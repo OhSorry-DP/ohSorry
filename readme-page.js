@@ -12,8 +12,24 @@
   // 페이지 타이틀 변경 (브라우저 탭 + favicon 영역에 표시)
   document.title = '오소리 추천곡 자판기';
 
-  const MD_URL = 'https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw/guest-readme.md';
+  // 1. Gist 시도 → 2. 실패 시 같이 host 된 ./guest-readme.md fallback
+  const MD_GIST = 'https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw/guest-readme.md';
+  const MD_LOCAL = './guest-readme.md';
   const MARKED_CDN = 'https://cdn.jsdelivr.net/npm/marked/marked.min.js';
+
+  async function fetchMd() {
+    const t = '?t=' + Date.now();
+    try {
+      const r = await fetch(MD_GIST + t, { cache: 'no-store' });
+      if (r.ok) return await r.text();
+      throw new Error('HTTP ' + r.status);
+    } catch (e) {
+      console.warn('[짭레터넷] Gist 마크다운 fetch 실패 → 로컬 fallback', e);
+      const r2 = await fetch(MD_LOCAL + t, { cache: 'no-store' });
+      if (!r2.ok) throw new Error('로컬 마크다운 로드 실패: ' + r2.status);
+      return await r2.text();
+    }
+  }
 
   // CSS 주입 (다크 테마)
   const STYLE_ID = '__chap_letter_style';
@@ -125,13 +141,8 @@
   try {
     container.innerHTML = '<p style="color:#888;text-align:center;padding:40px">불러오는 중...</p>';
 
-    // 2. marked.js 로드 + 마크다운 fetch (병렬)
-    const [, mdRes] = await Promise.all([
-      loadMarked(),
-      fetch(MD_URL + '?t=' + Date.now(), { cache: 'no-store' })
-    ]);
-    if (!mdRes.ok) throw new Error('마크다운 데이터 로드 실패: ' + mdRes.status);
-    const md = await mdRes.text();
+    // 2. marked.js 로드 + 마크다운 fetch (병렬, Gist 실패 시 로컬 fallback)
+    const [, md] = await Promise.all([loadMarked(), fetchMd()]);
 
     // 3. 마크다운 → HTML 변환 후 표시
     container.innerHTML = window.marked.parse(md);
