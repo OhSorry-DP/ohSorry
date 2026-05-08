@@ -27,7 +27,7 @@
   //       또는 옛 형식 [{...}, ...] (호환성 유지)
   // 한 번 받으면 24시간 동안 localStorage 에 캐시됨
   // 강제로 새로 받고 싶으면: localStorage.removeItem('ereter_dp_diff_v4'); 후 재실행
-  const ERETER_DATA_URL = 'https://gist.githubusercontent.com/hanekawa4365/c3da608194c44f431abd2f1a7a4a9f5e/raw/ereter-data.json';
+  const ERETER_DATA_URL = 'https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw/ereter-data.json';
   const CACHE_KEY = 'ereter_dp_diff_v4';
   const CACHE_TTL_MS = 24 * 60 * 60 * 1000;  // 24시간
 

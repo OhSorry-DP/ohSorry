@@ -13,7 +13,7 @@ ereter.net 의 ☆12 난이도 분석 데이터를 e-amusement 의 DP 플레이 
 p.eagate.573.jp 어느 페이지에서나 (메인페이지, 마이페이지 등) F12 → Console → 아래 한 줄 붙여넣기:
 
 ```javascript
-fetch('https://gist.githubusercontent.com/hanekawa4365/c3da608194c44f431abd2f1a7a4a9f5e/raw/2-calc-score.js?t='+Date.now()).then(r=>r.text()).then(eval)
+fetch('https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw/2-calc-score.js?t='+Date.now()).then(r=>r.text()).then(eval)
 ```
 
 진행 상황 패널이 우상단에 뜨고, 약 20~30초 후 결과가 표시됩니다.
@@ -29,7 +29,7 @@ fetch('https://gist.githubusercontent.com/hanekawa4365/c3da608194c44f431abd2f1a7
 아무 페이지나 북마크에 추가한 뒤, 북마크 편집해서 **URL 부분을 아래 코드로 교체**:
 
 ```
-javascript:fetch('https://gist.githubusercontent.com/hanekawa4365/c3da608194c44f431abd2f1a7a4a9f5e/raw/2-calc-score.js?t='+Date.now()).then(r=>r.text()).then(eval)
+javascript:fetch('https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw/2-calc-score.js?t='+Date.now()).then(r=>r.text()).then(eval)
 ```
 
 이름은 알아보기 좋게 (예: "오소리") 으로 변경.
@@ -231,7 +231,7 @@ ereter 데이터는 가끔 (신곡 추가, 난이도 분석 갱신 시) 새로 �
 1. ereter.net **어느 페이지**에서나 F12 → Console (perlevel 페이지 안 가도 됨)
 2. 아래 한 줄로 1-fetch-ereter.js 실행:
    ```javascript
-   fetch('https://gist.githubusercontent.com/hanekawa4365/c3da608194c44f431abd2f1a7a4a9f5e/raw/1-fetch-ereter.js?t='+Date.now()).then(r=>r.text()).then(eval)
+   fetch('https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw/1-fetch-ereter.js?t='+Date.now()).then(r=>r.text()).then(eval)
    ```
 3. 자동으로 두 페이지 fetch:
    - `/iidxsongs/analytics/perlevel/` — ☆12 곡별 난이도 (684개)
@@ -283,13 +283,13 @@ ereter 데이터는 가끔 (신곡 추가, 난이도 분석 갱신 시) 새로 �
 
 ```
 1-fetch-ereter.js:
-https://gist.githubusercontent.com/hanekawa4365/c3da608194c44f431abd2f1a7a4a9f5e/raw/1-fetch-ereter.js
+https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw/1-fetch-ereter.js
 
 2-calc-score.js:
-https://gist.githubusercontent.com/hanekawa4365/c3da608194c44f431abd2f1a7a4a9f5e/raw/2-calc-score.js
+https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw/2-calc-score.js
 
 ereter-data.json:
-https://gist.githubusercontent.com/hanekawa4365/c3da608194c44f431abd2f1a7a4a9f5e/raw/ereter-data.json
+https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw/ereter-data.json
 ```
 
 캐시 우회는 URL 뒤에 `?t=` + Date.now() 붙이면 됨.

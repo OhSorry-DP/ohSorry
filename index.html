@@ -20,7 +20,7 @@
   <script>
     // Gist 에서 readme-page.js 를 fetch 해서 실행 (캐시 우회)
     // 스타일 + 마크다운 렌더링 모두 이 스크립트가 처리
-    fetch('https://gist.githubusercontent.com/hanekawa4365/c3da608194c44f431abd2f1a7a4a9f5e/raw/readme-page.js?t=' + Date.now(), { cache: 'no-store' })
+    fetch('https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw/readme-page.js?t=' + Date.now(), { cache: 'no-store' })
       .then(r => r.text())
       .then(eval)
       .catch(e => {

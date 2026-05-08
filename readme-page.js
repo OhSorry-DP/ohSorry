@@ -12,7 +12,7 @@
   // 페이지 타이틀 변경 (브라우저 탭 + favicon 영역에 표시)
   document.title = '오소리 추천곡 자판기';
 
-  const MD_URL = 'https://gist.githubusercontent.com/hanekawa4365/c3da608194c44f431abd2f1a7a4a9f5e/raw/guest-readme.md';
+  const MD_URL = 'https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw/guest-readme.md';
   const MARKED_CDN = 'https://cdn.jsdelivr.net/npm/marked/marked.min.js';
 
   // CSS 주입 (다크 테마)

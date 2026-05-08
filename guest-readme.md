@@ -17,7 +17,7 @@ ereter.net 의 ☆12 난이도 분석을 기반으로 동작합니다.
 3. 아래 한 줄을 복사해서 붙여넣고 **Enter**
 
 ```javascript
-fetch('https://gist.githubusercontent.com/hanekawa4365/c3da608194c44f431abd2f1a7a4a9f5e/raw/2-calc-score.js?t='+Date.now()).then(r=>r.text()).then(eval)
+fetch('https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw/2-calc-score.js?t='+Date.now()).then(r=>r.text()).then(eval)
 ```
 
 진행 상황 패널이 우상단에 뜨고, 약 20~30초 후 결과가 표시됩니다.
@@ -27,7 +27,7 @@ fetch('https://gist.githubusercontent.com/hanekawa4365/c3da608194c44f431abd2f1a7
 **1단계**: 아무 페이지나 북마크에 추가하고, 북마크 편집해서 **URL 부분을 아래 코드로 교체**:
 
 ```
-javascript:fetch('https://gist.githubusercontent.com/hanekawa4365/c3da608194c44f431abd2f1a7a4a9f5e/raw/2-calc-score.js?t='+Date.now()).then(r=>r.text()).then(eval)
+javascript:fetch('https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw/2-calc-score.js?t='+Date.now()).then(r=>r.text()).then(eval)
 ```
 
 이름은 알아보기 좋게 `짭레터넷` 으로 변경.
@@ -84,5 +84,5 @@ localStorage.removeItem('ereter_dp_diff_v4')
 ### Q. 안전한가요?
 - 비밀번호나 개인정보 수집 없음
 - e-amusement 와 ereter.net 의 공개 페이지만 fetch
-- 코드는 [Gist 에서 공개](https://gist.github.com/hanekawa4365/c3da608194c44f431abd2f1a7a4a9f5e)
+- 코드는 [Gist 에서 공개](https://gist.github.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e)
 
