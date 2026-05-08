@@ -1,0 +1,17 @@
+# 데이터 폴더 (대용량, 학습/스크래핑 raw)
+raw/
+logic/
+source/
+source_lv12/
+scripts/
+
+# 데이터 파일
+dataset.json
+loocv-base.json
+loocv-extra.json
+ereter-data.json
+
+# 운영 / 캐시
+node_modules/
+.DS_Store
+*.log

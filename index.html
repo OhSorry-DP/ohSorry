@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>짭레터넷 - 사용안내</title>
+  <style>
+    /* CSS 로드 전 깜빡임 방지 (FOUC) - 배경색만 미리 적용
+       나머지 스타일은 readme-page.js 에서 주입 */
+    body { background: #1a1a1a; color: #e9ecef; margin: 0; }
+  </style>
+</head>
+<body>
+  <main id="content">
+    <p style="color:#888;text-align:center;padding:40px">불러오는 중...</p>
+  </main>
+  <footer>
+    ereter.net 의 데이터를 사용했습니다. 이레터님의 허락을 받지 않았습니다. 재미로만 이용해주세요.
+  </footer>
+  <script>
+    // Gist 에서 readme-page.js 를 fetch 해서 실행 (캐시 우회)
+    // 스타일 + 마크다운 렌더링 모두 이 스크립트가 처리
+    fetch('https://gist.githubusercontent.com/hanekawa4365/c3da608194c44f431abd2f1a7a4a9f5e/raw/readme-page.js?t=' + Date.now(), { cache: 'no-store' })
+      .then(r => r.text())
+      .then(eval)
+      .catch(e => {
+        console.error('[짭레터넷] 스크립트 로드 실패:', e);
+        document.getElementById('content').innerHTML = `
+          <div style="color:#ff6b6b;padding:20px;background:#2d1818;border:1px solid #5c2828;border-radius:8px;max-width:720px;margin:40px auto;font-family:sans-serif">
+            <strong>페이지 스크립트를 불러오지 못했습니다.</strong><br>
+            네트워크 상태를 확인하고 새로고침해주세요.
+          </div>
+        `;
+      });
+  </script>
+</body>
+</html>
