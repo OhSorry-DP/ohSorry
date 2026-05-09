@@ -257,6 +257,45 @@ ereter 데이터는 가끔 (신곡 추가, 난이도 분석 갱신 시) 새로 �
 
 옛 형식 (v1, 배열만 또는 charts 만) 도 호환 — 단 `players` 가 없으면 추천곡 토글 X / 이레터 원본 ★ 비교 표시 X.
 
+### zasa 보충 데이터 갱신
+
+ereter 가 등록 안 한 ☆12 차트 (LEGGENDARIA 다수 + 신곡 ANOTHER) 를 보강하기 위해 zasa.sakura.ne.jp 의 비공식 ☆12 난이도표를 보충 데이터로 사용합니다. **추천곡 / ★값 추정에는 사용 X — "★ 단위별 클리어 램프 / DJ LEVEL" 표 의 곡 수 보강용 (ereter 미등록 차트 검증) 만**.
+
+#### 절차
+
+1. https://zasa.sakura.ne.jp/dp/run.php 접속
+2. F12 → Console 에서 아래 한 줄 실행:
+   ```javascript
+   fetch('https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw/3-fetch-zasa.js?t='+Date.now()).then(r=>r.text()).then(eval)
+   ```
+3. 자동으로 ☆12 (★11.6~12.7) 차트 추출 → 클립보드에 JSON 복사
+4. Gist 의 `zasa-data.json` 파일을 새로 만들거나 (없으면 "Add file" → 파일명 `zasa-data.json`) 갈아끼움
+5. Gist 저장하면 다음 `2-calc-score.js` 실행 시 자동으로 적용
+
+#### zasa-data.json 형식
+
+```json
+{
+  "extractedAt": "2026-05-09T10:00:00.000Z",
+  "source": "https://zasa.sakura.ne.jp/dp/run.php",
+  "count": 729,
+  "charts": [
+    { "title": "곡명", "diff": "ANOTHER", "level": 12.3 },
+    ...
+  ]
+}
+```
+
+ereter 와 다른 점:
+- `level` 만 있고 `ec` / `hc` / `exh` 단계별 ★ 없음 → 추천곡 / ★값 추정에 못 씀
+- `players` 없음 (zasa 는 사용자별 ★ 데이터 X)
+
+#### 갱신 빈도
+
+ereter 보다 보수적으로 — **신곡 시즌 추가 후 한 번** 정도면 충분. zasa 는 비공식 운영자가 수동으로 갱신하니 변경이 잦지 않음.
+
+zasa-data.json 이 Gist 에 없어도 동작 — 그땐 ereter 데이터만 사용 (이전 동작 그대로).
+
 ---
 
 ## 파일 구조
@@ -266,12 +305,14 @@ ereter 데이터는 가끔 (신곡 추가, 난이도 분석 갱신 시) 새로 �
 | `1-fetch-ereter.js` | ereter.net 에서 ☆12 난이도 + 사용자 ★ 데이터 추출 (관리자용) |
 | `2-calc-score.js` | e-amusement 콘솔에서 실행, ★값 추정 + UI 표시 (메인) |
 | `3-fetch-lv12-batch.js` | lv12 사용자별 batch 수집 (학습 데이터 보강용) |
+| `3-fetch-zasa.js` | zasa.sakura.ne.jp 에서 비공식 ☆12 난이도표 추출 (관리자용 보충) |
 | `ereter-data.json` | ereter.net 추출 데이터 (관리자가 갱신) |
+| `zasa-data.json` | zasa 보충 데이터 — ereter 미등록 차트 검증 (선택, 없어도 동작) |
 | `dataset.json` | 학습용 통합 데이터셋 |
 | `index.html` | 사용 안내 정적 페이지 |
 | `readme-page.js` | 사용 안내 페이지 렌더링 |
 | `README.md` | 이 문서 |
-| [`logic/`](logic/) | 모델 archive (v3.0.2 ~ v3.2.1 + params JSON) |
+| [`logic/`](logic/) | 모델 archive (v3.0.2 ~ v3.2.10 + params JSON) |
 
 학습 데이터는 [`source/`](source/) (combined 페이지) 와 [`source_lv12/`](source_lv12/) (lv12 페이지) 에 사용자 ID 별로 저장.
 
@@ -288,8 +329,14 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 2-calc-score.js:
 https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw/2-calc-score.js
 
+3-fetch-zasa.js:
+https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw/3-fetch-zasa.js
+
 ereter-data.json:
 https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw/ereter-data.json
+
+zasa-data.json (선택):
+https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw/zasa-data.json
 ```
 
 캐시 우회는 URL 뒤에 `?t=` + Date.now() 붙이면 됨.
