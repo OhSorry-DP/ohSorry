@@ -986,22 +986,26 @@
     return a;
   };
 
-  // 도전곡 범위 — recBaseStar 위로 얼마까지 추천할지.
-  //   ★0.5 사용자: +1.2 까지 (저렙은 도전곡이 풍부하니 넓게)
-  //   ★14.0 사용자: +0.3 까지 (고렙은 좁게)
-  //   사이는 선형 보간, 범위 밖은 clamp.
+  // 도전곡 최대 offset — baseStar 위로 얼마까지 도전곡 풀에 포함할지.
+  //   ★0.5 → +1.0, ★14.0 → +0.3 선형 보간.
   const challengeOffset = (baseStar) => {
-    if (baseStar <= 0.5) return 1.2;
+    if (baseStar <= 0.5) return 1.0;
     if (baseStar >= 14.0) return 0.3;
-    return 1.2 - ((baseStar - 0.5) * 0.9) / 13.5;
+    return 1.0 - ((baseStar - 0.5) * 0.7) / 13.5;
   };
 
-  // 도전/정리 풀 분리 (recBaseStar 가 기준 — ereter / ohsorry 토글에 따라 변경됨)
+  const HARD_WIDTH = 0.3;  // 하드 도전 범위 폭
+  const EASY_WIDTH = 0.2;  // 약 도전 범위 폭
+
+  // 3 풀 분리: 하드 도전 [base+offset-0.3, base+offset], 약 도전 [base, base+0.2], 정리 [0, base)
   const buildPools = (threshold, getDiffField) => {
-    const challenge = [];
-    const cleanup = [];
-    if (recBaseStar == null) return { challenge, cleanup };
+    const hard = [], easy = [], cleanup = [];
+    if (recBaseStar == null) return { hard, easy, cleanup };
     const offset = challengeOffset(recBaseStar);
+    const hardMax = recBaseStar + offset;
+    const hardMin = recBaseStar + offset - HARD_WIDTH;
+    const easyMax = recBaseStar + EASY_WIDTH;
+    const easyMin = recBaseStar;
     for (const c of allCharts) {
       if (c.lampNum >= threshold) continue;
       const e = ereterMap.get(norm(c.title) + '|' + c.diff);
@@ -1016,59 +1020,59 @@
         diffValue: dv, currentLamp: c.lamp,
         margin: recBaseStar - dv,
       };
-      if (dv >= recBaseStar && dv <= recBaseStar + offset) {
-        challenge.push(item);
+      // 하드 우선 (overlap 시 약 도전과 중복 방지)
+      if (dv >= hardMin && dv <= hardMax && dv > easyMax) {
+        hard.push(item);
+      } else if (dv >= easyMin && dv <= easyMax) {
+        easy.push(item);
       } else if (dv < recBaseStar) {
         cleanup.push(item);
       }
     }
-    return { challenge, cleanup };
+    return { hard, easy, cleanup };
   };
 
   const buildRecs = (threshold, getDiffField) => {
-    const { challenge, cleanup } = buildPools(threshold, getDiffField);
-    const countField = getDiffField + '_n';  // ec→ec_n, hc→hc_n, exh→exh_n
-
+    const { hard, easy, cleanup } = buildPools(threshold, getDiffField);
+    const countField = getDiffField + '_n';
     const keyOf = r => (r.title || '') + '|' + r.chart;
 
-    // 후보 10곡 = 클리어 인구수 desc top 5 + 순 랜덤 5. 마지막에 셔플.
-    const sample10 = (pool) => {
+    // 각 풀 → 카운트 desc top 10 + 그 외 풀에서 순 랜덤 5 = 후보 (최대 15곡)
+    const sample15 = (pool) => {
       const sorted = [...pool].sort((a, b) => (b[countField] || 0) - (a[countField] || 0));
-      const top5 = sorted.slice(0, 5);
-      const usedKeys = new Set(top5.map(keyOf));
+      const top10 = sorted.slice(0, 10);
+      const usedKeys = new Set(top10.map(keyOf));
       const rest = pool.filter(r => !usedKeys.has(keyOf(r)));
       const rand5 = shuffle(rest).slice(0, 5);
-      return shuffle([...top5, ...rand5]);
+      return [...top10, ...rand5];
     };
+    const hardCands = sample15(hard);
+    const easyCands = sample15(easy);
+    const cleanupCands = sample15(cleanup);
 
-    const challengeRand = sample10(challenge);
-    const cleanupRand = sample10(cleanup);
+    // 후보 셔플 → N곡 표시 (하드 2 / 약 도전 5 / 정리 3)
+    const hardPicked = shuffle(hardCands).slice(0, 2);
+    const easyPicked = shuffle(easyCands).slice(0, 5);
+    const cleanupPicked = shuffle(cleanupCands).slice(0, 3);
 
-    const used = new Set();
-    let chPick = challengeRand.slice(0, 6);
-    chPick.forEach(r => used.add(keyOf(r)));
-    let clPick = cleanupRand.filter(r => !used.has(keyOf(r))).slice(0, 4);
-    clPick.forEach(r => used.add(keyOf(r)));
+    const used = new Set([...hardPicked, ...easyPicked, ...cleanupPicked].map(keyOf));
 
-    // 부족하면 다른 쪽에서 채움 (총 최대 10곡)
-    if (chPick.length + clPick.length < 10 && clPick.length < 4) {
-      const extra = challengeRand
-        .filter(r => !used.has(keyOf(r)))
-        .slice(0, 10 - chPick.length - clPick.length);
-      chPick = [...chPick, ...extra];
-      extra.forEach(r => used.add(keyOf(r)));
-    }
-    if (chPick.length + clPick.length < 10) {
-      const extra = cleanupRand
-        .filter(r => !used.has(keyOf(r)))
-        .slice(0, 10 - chPick.length - clPick.length);
-      clPick = [...clPick, ...extra];
+    // 한 풀 부족 시 다른 풀 후보에서 보충 (총 10 유지)
+    let need = 10 - hardPicked.length - easyPicked.length - cleanupPicked.length;
+    let extras = [];
+    if (need > 0) {
+      const allCands = [...hardCands, ...easyCands, ...cleanupCands];
+      const rest = allCands.filter(r => !used.has(keyOf(r)));
+      extras = shuffle(rest).slice(0, need);
+      extras.forEach(r => used.add(keyOf(r)));
     }
 
-    // 표시 순서: 도전(★ 높은→낮은) → 정리(★ 높은→낮은)
-    chPick.sort((a, b) => b.diffValue - a.diffValue);
-    clPick.sort((a, b) => b.diffValue - a.diffValue);
-    return [...chPick, ...clPick];
+    // 표시 순서: 하드 (★ asc) → 약 도전 (★ asc) → 정리 (★ asc) → extras (★ asc)
+    hardPicked.sort((a, b) => a.diffValue - b.diffValue);
+    easyPicked.sort((a, b) => a.diffValue - b.diffValue);
+    cleanupPicked.sort((a, b) => a.diffValue - b.diffValue);
+    extras.sort((a, b) => a.diffValue - b.diffValue);
+    return [...hardPicked, ...easyPicked, ...cleanupPicked, ...extras];
   };
 
   if (recBaseStar != null) {
