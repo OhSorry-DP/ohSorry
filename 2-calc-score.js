@@ -1003,14 +1003,14 @@
   const EASY_WIDTH = 0.2;  // 약 도전 범위 폭
 
   // 3 풀 분리: 하드 도전 [base+offset-0.3, base+offset], 약 도전 [base, base+0.2], 정리 [0, base)
-  const buildPools = (threshold, getDiffField) => {
+  const buildPools = (threshold, getDiffField, baseStar) => {
     const hard = [], easy = [], cleanup = [];
-    if (recBaseStar == null) return { hard, easy, cleanup };
-    const offset = challengeOffset(recBaseStar);
-    const hardMax = recBaseStar + offset;
-    const hardMin = recBaseStar + offset - HARD_WIDTH;
-    const easyMax = recBaseStar + EASY_WIDTH;
-    const easyMin = recBaseStar;
+    if (baseStar == null) return { hard, easy, cleanup };
+    const offset = challengeOffset(baseStar);
+    const hardMax = baseStar + offset;
+    const hardMin = baseStar + offset - HARD_WIDTH;
+    const easyMax = baseStar + EASY_WIDTH;
+    const easyMin = baseStar;
     for (const c of allCharts) {
       if (c.lampNum >= threshold) continue;
       const e = ereterMap.get(norm(c.title) + '|' + c.diff);
@@ -1023,22 +1023,22 @@
         ec: e.ec, hc: e.hc, exh: e.exh,
         ec_n: e.ec_n, hc_n: e.hc_n, exh_n: e.exh_n,
         diffValue: dv, currentLamp: c.lamp,
-        margin: recBaseStar - dv,
+        margin: baseStar - dv,
       };
       // 하드 우선 (overlap 시 약 도전과 중복 방지)
       if (dv >= hardMin && dv <= hardMax && dv > easyMax) {
         hard.push(item);
       } else if (dv >= easyMin && dv <= easyMax) {
         easy.push(item);
-      } else if (dv < recBaseStar) {
+      } else if (dv < baseStar) {
         cleanup.push(item);
       }
     }
     return { hard, easy, cleanup };
   };
 
-  const buildRecs = (threshold, getDiffField) => {
-    const { hard, easy, cleanup } = buildPools(threshold, getDiffField);
+  const buildRecs = (threshold, getDiffField, baseStar) => {
+    const { hard, easy, cleanup } = buildPools(threshold, getDiffField, baseStar);
     const countField = getDiffField + '_n';
     const keyOf = r => (r.title || '') + '|' + r.chart;
 
@@ -1078,10 +1078,12 @@
   };
 
   // EXH 전용 추천 — EC/HC 와 별개 로직.
-  //   EXH 미클리어 (lamp < 6) 곡 중 자기 실력 (recBaseStar) 이하인 곡만,
+  //   EXH 미클리어 (lamp < 6) 곡 중 자기 실력 (baseStar) 이하인 곡만,
   //   EXH ★ 낮은 순으로 30곡 → 미스 카운트 낮은 순으로 정렬 → 10곡 표시.
   //   미스 카운트 없는 곡은 뒤로 밀어서 정렬.
-  const buildExhRecs = () => {
+  //   baseStar 가 없으면 (실력값 추정 불가) 빈 배열 반환.
+  const buildExhRecs = (baseStar) => {
+    if (baseStar == null) return [];
     const candidates = [];
     for (const c of allCharts) {
       if (c.lampNum >= 6) continue;
@@ -1089,8 +1091,8 @@
       if (!e || e.level == null) continue;
       if (e.level < 11.6 || e.level > 12.7) continue;
       if (typeof e.exh !== 'number') continue;
-      // 실력 이상 곡 제외 (recBaseStar 없으면 필터 없음)
-      if (recBaseStar != null && e.exh > recBaseStar) continue;
+      // 실력 이상 곡 제외
+      if (e.exh > baseStar) continue;
       candidates.push({
         title: c.title, chart: c.diff, level: e.level,
         ec: e.ec, hc: e.hc, exh: e.exh,
@@ -1114,11 +1116,15 @@
     return top30.slice(0, 10);
   };
 
+  // EC 는 실력값 없을 때 0.3 으로 fallback (저렙 진입자도 추천 받을 수 있게)
+  // HC / EXH 는 실력값 없으면 빈 배열
+  const EC_FALLBACK_BASE = 0.3;
+  const ecBase = recBaseStar != null ? recBaseStar : EC_FALLBACK_BASE;
+  recsEC.push(...buildRecs(3, 'ec', ecBase));
   if (recBaseStar != null) {
-    recsEC.push(...buildRecs(3, 'ec'));
-    recsHC.push(...buildRecs(5, 'hc'));
+    recsHC.push(...buildRecs(5, 'hc', recBaseStar));
+    recsEXH.push(...buildExhRecs(recBaseStar));
   }
-  recsEXH.push(...buildExhRecs());
   console.log(`[step2] 추천곡: EC ${recsEC.length}, HC ${recsHC.length}, EXH ${recsEXH.length}`);
 
   const topEC  = recsEC;
@@ -1128,11 +1134,10 @@
   // 다시 뽑기 버튼에서 사용할 수 있도록 노출
   // (panel 생성 후 클릭으로 재호출 → DOM 부분 업데이트)
   window.__dp_rerollRecs = (stage) => {
-    if (stage === 'exh') return buildExhRecs();
-    let threshold, field;
-    if (stage === 'ec') { threshold = 3; field = 'ec'; }
-    if (stage === 'hc') { threshold = 5; field = 'hc'; }
-    return buildRecs(threshold, field);
+    if (stage === 'exh') return recBaseStar != null ? buildExhRecs(recBaseStar) : [];
+    if (stage === 'hc')  return recBaseStar != null ? buildRecs(5, 'hc', recBaseStar) : [];
+    if (stage === 'ec')  return buildRecs(3, 'ec', recBaseStar != null ? recBaseStar : EC_FALLBACK_BASE);
+    return [];
   };
 
   // -------- 6. 화면에 표시 --------
