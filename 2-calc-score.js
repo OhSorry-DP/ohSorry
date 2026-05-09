@@ -959,11 +959,22 @@
 
   const buildRecs = (threshold, getDiffField) => {
     const { challenge, cleanup } = buildPools(threshold, getDiffField);
+    const countField = getDiffField + '_n';  // ec→ec_n, hc→hc_n, exh→exh_n
 
-    // 풀에서 랜덤 10곡씩 (총 20곡 후보), picked = 도전 6 + 정리 4 비율 고정
-    const challengeRand = shuffle(challenge).slice(0, 10);
-    const cleanupRand = shuffle(cleanup).slice(0, 10);
     const keyOf = r => (r.title || '') + '|' + r.chart;
+
+    // 후보 10곡 = 클리어 인구수 desc top 5 + 순 랜덤 5. 마지막에 셔플.
+    const sample10 = (pool) => {
+      const sorted = [...pool].sort((a, b) => (b[countField] || 0) - (a[countField] || 0));
+      const top5 = sorted.slice(0, 5);
+      const usedKeys = new Set(top5.map(keyOf));
+      const rest = pool.filter(r => !usedKeys.has(keyOf(r)));
+      const rand5 = shuffle(rest).slice(0, 5);
+      return shuffle([...top5, ...rand5]);
+    };
+
+    const challengeRand = sample10(challenge);
+    const cleanupRand = sample10(cleanup);
 
     const used = new Set();
     let chPick = challengeRand.slice(0, 6);
