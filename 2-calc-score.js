@@ -1067,12 +1067,9 @@
       extras.forEach(r => used.add(keyOf(r)));
     }
 
-    // 표시 순서: 하드 (★ asc) → 약 도전 (★ asc) → 정리 (★ asc) → extras (★ asc)
-    hardPicked.sort((a, b) => a.diffValue - b.diffValue);
-    easyPicked.sort((a, b) => a.diffValue - b.diffValue);
-    cleanupPicked.sort((a, b) => a.diffValue - b.diffValue);
-    extras.sort((a, b) => a.diffValue - b.diffValue);
-    return [...hardPicked, ...easyPicked, ...cleanupPicked, ...extras];
+    // 표시 순서: 카테고리 무관, 전체 10곡 ★ asc 통합 정렬
+    return [...hardPicked, ...easyPicked, ...cleanupPicked, ...extras]
+      .sort((a, b) => a.diffValue - b.diffValue);
   };
 
   if (recBaseStar != null) {
@@ -1098,6 +1095,64 @@
 
   // -------- 6. 화면에 표시 --------
   document.getElementById('__dp_score_panel')?.remove();
+  // 다시 계산 — 패널 제거 후 같은 Gist 다시 fetch + eval (캐시 우회)
+  window.__dp_rerun = () => {
+    document.getElementById('__dp_score_panel')?.remove();
+    document.getElementById('__dp_progress')?.remove();
+    document.getElementById('__dp_confirm_rerun')?.remove();
+    fetch('https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw/2-calc-score.js?t=' + Date.now())
+      .then(r => r.text())
+      .then(eval);
+  };
+  // 클릭 위치 근처에 재실행 확인 팝업 — 외부 클릭/취소 시 닫힘
+  window.__dp_confirmRerun = (x, y) => {
+    document.getElementById('__dp_confirm_rerun')?.remove();
+    const box = document.createElement('div');
+    box.id = '__dp_confirm_rerun';
+    // 일단 화면 밖에 두고 크기 측정 후 viewport 안으로 조정
+    box.style.cssText = `
+      position: fixed; left: -9999px; top: -9999px; z-index: 9999999;
+      background: #fff; color: #222;
+      border: 1px solid #ccc; border-radius: 8px;
+      box-shadow: 0 4px 16px rgba(0,0,0,.2);
+      padding: 10px 12px;
+      font-family: -apple-system, "Segoe UI", "Hiragino Sans", "Yu Gothic", "Meiryo", sans-serif;
+      font-size: 13px; line-height: 1.4;
+    `;
+    box.innerHTML = `
+      <div style="margin-bottom:8px;white-space:nowrap">스크립트를 재실행 할까요?</div>
+      <div style="display:flex;gap:6px;justify-content:flex-end">
+        <button class="dp-confirm-no" style="border:1px solid #ddd;background:#fff;color:#555;padding:4px 10px;border-radius:4px;cursor:pointer;font-size:12px">취소</button>
+        <button class="dp-confirm-yes" style="border:1px solid #1d9e75;background:#1d9e75;color:#fff;padding:4px 10px;border-radius:4px;cursor:pointer;font-size:12px">재실행</button>
+      </div>
+    `;
+    document.body.appendChild(box);
+    // viewport edge clamp — 클릭 위치 아래 우선, 안 되면 위로
+    const w = box.offsetWidth, h = box.offsetHeight;
+    const M = 8;
+    let left = x - w / 2;
+    if (left < M) left = M;
+    if (left + w > window.innerWidth - M) left = window.innerWidth - w - M;
+    let top = y + 12;
+    if (top + h > window.innerHeight - M) top = y - h - 12;
+    if (top < M) top = M;
+    box.style.left = left + 'px';
+    box.style.top = top + 'px';
+    box.querySelector('.dp-confirm-no').onclick = (e) => { e.stopPropagation(); box.remove(); };
+    box.querySelector('.dp-confirm-yes').onclick = (e) => { e.stopPropagation(); box.remove(); window.__dp_rerun(); };
+    // 외부 클릭 시 닫기 (현재 클릭 이벤트 끝난 후 listener 등록)
+    setTimeout(() => {
+      const onDismiss = (e) => {
+        if (!box.contains(e.target)) {
+          box.remove();
+          document.removeEventListener('mousedown', onDismiss, true);
+          document.removeEventListener('touchstart', onDismiss, true);
+        }
+      };
+      document.addEventListener('mousedown', onDismiss, true);
+      document.addEventListener('touchstart', onDismiss, true);
+    }, 0);
+  };
   const fmt = (n) => Math.round(n * 100) / 100;
   const escHtml = (s) => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const panel = document.createElement('div');
@@ -1217,7 +1272,8 @@
         margin: 0 8px;
       }
       #__dp_score_panel .recs { margin-top: 12px; }
-      #__dp_score_panel .rec-item { padding: 6px 8px; background: #f8f9fb; border-radius: 4px; margin-bottom: 4px; font-size: 12px; display: flex; justify-content: space-between; gap: 8px; }
+      #__dp_score_panel .rec-item { padding: 4px 0; font-size: 12px; display: flex; justify-content: space-between; gap: 8px; border-bottom: 1px solid #eee; }
+      #__dp_score_panel .rec-item:last-child { border-bottom: none; }
       #__dp_score_panel .rec-item .rec-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       #__dp_score_panel .rec-item .rec-info { flex-shrink: 0; color: #666; font-variant-numeric: tabular-nums; font-size: 11px; }
       #__dp_score_panel .rec-item .rec-diff { color: #343a40; font-weight: 600; }
@@ -1410,8 +1466,16 @@
       ].join('');
     })()}
 
-    <details open class="toggle" style="margin-top:10px">
-      <summary style="font-weight:600;color:#212529">상세 통계 (LEVEL ${levelText} / ${style === '1' ? 'DP' : 'SP'})</summary>
+    <details open class="toggle-rec" style="margin-top:10px">
+      <summary style="font-weight:600;color:#212529">
+        <span class="rec-summary-text">상세 통계 (LEVEL ${levelText} / ${style === '1' ? 'DP' : 'SP'})</span>
+        <span class="rec-summary-marker"></span>
+        <button type="button" class="rec-reroll"
+          onclick="event.preventDefault();event.stopPropagation();window.__dp_confirmRerun(event.clientX, event.clientY);return false;"
+          onmousedown="event.stopPropagation();"
+          ontouchstart="event.stopPropagation();"
+          title="다시 계산">↻</button>
+      </summary>
       <div class="meta" style="margin:6px 0">${pageCount}페이지 · ${allCharts.length}곡 · 매칭 ${matched} · 미매칭 ${unmatched}</div>
       ${(() => {
         // CLEAR TYPE 매핑 (게임 내 명칭 + 색상)
