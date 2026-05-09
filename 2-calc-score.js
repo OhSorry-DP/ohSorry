@@ -1127,15 +1127,16 @@
       </div>
     `;
     document.body.appendChild(box);
-    // viewport edge clamp — 클릭 위치 아래 우선, 안 되면 위로
+    // viewport edge clamp — 클릭 위치 왼쪽 우선, 공간 없으면 오른쪽 / 세로는 가운데 정렬
     const w = box.offsetWidth, h = box.offsetHeight;
     const M = 8;
-    let left = x - w / 2;
-    if (left < M) left = M;
+    let left = x - w - 12;
+    if (left < M) left = x + 12;
     if (left + w > window.innerWidth - M) left = window.innerWidth - w - M;
-    let top = y + 12;
-    if (top + h > window.innerHeight - M) top = y - h - 12;
+    if (left < M) left = M;
+    let top = y - h / 2;
     if (top < M) top = M;
+    if (top + h > window.innerHeight - M) top = window.innerHeight - h - M;
     box.style.left = left + 'px';
     box.style.top = top + 'px';
     box.querySelector('.dp-confirm-no').onclick = (e) => { e.stopPropagation(); box.remove(); };
