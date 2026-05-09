@@ -28,6 +28,9 @@
   // 한 번 받으면 24시간 동안 localStorage 에 캐시됨
   // 강제로 새로 받고 싶으면: localStorage.removeItem('ereter_dp_diff_v4'); 후 재실행
   const ERETER_DATA_URL = 'https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw/ereter-data.json';
+  // zasa.sakura.ne.jp 의 비공식 ☆12 난이도표 — ereter 미등록 차트 검증용 (보충).
+  // 추천곡 / ★값 추정에는 사용 X. "★ 단위별 클리어 램프 표" 의 곡 수 보강만.
+  const ZASA_DATA_URL = 'https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw/zasa-data.json';
   const CACHE_KEY = 'ereter_dp_diff_v4';
   const CACHE_TTL_MS = 24 * 60 * 60 * 1000;  // 24시간
 
@@ -122,6 +125,22 @@
   }
   console.log(`[step2] ereter 차트 ${ereterData.length}개 로드`);
 
+  // -------- 0.5. zasa 보충 데이터 fetch (선택, 실패해도 무시) --------
+  // ereter 에 없는 ☆12 차트를 검증용으로 보충. 추천 / ★ 추정엔 사용 X.
+  let zasaData = [];
+  try {
+    const res = await fetch(ZASA_DATA_URL + '?t=' + Date.now(), { cache: 'no-store' });
+    if (res.ok) {
+      const raw = await res.json();
+      if (raw && Array.isArray(raw.charts)) {
+        zasaData = raw.charts;
+        console.log(`[step2] zasa 보충 차트 ${zasaData.length}개 로드`);
+      }
+    }
+  } catch (e) {
+    console.warn('[step2] zasa fetch 실패 (무시 가능):', e.message);
+  }
+
   // -------- 1. 곡명 정규화 + 인덱싱 --------
   const norm = (s) => (s || '')
     .toLowerCase()
@@ -137,6 +156,21 @@
   for (const c of ereterData) {
     if (!c.title || !c.diff) continue;
     ereterMap.set(norm(c.title) + '|' + c.diff, c);
+  }
+
+  // zasa 차트 인덱스 (ereter 와 같은 키 형식)
+  const zasaMap = new Map();
+  for (const c of zasaData) {
+    if (!c.title || !c.diff) continue;
+    zasaMap.set(norm(c.title) + '|' + c.diff, c);
+  }
+  // ereter 에 없는 zasa 전용 차트 (★ 단위별 표의 곡 수 보강용)
+  const zasaSupplemental = zasaData.filter((c) => {
+    const k = norm(c.title) + '|' + c.diff;
+    return !ereterMap.has(k);
+  });
+  if (zasaSupplemental.length > 0) {
+    console.log(`[step2] zasa 보충 (ereter 미등록): ${zasaSupplemental.length}곡`);
   }
 
   // -------- 2. 대상 페이지 설정 (LEVEL 12 / DP 고정) --------
@@ -1399,27 +1433,41 @@
         <summary style="font-weight:600;color:#212529">난이도 별 클리어 램프</summary>
         ${(() => {
         // ★ 단위별 진행 현황
-        //   곡 수: ereter 전체 데이터 기준
-        //   클리어 카운트: 사용자 실제 데이터 (lamp 단독, 누적 X)
+        //   곡 수: ereter + zasa 보충 (ereter 미등록 차트는 zasa 기준 ★ 으로 카운트)
+        //   클리어 카운트: 사용자 실제 데이터 (lamp 단독, 누적 X) — ereter / zasa 둘 다 매칭
         //   합계 = 곡 수 가 되도록 모든 lamp 단계 표시
         const levels = [11.6, 11.7, 11.8, 11.9, 12.0, 12.1, 12.2, 12.3, 12.4, 12.5, 12.6, 12.7];
         const stats = {};
         for (const lv of levels) {
-          stats[lv.toFixed(1)] = { total: 0, fc: 0, exh: 0, hd: 0, cl: 0, ez: 0, as: 0, fa: 0, np: 0, played: 0 };
+          stats[lv.toFixed(1)] = { total: 0, fc: 0, exh: 0, hd: 0, cl: 0, ez: 0, as: 0, fa: 0, np: 0, played: 0, zasa: 0 };
         }
-        // 1. 곡 수: ereter 전체 데이터
+        // 1a. 곡 수: ereter 전체 데이터
         for (const e of ereterData) {
           if (e.level == null) continue;
           const k = e.level.toFixed(1);
           if (!stats[k]) continue;
           stats[k].total++;
         }
-        // 2. lamp 단독 카운트
-        for (const c of allCharts) {
-          const e = ereterMap.get(norm(c.title) + '|' + c.diff);
-          if (!e || e.level == null) continue;
-          const k = e.level.toFixed(1);
+        // 1b. zasa 보충: ereter 에 없는 차트만 추가 (★ 단위는 zasa 의 level 기준)
+        for (const z of zasaSupplemental) {
+          if (z.level == null) continue;
+          const k = z.level.toFixed(1);
           if (!stats[k]) continue;
+          stats[k].total++;
+          stats[k].zasa++;
+        }
+        // 2. lamp 단독 카운트 — ereter 우선, 없으면 zasa 매칭 (zasa 의 level 사용)
+        for (const c of allCharts) {
+          const key = norm(c.title) + '|' + c.diff;
+          const e = ereterMap.get(key);
+          let k = null;
+          if (e && e.level != null) {
+            k = e.level.toFixed(1);
+          } else {
+            const z = zasaMap.get(key);
+            if (z && z.level != null) k = z.level.toFixed(1);
+          }
+          if (!k || !stats[k]) continue;
           if (c.lampNum >= 1) stats[k].played++;
           if (c.lampNum === 7) stats[k].fc++;
           else if (c.lampNum === 6) stats[k].exh++;
@@ -1455,10 +1503,14 @@
         for (const lv of levels) {
           const s = stats[lv.toFixed(1)];
           if (s.total === 0) continue;
+          // 곡 수 셀: zasa 보충된 분량은 작게 옅은 색으로 +N 표시
+          const totalCell = s.zasa > 0
+            ? `<td class="num">${s.total} <span style="color:#aaa;font-size:10px">+${s.zasa}</span></td>`
+            : `<td class="num">${s.total}</td>`;
           html += `
             <tr>
               <td>★${lv.toFixed(1)}</td>
-              <td class="num">${s.total}</td>
+              ${totalCell}
               ${cell(s.fc)}
               ${cell(s.exh)}
               ${cell(s.hd)}
@@ -1470,6 +1522,9 @@
             </tr>`;
         }
         html += '</table>';
+        if (zasaSupplemental.length > 0) {
+          html += `<div class="meta" style="font-size:10px;color:#aaa;margin-top:4px">+N = zasa 보충 (ereter 미등록)</div>`;
+        }
         return html;
       })()}
       </details>
@@ -1477,26 +1532,40 @@
         <summary style="font-weight:600;color:#212529">난이도 별 DJ LEVEL</summary>
         ${(() => {
         // ★ 단위별 DJ LEVEL 분포
-        //   곡 수: ereter 전체 데이터 기준
+        //   곡 수: ereter + zasa 보충 (앞 표와 일관)
         //   DJ LEVEL: 사용자 실제 데이터 (AAA, AA, A, B, C이하 그룹)
         const levels = [11.6, 11.7, 11.8, 11.9, 12.0, 12.1, 12.2, 12.3, 12.4, 12.5, 12.6, 12.7];
         const stats = {};
         for (const lv of levels) {
-          stats[lv.toFixed(1)] = { total: 0, AAA: 0, AA: 0, A: 0, B: 0, lower: 0, none: 0 };
+          stats[lv.toFixed(1)] = { total: 0, AAA: 0, AA: 0, A: 0, B: 0, lower: 0, none: 0, zasa: 0 };
         }
-        // 1. 곡 수: ereter 전체
+        // 1a. 곡 수: ereter
         for (const e of ereterData) {
           if (e.level == null) continue;
           const k = e.level.toFixed(1);
           if (!stats[k]) continue;
           stats[k].total++;
         }
-        // 2. DJ LEVEL: 사용자 데이터 (C/D/E/F 는 lower 로 합침)
-        for (const c of allCharts) {
-          const e = ereterMap.get(norm(c.title) + '|' + c.diff);
-          if (!e || e.level == null) continue;
-          const k = e.level.toFixed(1);
+        // 1b. zasa 보충 (ereter 미등록 차트만)
+        for (const z of zasaSupplemental) {
+          if (z.level == null) continue;
+          const k = z.level.toFixed(1);
           if (!stats[k]) continue;
+          stats[k].total++;
+          stats[k].zasa++;
+        }
+        // 2. DJ LEVEL: 사용자 데이터 (C/D/E/F 는 lower 로 합침). ereter 우선, zasa fallback.
+        for (const c of allCharts) {
+          const key = norm(c.title) + '|' + c.diff;
+          const e = ereterMap.get(key);
+          let k = null;
+          if (e && e.level != null) {
+            k = e.level.toFixed(1);
+          } else {
+            const z = zasaMap.get(key);
+            if (z && z.level != null) k = z.level.toFixed(1);
+          }
+          if (!k || !stats[k]) continue;
           if (!c.djLevel) continue;
           if (['AAA', 'AA', 'A', 'B'].includes(c.djLevel)) {
             stats[k][c.djLevel]++;
@@ -1529,10 +1598,13 @@
         for (const lv of levels) {
           const s = stats[lv.toFixed(1)];
           if (s.total === 0) continue;
+          const totalCell = s.zasa > 0
+            ? `<td class="num">${s.total} <span style="color:#aaa;font-size:10px">+${s.zasa}</span></td>`
+            : `<td class="num">${s.total}</td>`;
           html += `
             <tr>
               <td>★${lv.toFixed(1)}</td>
-              <td class="num">${s.total}</td>
+              ${totalCell}
               ${cell2(s.AAA)}
               ${cell2(s.AA)}
               ${cell2(s.A)}
