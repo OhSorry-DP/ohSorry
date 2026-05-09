@@ -269,6 +269,11 @@
         const m2 = scoreText.match(/^(\d+)/);
         if (m2) exScore = parseInt(m2[1], 10);
       }
+      // 미스 카운트 (BP/MISS) — score cell 의 추가 텍스트 또는 다른 td 어디에 있을 수도 있음
+      let missCount = null;
+      const allText = Array.from(tds).map(td => td.textContent || '').join(' ');
+      const missMatch = allText.match(/(?:BP|MISS|BAD)[:\s]*(\d+)/i);
+      if (missMatch) missCount = parseInt(missMatch[1], 10);
       // 클리어 램프
       const lampImg = tds[4].querySelector('img');
       if (!lampImg) return;
@@ -278,7 +283,7 @@
       out.charts.push({
         title, diff: chartType,
         lampNum, lamp: LAMP_NAMES[lampNum] || `?${lampNum}`,
-        exScore, pgreat, great, djLevel,
+        exScore, pgreat, great, djLevel, missCount,
       });
     });
     // 다음 페이지가 있는지: <div class="navi-next"> a 가 존재하면 있음
@@ -1072,24 +1077,61 @@
       .sort((a, b) => a.diffValue - b.diffValue);
   };
 
+  // EXH 전용 추천 — EC/HC 와 별개 로직.
+  //   EXH 미클리어 (lamp < 6) 곡 중 자기 실력 (recBaseStar) 이하인 곡만,
+  //   EXH ★ 낮은 순으로 30곡 → 미스 카운트 낮은 순으로 정렬 → 10곡 표시.
+  //   미스 카운트 없는 곡은 뒤로 밀어서 정렬.
+  const buildExhRecs = () => {
+    const candidates = [];
+    for (const c of allCharts) {
+      if (c.lampNum >= 6) continue;
+      const e = ereterMap.get(norm(c.title) + '|' + c.diff);
+      if (!e || e.level == null) continue;
+      if (e.level < 11.6 || e.level > 12.7) continue;
+      if (typeof e.exh !== 'number') continue;
+      // 실력 이상 곡 제외 (recBaseStar 없으면 필터 없음)
+      if (recBaseStar != null && e.exh > recBaseStar) continue;
+      candidates.push({
+        title: c.title, chart: c.diff, level: e.level,
+        ec: e.ec, hc: e.hc, exh: e.exh,
+        ec_n: e.ec_n, hc_n: e.hc_n, exh_n: e.exh_n,
+        diffValue: e.exh, currentLamp: c.lamp,
+        missCount: c.missCount,
+      });
+    }
+    // 1. EXH ★ 낮은 순 → top 30
+    candidates.sort((a, b) => a.diffValue - b.diffValue);
+    const top30 = candidates.slice(0, 30);
+    // 2. 미스 카운트 낮은 순 (null 은 뒤로) → 10곡
+    top30.sort((a, b) => {
+      const ma = a.missCount;
+      const mb = b.missCount;
+      if (ma == null && mb == null) return 0;
+      if (ma == null) return 1;
+      if (mb == null) return -1;
+      return ma - mb;
+    });
+    return top30.slice(0, 10);
+  };
+
   if (recBaseStar != null) {
     recsEC.push(...buildRecs(3, 'ec'));
     recsHC.push(...buildRecs(5, 'hc'));
-    recsEXH.push(...buildRecs(6, 'exh'));
-    console.log(`[step2] 추천곡: EC ${recsEC.length}, HC ${recsHC.length}, EXH ${recsEXH.length}`);
   }
+  recsEXH.push(...buildExhRecs());
+  console.log(`[step2] 추천곡: EC ${recsEC.length}, HC ${recsHC.length}, EXH ${recsEXH.length}`);
 
   const topEC  = recsEC;
   const topHC  = recsHC;
   const topEXH = recsEXH;
 
-  // 다시 뽑기 버튼에서 사용할 수 있도록 buildRecs 노출
+  // 다시 뽑기 버튼에서 사용할 수 있도록 노출
   // (panel 생성 후 클릭으로 재호출 → DOM 부분 업데이트)
   window.__dp_rerollRecs = (stage) => {
+    if (stage === 'exh') return buildExhRecs();
     let threshold, field;
-    if (stage === 'ec')  { threshold = 3; field = 'ec';  }
-    if (stage === 'hc')  { threshold = 5; field = 'hc';  }
-    if (stage === 'exh') { threshold = 6; field = 'exh'; }
+    if (stage === 'ec') { threshold = 3; field = 'ec'; }
+    if (stage === 'hc') { threshold = 5; field = 'hc'; }
     return buildRecs(threshold, field);
   };
 
@@ -1209,9 +1251,9 @@
       #__dp_score_panel .profile-img { flex-shrink: 0; width: 64px; height: 64px; background: #e9ecef; border-radius: 4px; overflow: hidden; }
       #__dp_score_panel .profile-img img { width: 100%; height: 100%; object-fit: cover; }
       #__dp_score_panel .profile-info { flex: 1; min-width: 0; }
-      #__dp_score_panel .profile-name { font-size: 16px; font-weight: 600; line-height: 1.2; }
-      #__dp_score_panel .profile-id { font-size: 11px; color: #666; margin-top: 2px; }
-      #__dp_score_panel .profile-rank { display: flex; gap: 10px; margin-top: 6px; font-size: 13px; flex-wrap: wrap; }
+      #__dp_score_panel .profile-name { font-size: 16px; font-weight: 600; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      #__dp_score_panel .profile-id { font-size: 11px; color: #666; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      #__dp_score_panel .profile-rank { display: flex; gap: 10px; margin-top: 6px; font-size: 13px; flex-wrap: nowrap; white-space: nowrap; overflow: hidden; }
       #__dp_score_panel .profile-rank span { white-space: nowrap; font-weight: 700; }
       #__dp_score_panel .profile-rank b { color: #6c757d; margin-right: 3px; font-weight: 600; }
       /* 중전 (은빛) / 개전 (금빛) 은은하게 반짝이는 그라데이션 */
@@ -1243,17 +1285,21 @@
       #__dp_score_panel .profile-star { flex-shrink: 0; text-align: center; padding: 4px 4px 4px 8px; min-width: 72px; }
       #__dp_score_panel .profile-star-value { font-size: 22px; font-weight: 700; color: #212529; line-height: 1.1; margin: 2px 0; }
       #__dp_score_panel .profile-star-note { font-size: 9px; color: #888; line-height: 1.1; }
-      /* 추천곡 기준 토글 (ereter / OhSorry) — 두 줄, 글씨 클릭 전환 */
+      /* 추천곡 기준 토글 (ereter / OhSorry) — 우측 정렬 */
       #__dp_score_panel .rec-mode-toggle {
         margin-top: 10px;
-        text-align: center;
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 8px;
       }
       #__dp_score_panel .rec-mode-label {
         font-size: 11px; color: #888;
-        margin-bottom: 2px;
+        white-space: nowrap;
       }
       #__dp_score_panel .rec-mode-options {
         font-size: 12px;
+        white-space: nowrap;
       }
       #__dp_score_panel .rec-mode-opt {
         cursor: pointer;
@@ -1273,11 +1319,13 @@
         margin: 0 8px;
       }
       #__dp_score_panel .recs { margin-top: 12px; }
-      #__dp_score_panel .rec-item { padding: 4px 0; font-size: 12px; display: flex; justify-content: space-between; gap: 8px; border-bottom: 1px solid #eee; }
+      #__dp_score_panel .rec-item { padding: 4px 0; font-size: 12px; display: flex; align-items: center; gap: 6px; border-bottom: 1px solid #eee; }
       #__dp_score_panel .rec-item:last-child { border-bottom: none; }
       #__dp_score_panel .rec-item .rec-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-      #__dp_score_panel .rec-item .rec-info { flex-shrink: 0; color: #666; font-variant-numeric: tabular-nums; font-size: 11px; }
-      #__dp_score_panel .rec-item .rec-diff { color: #343a40; font-weight: 600; }
+      /* 우측 3개 컬럼 정렬: 실력난이도 ★ / 서열표 ☆ / 보면종류 */
+      #__dp_score_panel .rec-item .rec-diff { flex: 0 0 42px; text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+      #__dp_score_panel .rec-item .rec-level { flex: 0 0 32px; text-align: right; color: #888; font-variant-numeric: tabular-nums; font-size: 11px; }
+      #__dp_score_panel .rec-item .rec-chart { flex: 0 0 12px; text-align: center; font-weight: 600; font-size: 11px; }
     </style>
     <button class="close" onclick="document.getElementById('__dp_score_panel').remove()" title="닫기">×</button>
 
@@ -1378,11 +1426,10 @@
           const cColor = chartColor(r.chart);
           return `
             <div class="rec-item">
+              <span class="rec-chart" style="color:${cColor}" title="${r.chart || ''}">${chartLetter}</span>
               <div class="rec-title">${escHtml(r.title)}<span style="color:#aaa;font-weight:400;margin-left:4px;font-size:10.5px">${r.currentLamp || ''}</span></div>
-              <div class="rec-info">
-                <span class="rec-diff" style="color:${color}">★${fmt(r.diffValue)}</span>
-                · ☆${r.level} <span style="color:${cColor};font-weight:600">${chartLetter}</span>
-              </div>
+              <span class="rec-diff" style="color:${color}" title="실력 ★">★${r.diffValue.toFixed(2)}</span>
+              <span class="rec-level" title="서열표 ☆">☆${r.level.toFixed(1)}</span>
             </div>
           `;
         }).join('');
@@ -1425,18 +1472,17 @@
         if (eraterTrueStar == null) return '';
         const ereterActive = recBaseMode === 'ereter';
         const ohsorryActive = recBaseMode === 'ohsorry';
-        const ereterStarTxt = `★${eraterTrueStar.toFixed(2)}`;
-        const ohsorryStarTxt = starEstimate != null ? `★${fmt(starEstimate)}` : '없음';
         return `
           <div class="rec-mode-toggle">
+            <span class="rec-mode-label">추천곡 기준 :</span>
             <div class="rec-mode-options">
               <span class="rec-mode-opt ${ereterActive ? 'active' : ''}" data-mode="ereter"
                 onclick="window.__dp_setRecBase && window.__dp_setRecBase('ereter')"
-                title="이레터넷 원본 ★값 기준">ereter ${ereterStarTxt}</span>
+                title="이레터넷 원본 ★값 기준">ereter</span>
               <span class="rec-mode-sep">|</span>
               <span class="rec-mode-opt ${ohsorryActive ? 'active' : ''}" data-mode="ohsorry"
                 onclick="window.__dp_setRecBase && window.__dp_setRecBase('ohsorry')"
-                title="OhSorry (우리 모델) 추정 ★값 기준">OhSorry ${ohsorryStarTxt}</span>
+                title="OhSorry (우리 모델) 추정 ★값 기준">OhSorry</span>
             </div>
           </div>
         `;
@@ -1532,34 +1578,30 @@
         html += '</table>';
         return html;
       })()}
-      <details class="toggle" style="margin-top:8px">
-        <summary style="font-weight:600;color:#212529">난이도 별 클리어 램프</summary>
-        ${(() => {
-        // ★ 단위별 진행 현황
-        //   곡 수: ereter + zasa 보충 (ereter 미등록 차트는 zasa 기준 ★ 으로 카운트)
-        //   클리어 카운트: 사용자 실제 데이터 (lamp 단독, 누적 X) — ereter / zasa 둘 다 매칭
-        //   합계 = 곡 수 가 되도록 모든 lamp 단계 표시
+      ${(() => {
+        // 시각화: ★ 단위별 stacked 가로 바 (flex). 각 row 의 width = total 비례, 내부 segment 는 lamp/dj 분포 비례.
+        // 세로 정렬 보기 좋도록: 모든 ★ 의 bar 영역은 같은 폭, 내부에 [played 영역 (실제 곡 수 / max(total))] 만 채움.
+        // 각 segment 는 hover 시 (label: count 곡) tooltip.
         const levels = [11.6, 11.7, 11.8, 11.9, 12.0, 12.1, 12.2, 12.3, 12.4, 12.5, 12.6, 12.7];
-        const stats = {};
+
+        // ----- 클리어 램프 stats -----
+        const lampStats = {};
         for (const lv of levels) {
-          stats[lv.toFixed(1)] = { total: 0, fc: 0, exh: 0, hd: 0, cl: 0, ez: 0, as: 0, fa: 0, np: 0, played: 0, zasa: 0 };
+          lampStats[lv.toFixed(1)] = { total: 0, fc: 0, exh: 0, hd: 0, cl: 0, ez: 0, as: 0, fa: 0, np: 0, played: 0, zasa: 0 };
         }
-        // 1a. 곡 수: ereter 전체 데이터
         for (const e of ereterData) {
           if (e.level == null) continue;
           const k = e.level.toFixed(1);
-          if (!stats[k]) continue;
-          stats[k].total++;
+          if (!lampStats[k]) continue;
+          lampStats[k].total++;
         }
-        // 1b. zasa 보충: ereter 에 없는 차트만 추가 (★ 단위는 zasa 의 level 기준)
         for (const z of zasaSupplemental) {
           if (z.level == null) continue;
           const k = z.level.toFixed(1);
-          if (!stats[k]) continue;
-          stats[k].total++;
-          stats[k].zasa++;
+          if (!lampStats[k]) continue;
+          lampStats[k].total++;
+          lampStats[k].zasa++;
         }
-        // 2. lamp 단독 카운트 — ereter 우선, 없으면 zasa 매칭 (zasa 의 level 사용)
         for (const c of allCharts) {
           const key = norm(c.title) + '|' + c.diff;
           const e = ereterMap.get(key);
@@ -1570,94 +1612,39 @@
             const z = zasaMap.get(key);
             if (z && z.level != null) k = z.level.toFixed(1);
           }
-          if (!k || !stats[k]) continue;
-          if (c.lampNum >= 1) stats[k].played++;
-          if (c.lampNum === 7) stats[k].fc++;
-          else if (c.lampNum === 6) stats[k].exh++;
-          else if (c.lampNum === 5) stats[k].hd++;
-          else if (c.lampNum === 4) stats[k].cl++;
-          else if (c.lampNum === 3) stats[k].ez++;
-          else if (c.lampNum === 2) stats[k].as++;
-          else if (c.lampNum === 1) stats[k].fa++;
+          if (!k || !lampStats[k]) continue;
+          if (c.lampNum >= 1) lampStats[k].played++;
+          if (c.lampNum === 7) lampStats[k].fc++;
+          else if (c.lampNum === 6) lampStats[k].exh++;
+          else if (c.lampNum === 5) lampStats[k].hd++;
+          else if (c.lampNum === 4) lampStats[k].cl++;
+          else if (c.lampNum === 3) lampStats[k].ez++;
+          else if (c.lampNum === 2) lampStats[k].as++;
+          else if (c.lampNum === 1) lampStats[k].fa++;
         }
-        // 3. NP = 전체 곡 수 - 사용자가 시도한 곡 수
         for (const lv of levels) {
           const k = lv.toFixed(1);
-          stats[k].np = Math.max(0, stats[k].total - stats[k].played);
+          lampStats[k].np = Math.max(0, lampStats[k].total - lampStats[k].played);
         }
-        // 0 일 경우 - 로 표기 + 연한 회색 (시각적 노이즈 줄이기)
-        const cell = (n) => n === 0
-          ? `<td class="num" style="color:#d0d0d0">-</td>`
-          : `<td class="num">${n}</td>`;
-        let html = `
-          <table style="margin-bottom:8px;width:100%">
-            <tr>
-              <th>★</th>
-              <th class="num">곡 수</th>
-              <th class="num" style="color:#00aab2">FC</th>
-              <th class="num" style="color:#dcaf45">EX</th>
-              <th class="num" style="color:#dc3545">HC</th>
-              <th class="num" style="color:#212529">CL</th>
-              <th class="num" style="color:#52a447">EC</th>
-              <th class="num" style="color:#9966cc">AC</th>
-              <th class="num" style="color:#8b3a3a">FA</th>
-              <th class="num" style="color:#888">NP</th>
-            </tr>`;
+
+        // ----- DJ LEVEL stats -----
+        const djStats = {};
         for (const lv of levels) {
-          const s = stats[lv.toFixed(1)];
-          if (s.total === 0) continue;
-          // 곡 수 셀: zasa 보충된 분량은 작게 옅은 색으로 +N 표시
-          const totalCell = s.zasa > 0
-            ? `<td class="num">${s.total} <span style="color:#aaa;font-size:10px">+${s.zasa}</span></td>`
-            : `<td class="num">${s.total}</td>`;
-          html += `
-            <tr>
-              <td>★${lv.toFixed(1)}</td>
-              ${totalCell}
-              ${cell(s.fc)}
-              ${cell(s.exh)}
-              ${cell(s.hd)}
-              ${cell(s.cl)}
-              ${cell(s.ez)}
-              ${cell(s.as)}
-              ${cell(s.fa)}
-              ${cell(s.np)}
-            </tr>`;
+          djStats[lv.toFixed(1)] = { total: 0, AAA: 0, AA: 0, A: 0, B: 0, C: 0, lower: 0, none: 0, zasa: 0 };
         }
-        html += '</table>';
-        if (zasaSupplemental.length > 0) {
-          html += `<div class="meta" style="font-size:10px;color:#aaa;margin-top:4px">+N = zasa 보충 (ereter 미등록)</div>`;
-        }
-        return html;
-      })()}
-      </details>
-      <details class="toggle" style="margin-top:6px">
-        <summary style="font-weight:600;color:#212529">난이도 별 DJ LEVEL</summary>
-        ${(() => {
-        // ★ 단위별 DJ LEVEL 분포
-        //   곡 수: ereter + zasa 보충 (앞 표와 일관)
-        //   DJ LEVEL: 사용자 실제 데이터 (AAA, AA, A, B, C이하 그룹)
-        const levels = [11.6, 11.7, 11.8, 11.9, 12.0, 12.1, 12.2, 12.3, 12.4, 12.5, 12.6, 12.7];
-        const stats = {};
-        for (const lv of levels) {
-          stats[lv.toFixed(1)] = { total: 0, AAA: 0, AA: 0, A: 0, B: 0, lower: 0, none: 0, zasa: 0 };
-        }
-        // 1a. 곡 수: ereter
         for (const e of ereterData) {
           if (e.level == null) continue;
           const k = e.level.toFixed(1);
-          if (!stats[k]) continue;
-          stats[k].total++;
+          if (!djStats[k]) continue;
+          djStats[k].total++;
         }
-        // 1b. zasa 보충 (ereter 미등록 차트만)
         for (const z of zasaSupplemental) {
           if (z.level == null) continue;
           const k = z.level.toFixed(1);
-          if (!stats[k]) continue;
-          stats[k].total++;
-          stats[k].zasa++;
+          if (!djStats[k]) continue;
+          djStats[k].total++;
+          djStats[k].zasa++;
         }
-        // 2. DJ LEVEL: 사용자 데이터 (C/D/E/F 는 lower 로 합침). ereter 우선, zasa fallback.
         for (const c of allCharts) {
           const key = norm(c.title) + '|' + c.diff;
           const e = ereterMap.get(key);
@@ -1668,58 +1655,99 @@
             const z = zasaMap.get(key);
             if (z && z.level != null) k = z.level.toFixed(1);
           }
-          if (!k || !stats[k]) continue;
+          if (!k || !djStats[k]) continue;
           if (!c.djLevel) continue;
-          if (['AAA', 'AA', 'A', 'B'].includes(c.djLevel)) {
-            stats[k][c.djLevel]++;
-          } else if (['C', 'D', 'E', 'F'].includes(c.djLevel)) {
-            stats[k].lower++;
-          }
+          if (['AAA', 'AA', 'A', 'B', 'C'].includes(c.djLevel)) djStats[k][c.djLevel]++;
+          else if (['D', 'E', 'F'].includes(c.djLevel)) djStats[k].lower++;
         }
-        // 3. none = 점수 없는 곡 = 곡 수 - 점수 있는 곡 수
         for (const lv of levels) {
           const k = lv.toFixed(1);
-          const s = stats[k];
-          const scored = s.AAA + s.AA + s.A + s.B + s.lower;
-          s.none = Math.max(0, s.total - scored);
+          const s = djStats[k];
+          s.none = Math.max(0, s.total - (s.AAA + s.AA + s.A + s.B + s.C + s.lower));
         }
-        const cell2 = (n) => n === 0
-          ? `<td class="num" style="color:#d0d0d0">-</td>`
-          : `<td class="num">${n}</td>`;
-        let html = `
-          <table style="margin-bottom:8px;width:100%">
-            <tr>
-              <th>★</th>
-              <th class="num">곡 수</th>
-              <th class="num" style="color:#dcaf45">AAA</th>
-              <th class="num" style="color:#dcaf45">AA</th>
-              <th class="num" style="color:#52a447">A</th>
-              <th class="num" style="color:#1971c2">B</th>
-              <th class="num" style="color:#888">C↓</th>
-              <th class="num" style="color:#888">NP</th>
-            </tr>`;
+
+        // ----- 시각화 헬퍼 -----
+        // bar 는 100% 폭 채움. segment 는 lamp/dj 분포 비례.
+        const renderBar = (segments, total) => {
+          if (total === 0) return '';
+          return segments.map(({ color, label, count, cls }) => {
+            if (count === 0) return '';
+            const pct = (count / total * 100).toFixed(2);
+            const classAttr = cls ? ` class="${cls}"` : '';
+            const bgStyle = cls ? '' : `background:${color};`;
+            return `<div${classAttr} style="${bgStyle}width:${pct}%;height:100%" title="${label}: ${count}곡"></div>`;
+          }).join('');
+        };
+
+        const renderRow = (lv, s, segments) => {
+          return `
+            <div style="display:flex;align-items:center;gap:6px;font-size:11px;line-height:1;margin-bottom:3px">
+              <span style="flex-shrink:0;width:34px;color:#666;font-variant-numeric:tabular-nums">★${lv.toFixed(1)}</span>
+              <span style="flex-shrink:0;width:24px;text-align:right;color:#888;font-variant-numeric:tabular-nums">${s.total}</span>
+              <div style="flex:1;height:12px;display:flex;border-radius:2px;overflow:hidden">${renderBar(segments, s.total)}</div>
+            </div>`;
+        };
+
+        const lampPalette = [
+          { key: 'fc',  color: '#00aab2', label: 'FC' },         // 하늘색
+          { key: 'exh', color: '#dcaf45', label: 'EX-HARD' },    // 금
+          { key: 'hd',  color: '#dc3545', label: 'HARD' },       // 빨강
+          { key: 'cl',  color: '#7dd3da', label: 'CLEAR' },      // 연한 하늘색 (FC 의 lighter)
+          { key: 'ez',  color: '#52a447', label: 'EASY' },       // 초록
+          { key: 'as',  color: '#9966cc', label: 'ASSIST' },     // 보라
+          { key: 'fa',  color: '#999',    label: 'FAILED' },     // 회색
+          { key: 'np',  color: '#e9ecef', label: 'NO PLAY' },    // 연회색
+        ];
+        const djPalette = [
+          { key: 'AAA',   color: '#ffcc44', label: 'AAA' },      // 밝은 금
+          { key: 'AA',    color: '#dcaf45', label: 'AA' },       // 금
+          { key: 'A',     color: '#dc3545', label: 'A' },        // 빨강
+          { key: 'B',     color: '#1971c2', label: 'B' },        // 파랑
+          { key: 'C',     color: '#9ed870', label: 'C' },        // 연두
+          { key: 'lower', color: '#b0b0b0', label: 'D↓' },       // 연회색
+          { key: 'none',  color: '#e9ecef', label: 'NP' },       // 연회색
+        ];
+
+        const renderLegend = (palette) => {
+          return `
+            <div style="display:flex;flex-wrap:nowrap;gap:6px 10px;font-size:10px;color:#666;margin-bottom:6px;white-space:nowrap;overflow:hidden">
+              ${palette.map(p => {
+                const swatchClass = p.cls ? ` class="${p.cls}"` : '';
+                const swatchBg = p.cls ? '' : `background:${p.color};`;
+                return `<span style="display:inline-flex;align-items:center;gap:3px">
+                  <span${swatchClass} style="display:inline-block;width:9px;height:9px;${swatchBg}border-radius:1px"></span>
+                  ${p.label}
+                </span>`;
+              }).join('')}
+            </div>`;
+        };
+
+        let html = '';
+
+        // 클리어 램프 시각화
+        html += `<details class="toggle" style="margin-top:8px"><summary style="font-weight:600;color:#212529">난이도 별 클리어 램프</summary>`;
+        html += `<div style="margin-top:6px">${renderLegend(lampPalette)}`;
         for (const lv of levels) {
-          const s = stats[lv.toFixed(1)];
+          const s = lampStats[lv.toFixed(1)];
           if (s.total === 0) continue;
-          const totalCell = s.zasa > 0
-            ? `<td class="num">${s.total} <span style="color:#aaa;font-size:10px">+${s.zasa}</span></td>`
-            : `<td class="num">${s.total}</td>`;
-          html += `
-            <tr>
-              <td>★${lv.toFixed(1)}</td>
-              ${totalCell}
-              ${cell2(s.AAA)}
-              ${cell2(s.AA)}
-              ${cell2(s.A)}
-              ${cell2(s.B)}
-              ${cell2(s.lower)}
-              ${cell2(s.none)}
-            </tr>`;
+          const segs = lampPalette.map(p => ({ ...p, count: s[p.key] || 0 }));
+          html += renderRow(lv, s, segs);
         }
-        html += '</table>';
+        html += `</div></details>`;
+
+        // DJ LEVEL 시각화
+        html += `<details class="toggle" style="margin-top:6px"><summary style="font-weight:600;color:#212529">난이도 별 DJ LEVEL</summary>`;
+        html += `<div style="margin-top:6px">${renderLegend(djPalette)}`;
+        for (const lv of levels) {
+          const s = djStats[lv.toFixed(1)];
+          if (s.total === 0) continue;
+          const segs = djPalette.map(p => ({ ...p, count: s[p.key] || 0 }));
+          html += renderRow(lv, s, segs);
+        }
+        html += `</div></details>`;
+
         return html;
       })()}
-      </details>
     </details>
 
     ${ereterExtractedAt ? (() => {
