@@ -17,7 +17,7 @@
 //
 // 다른 레벨/스타일을 보고 싶으면 코드 안의 difficult/style 값 변경
 // 딜레이 조정: DELAY_MIN_MS / DELAY_MAX_MS 변수 변경
-//   기본: 2000~3000ms (12레벨 8페이지면 총 약 16~24초)
+//   기본: 600~1800ms (12레벨 8페이지면 총 약 5~14초)
 // ============================================================
 
 (async () => {
@@ -224,8 +224,8 @@
   const STEP = 50;
   const MAX_PAGES = 30;  // 무한 루프 방어
   // 사람이 페이지 넘기는 속도와 비슷하게: 페이지마다 3~6초 사이 랜덤 대기
-  const DELAY_MIN_MS = 2000;
-  const DELAY_MAX_MS = 3000;
+  const DELAY_MIN_MS = 600;
+  const DELAY_MAX_MS = 1800;
   const randomDelay = () => DELAY_MIN_MS + Math.random() * (DELAY_MAX_MS - DELAY_MIN_MS);
   let pageCount = 0;
 
@@ -411,7 +411,12 @@
     unmatchedSamples.forEach(s => console.log('  -', s));
   }
 
-  // -------- 5.5. ★값 추정 (v3.2.9: v3.2.7 + ridge 음수 미적용 (bin 활성)) --------
+  // -------- 5.5. ★값 추정 (v3.2.10: v3.2.9 + 추천곡 로직 정리) --------
+  //
+  // v3.2.10 변경 (★값 추정 모델 자체는 v3.2.9 그대로):
+  //   - 추천곡 challenge offset 동적화: ★0.5 → +1.2, ★14.0 → +0.3 선형 보간
+  //   - 6:4 비율 고정 (저레벨 3:7 분기 제거)
+  //   - 풀 샘플 10+10=20 → picked 10 (한 쪽 부족 시 다른 쪽에서 보충)
   //
   // v3.2.9 모델: v3.2.7 + 4단계 진입 시 bin 보너스 활성 + ridge 음수 → ridge 0 처리
   //   - 86명 (n_cleared >= 50) 학습 (LOOCV 기준)
@@ -814,7 +819,7 @@
       // 출력 범위 클램프
       starEstimate = Math.max(0.0, Math.min(15.0, starEstimate));
 
-      console.log(`[step2] ★값 추정 (v3.2.9): ${starEstimate.toFixed(2)} (raw=${starRaw.toFixed(2)}, ridge 보정=${correction >= 0 ? '+' : ''}${correction.toFixed(3)}${ridgeMuted ? ' ★음소거' : ''}, post 보정=${postCorrection >= 0 ? '+' : ''}${postCorrection.toFixed(3)}, djBoost=${djBoost >= 0 ? '+' : ''}${djBoost.toFixed(3)}, 표본 ${fitData.length}, 사용 lamp: ${validStages.join('/')})`);
+      console.log(`[step2] ★값 추정 (v3.2.10): ${starEstimate.toFixed(2)} (raw=${starRaw.toFixed(2)}, ridge 보정=${correction >= 0 ? '+' : ''}${correction.toFixed(3)}${ridgeMuted ? ' ★음소거' : ''}, post 보정=${postCorrection >= 0 ? '+' : ''}${postCorrection.toFixed(3)}, djBoost=${djBoost >= 0 ? '+' : ''}${djBoost.toFixed(3)}, 표본 ${fitData.length}, 사용 lamp: ${validStages.join('/')})`);
       console.log(`[step2]   base: ec(max=${fEc.max_clear.toFixed(2)}, p50=${fEc.p50_clear.toFixed(2)}), hc(max=${fHc.max_clear.toFixed(2)}, p50=${fHc.p50_clear.toFixed(2)}), exh(max=${fExh.max_clear.toFixed(2)})`);
       console.log(`[step2]   AC/FC: ac_frac=${ac_frac.toFixed(3)}, ac_max=${ac_max_d.toFixed(2)}, fc_frac=${fc_frac.toFixed(3)}, fc_max=${fc_max_d.toFixed(2)}, fc_to_exh=${fc_to_exh_ratio.toFixed(3)}`);
       console.log(`[step2]   v3.2: M=${v32_M.toFixed(2)}, top10_avg=${v32_M_top10_avg.toFixed(2)}, gap_top10=${v32_gap_top10.toFixed(2)}, n_cleared=${n_cleared_v32}${isUnderCutoff ? ' (CUTOFF 미달!)' : ''}, prob_sum=${v32_prob_sum.toFixed(3)}`);
@@ -913,11 +918,22 @@
     return a;
   };
 
+  // 도전곡 범위 — recBaseStar 위로 얼마까지 추천할지.
+  //   ★0.5 사용자: +1.2 까지 (저렙은 도전곡이 풍부하니 넓게)
+  //   ★14.0 사용자: +0.3 까지 (고렙은 좁게)
+  //   사이는 선형 보간, 범위 밖은 clamp.
+  const challengeOffset = (baseStar) => {
+    if (baseStar <= 0.5) return 1.2;
+    if (baseStar >= 14.0) return 0.3;
+    return 1.2 - ((baseStar - 0.5) * 0.9) / 13.5;
+  };
+
   // 도전/정리 풀 분리 (recBaseStar 가 기준 — ereter / ohsorry 토글에 따라 변경됨)
   const buildPools = (threshold, getDiffField) => {
     const challenge = [];
     const cleanup = [];
     if (recBaseStar == null) return { challenge, cleanup };
+    const offset = challengeOffset(recBaseStar);
     for (const c of allCharts) {
       if (c.lampNum >= threshold) continue;
       const e = ereterMap.get(norm(c.title) + '|' + c.diff);
@@ -932,7 +948,7 @@
         diffValue: dv, currentLamp: c.lamp,
         margin: recBaseStar - dv,
       };
-      if (dv >= recBaseStar && dv <= recBaseStar + 0.8) {
+      if (dv >= recBaseStar && dv <= recBaseStar + offset) {
         challenge.push(item);
       } else if (dv < recBaseStar) {
         cleanup.push(item);
@@ -943,38 +959,31 @@
 
   const buildRecs = (threshold, getDiffField) => {
     const { challenge, cleanup } = buildPools(threshold, getDiffField);
-    const isLowLevel = (recBaseStar != null && recBaseStar < 2.0);
-    const challengeQuota = isLowLevel ? 3 : 6;
-    const cleanupQuota   = isLowLevel ? 7 : 4;
 
-    // 각 풀에서 랜덤 10개씩
+    // 풀에서 랜덤 10곡씩 (총 20곡 후보), picked = 도전 6 + 정리 4 비율 고정
     const challengeRand = shuffle(challenge).slice(0, 10);
     const cleanupRand = shuffle(cleanup).slice(0, 10);
     const keyOf = r => (r.title || '') + '|' + r.chart;
 
-    // 비율대로 가져오기 (중복은 도전 우선)
     const used = new Set();
-    let chPick = challengeRand.slice(0, challengeQuota);
+    let chPick = challengeRand.slice(0, 6);
     chPick.forEach(r => used.add(keyOf(r)));
-    let clPick = cleanupRand.filter(r => !used.has(keyOf(r))).slice(0, cleanupQuota);
+    let clPick = cleanupRand.filter(r => !used.has(keyOf(r))).slice(0, 4);
     clPick.forEach(r => used.add(keyOf(r)));
 
     // 부족하면 다른 쪽에서 채움 (총 최대 10곡)
-    const totalNow = chPick.length + clPick.length;
-    if (totalNow < 10) {
-      const need = 10 - totalNow;
-      // 정리 부족 → 도전 풀에서 추가
-      if (clPick.length < cleanupQuota) {
-        const extra = challengeRand.filter(r => !used.has(keyOf(r))).slice(0, need);
-        chPick = [...chPick, ...extra];
-        extra.forEach(r => used.add(keyOf(r)));
-      }
-      // 도전 부족 → 정리 풀에서 추가
-      const stillNeed = 10 - chPick.length - clPick.length;
-      if (stillNeed > 0) {
-        const extra = cleanupRand.filter(r => !used.has(keyOf(r))).slice(0, stillNeed);
-        clPick = [...clPick, ...extra];
-      }
+    if (chPick.length + clPick.length < 10 && clPick.length < 4) {
+      const extra = challengeRand
+        .filter(r => !used.has(keyOf(r)))
+        .slice(0, 10 - chPick.length - clPick.length);
+      chPick = [...chPick, ...extra];
+      extra.forEach(r => used.add(keyOf(r)));
+    }
+    if (chPick.length + clPick.length < 10) {
+      const extra = cleanupRand
+        .filter(r => !used.has(keyOf(r)))
+        .slice(0, 10 - chPick.length - clPick.length);
+      clPick = [...clPick, ...extra];
     }
 
     // 표시 순서: 도전(★ 높은→낮은) → 정리(★ 높은→낮은)
@@ -1595,7 +1604,7 @@
       star_estimate: starEstimate != null ? Number(starEstimate.toFixed(4)) : null,
       ereter_star: eraterTrueStar != null ? Number(eraterTrueStar) : null,
       raw_s: starRaw != null ? Number(starRaw.toFixed(4)) : null,
-      version: 'v3.2.9',
+      version: 'v3.2.10',
       sp_rank: profile.spRank || null,
       dp_rank: profile.dpRank || null,
       n_cleared: nClearedLv12,
