@@ -1789,10 +1789,7 @@
 
   // -------- 7. Supabase user_profiles UPSERT --------
   //   user_profiles: iidx_id PK 로 UPSERT (매번 덮어쓰기 + charts_json 저장)
-  //   DB trigger 가 자동 차단:
-  //     - star_estimate 가 이전과 같음 → skip (저장 안 함)
-  //     - 마지막 갱신 < 1일 → skip
-  //     - 둘 다 통과 → user_changes 에 변화 자동 INSERT (요약 + 곡별 diff)
+  //   DB trigger: ★값 변화 있으면 무조건 user_changes 에 INSERT (1일 cooldown 없음)
   //   실패해도 사용자 경험에 영향 없도록 fire-and-forget
   (async () => {
     const SUPABASE_URL = 'https://ryesiijulrlmstmhzpnv.supabase.co';
@@ -1848,7 +1845,7 @@
         body: JSON.stringify({ p: payload }),
       });
       if (res.ok) {
-        console.log('[step2] user_profiles upsert 성공 (DB trigger 가 ★값 변화 + 1일 경과 체크)');
+        console.log('[step2] user_profiles upsert 성공');
       } else {
         const errText = await res.text().catch(() => '');
         console.warn(`[step2] user_profiles 실패: HTTP ${res.status}`, errText);
