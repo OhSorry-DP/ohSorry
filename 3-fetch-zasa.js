@@ -53,7 +53,7 @@
       if (!m) continue;
       const gameLevel = parseInt(m[1], 10);
       const level = parseFloat(m[2]);
-      if (!Number.isFinite(level) || level < 11.6 || level > 12.7) continue;
+      if (!Number.isFinite(level) || level < 10.2 || level > 12.7) continue;
       charts.push({ title, diff, gameLevel, level });
     }
   });
