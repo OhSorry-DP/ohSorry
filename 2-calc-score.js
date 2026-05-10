@@ -999,18 +999,21 @@
     return 1.0 - ((baseStar - 0.5) * 0.7) / 13.5;
   };
 
-  const HARD_WIDTH = 0.3;  // 하드 도전 범위 폭
-  const EASY_WIDTH = 0.2;  // 약 도전 범위 폭
-
-  // 3 풀 분리: 하드 도전 [base+offset-0.3, base+offset], 약 도전 [base, base+0.2], 정리 [0, base)
+  // 3 풀 분리 — stage 별 범위:
+  //   HC (기본):
+  //     easy = [base, base+0.2], hard = [base+offset-0.3, base+offset], cleanup = [0, base)
+  //   EC (살짝 아래로 시프트 — EASY 클리어 부담이 적어 자기 ★ 살짝 아래도 도전 권장):
+  //     easy = [base-0.1, base+0.1], hard = [base+offset-0.4, base+offset-0.1], cleanup = [0, base-0.1)
+  //   (cleanup 의 상한은 if-else 순서 덕분에 자연스럽게 easy 의 하한까지로 좁혀짐)
   const buildPools = (threshold, getDiffField, baseStar) => {
     const hard = [], easy = [], cleanup = [];
     if (baseStar == null) return { hard, easy, cleanup };
     const offset = challengeOffset(baseStar);
-    const hardMax = baseStar + offset;
-    const hardMin = baseStar + offset - HARD_WIDTH;
-    const easyMax = baseStar + EASY_WIDTH;
-    const easyMin = baseStar;
+    const isEC = getDiffField === 'ec';
+    const hardMax = baseStar + offset - (isEC ? 0.1 : 0);
+    const hardMin = baseStar + offset - (isEC ? 0.4 : 0.3);
+    const easyMax = baseStar + (isEC ? 0.1 : 0.2);
+    const easyMin = baseStar - (isEC ? 0.1 : 0);
     for (const c of allCharts) {
       if (c.lampNum >= threshold) continue;
       const e = ereterMap.get(norm(c.title) + '|' + c.diff);
