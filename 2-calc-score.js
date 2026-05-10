@@ -237,19 +237,26 @@
     console.log(`[step2] zasa 보충 (ereter 미등록): ${zasaSupplemental.length}곡`);
   }
 
-  // -------- 2. 대상 페이지 설정 (LEVEL 12 / DP 고정) --------
+  // -------- 2. 대상 페이지 설정 (LEVEL 12 + LEVEL 11 / DP) --------
   // p.eagate.573.jp 도메인 안 어느 페이지에서나 실행 가능하도록
-  // difficulty.html 의 LEVEL 12 + DP 페이지를 직접 fetch 합니다.
-  // 다른 레벨/스타일을 보고 싶으면 아래 difficult/style 값을 변경하세요.
-  //   difficult: 0~11 (0-indexed, 11=LEVEL 12)
+  // difficulty.html 의 LEVEL 12 → LEVEL 11 순차 fetch.
+  //   difficult: 0~11 (0-indexed, 11=LEVEL 12, 10=LEVEL 11)
   //   style:     0=SP, 1=DP
+  // LEVEL 11 도 가져오는 이유: zasa★ 11.6~12.1 인 어려운 lv11 차트의 lamp 데이터를
+  //                          ohSorryRating fallback 으로 ★ 추정 / EC·HC 추천에 활용.
   const SERIES = '33';            // 현재 시즌 (Sparkle Shower)
-  const difficult = '11';         // LEVEL 12
   const style = '1';              // DP
   const disp = '1';
+  // 가져올 레벨 목록 (LEVEL 12 → LEVEL 11 순서)
+  const LEVELS_TO_FETCH = [
+    { difficult: '11', label: 12 },  // LEVEL 12
+    { difficult: '10', label: 11 },  // LEVEL 11 (zasa★ 11.6+ 만 추정에 활용됨)
+  ];
   const BASE_URL = `https://p.eagate.573.jp/game/2dx/33/djdata/music/difficulty.html`;
   // 호환성을 위해 currentURL 도 만들어둠 (이전 코드와 동일한 변수 이름 사용)
   const currentURL = new URL(BASE_URL);
+  // 기존 로그 / UI 용 — 첫 (LEVEL 12) label
+  const levelText = LEVELS_TO_FETCH[0].label;
 
   // 도메인 체크 (잘못된 사이트에서 실행하면 의미 없으니 안내)
   if (!location.hostname.endsWith('p.eagate.573.jp')) {
@@ -260,8 +267,7 @@
     return;
   }
 
-  const levelText = parseInt(difficult, 10) + 1;  // difficult=11 → LEVEL 12
-  console.log(`[step2] LEVEL ${levelText} / ${style === '1' ? 'DP' : 'SP'} 시작`);
+  console.log(`[step2] LEVEL ${LEVELS_TO_FETCH.map(l => l.label).join(' + ')} / ${style === '1' ? 'DP' : 'SP'} 시작`);
 
   // -------- 3. 페이지 한 장 파싱 --------
   const LAMP_NAMES = {
@@ -321,9 +327,8 @@
     return out;
   };
 
-  // -------- 4. offset=0,50,100,... 순회 --------
+  // -------- 4. offset=0,50,100,... 순회 (LEVEL 별로) --------
   const allCharts = [];
-  let offset = 0;
   const STEP = 50;
   const MAX_PAGES = 30;  // 무한 루프 방어
   // 사람이 페이지 넘기는 속도와 비슷하게: 페이지마다 3~6초 사이 랜덤 대기
@@ -359,83 +364,112 @@
     if (b) b.style.width = `${Math.min(100, Math.max(0, pct))}%`;
   };
 
-  // 첫 페이지(offset=0)도 fetch 로 가져옴 (어느 페이지에서 실행해도 동일하게 작동)
-  updateProgress(`page 1 (offset=0) 요청 중...`, 2);
-  let firstParse;
-  try {
-    const firstUrl = `${BASE_URL}?difficult=${difficult}&style=${style}&disp=${disp}&offset=0`;
-    const res = await fetch(firstUrl, { credentials: 'include' });
-    if (!res.ok) {
-      console.error(`[step2] 첫 페이지 fetch 실패: HTTP ${res.status}`);
-      updateProgress(`첫 페이지 HTTP ${res.status} 에러`, 100);
-      alert(
-        `첫 페이지를 가져오지 못했어요 (HTTP ${res.status}).\n` +
-        `로그인 상태인지 확인해주세요.`
-      );
-      return;
-    }
-    const html = await res.text();
-    const doc = new DOMParser().parseFromString(html, 'text/html');
-    firstParse = parseDoc(doc);
-  } catch (e) {
-    console.error('[step2] 첫 페이지 fetch 실패:', e);
-    updateProgress(`첫 페이지 fetch 실패: ${e.message}`, 100);
-    alert(`첫 페이지 fetch 실패: ${e.message}`);
-    return;
-  }
-  allCharts.push(...firstParse.charts);
-  pageCount++;
-  console.log(`[step2] page ${pageCount} (offset=0): ${firstParse.charts.length}곡`);
-  updateProgress(`page ${pageCount} (offset=0): ${firstParse.charts.length}곡`, 8);
-  if (firstParse.charts.length === 0) {
-    alert(
-      '첫 페이지에서 곡을 못 찾았어요. 로그인 상태가 아니거나 페이지 구조가 변경됐을 수 있습니다.'
-    );
-    document.getElementById('__dp_progress')?.remove();
-    return;
-  }
-  let hasNext = firstParse.hasNext;
-  offset = STEP;
+  // 한 LEVEL 의 전 페이지를 fetch 해서 charts 를 allCharts 에 push.
+  // 실패 시 false 반환 (로그인 만료 등) — 호출자가 중단 처리.
+  const fetchOneLevel = async (lvDifficult, lvLabel, basePctStart, basePctEnd) => {
+    let lvOffset = 0;
+    let lvPageCount = 0;
+    const lvSpan = basePctEnd - basePctStart;
+    const pctOf = (frac) => Math.min(basePctEnd, basePctStart + lvSpan * Math.max(0, Math.min(1, frac)));
 
-  while (hasNext && pageCount < MAX_PAGES) {
-    // 사람처럼 페이지 사이에 대기 (요청 보내기 전에)
-    const wait = Math.round(randomDelay());
-    const waitStartTs = Date.now();
-    while (Date.now() - waitStartTs < wait) {
-      const remain = Math.ceil((wait - (Date.now() - waitStartTs)) / 1000);
-      updateProgress(
-        `page ${pageCount + 1} (offset=${offset}) 다음 요청까지 ${remain}초...`,
-        Math.min(95, pageCount * 12)
-      );
-      await new Promise(r => setTimeout(r, 250));
-    }
-
-    const url = `${currentURL.origin}${currentURL.pathname}?difficult=${difficult}&style=${style}&disp=${disp}&offset=${offset}`;
+    // 첫 페이지 (offset=0)
+    updateProgress(`LEVEL ${lvLabel} page 1 (offset=0) 요청 중...`, pctOf(0.02));
+    let firstParse;
     try {
-      updateProgress(`page ${pageCount + 1} (offset=${offset}) 요청 중...`, Math.min(95, pageCount * 12 + 5));
-      const res = await fetch(url, { credentials: 'include' });
+      const firstUrl = `${BASE_URL}?difficult=${lvDifficult}&style=${style}&disp=${disp}&offset=0`;
+      const res = await fetch(firstUrl, { credentials: 'include' });
       if (!res.ok) {
-        console.warn(`[step2] HTTP ${res.status} at offset=${offset}, 중단`);
-        updateProgress(`HTTP ${res.status} 에러로 중단`, 100);
-        break;
+        console.error(`[step2] LEVEL ${lvLabel} 첫 페이지 fetch 실패: HTTP ${res.status}`);
+        updateProgress(`LEVEL ${lvLabel} 첫 페이지 HTTP ${res.status} 에러`, pctOf(1));
+        alert(
+          `LEVEL ${lvLabel} 첫 페이지를 가져오지 못했어요 (HTTP ${res.status}).\n로그인 상태인지 확인해주세요.`,
+        );
+        return false;
       }
       const html = await res.text();
       const doc = new DOMParser().parseFromString(html, 'text/html');
-      const parsed = parseDoc(doc);
-      allCharts.push(...parsed.charts);
-      pageCount++;
-      console.log(`[step2] page ${pageCount} (offset=${offset}): ${parsed.charts.length}곡`);
-      updateProgress(`page ${pageCount} (offset=${offset}): ${parsed.charts.length}곡 (총 ${allCharts.length}곡)`, Math.min(95, pageCount * 12 + 8));
-      if (parsed.charts.length === 0) break;
-      hasNext = parsed.hasNext;
-      offset += STEP;
+      firstParse = parseDoc(doc);
     } catch (e) {
-      console.error(`[step2] fetch 실패 at offset=${offset}:`, e);
-      updateProgress(`fetch 실패: ${e.message}`, 100);
-      break;
+      console.error(`[step2] LEVEL ${lvLabel} 첫 페이지 fetch 실패:`, e);
+      updateProgress(`LEVEL ${lvLabel} 첫 페이지 fetch 실패: ${e.message}`, pctOf(1));
+      alert(`LEVEL ${lvLabel} 첫 페이지 fetch 실패: ${e.message}`);
+      return false;
     }
+    allCharts.push(...firstParse.charts);
+    lvPageCount++;
+    pageCount++;
+    console.log(`[step2] LEVEL ${lvLabel} page ${lvPageCount} (offset=0): ${firstParse.charts.length}곡`);
+    updateProgress(`LEVEL ${lvLabel} page ${lvPageCount} (offset=0): ${firstParse.charts.length}곡`, pctOf(0.08));
+    if (firstParse.charts.length === 0) {
+      // LEVEL 12 의 첫 페이지가 비어있으면 로그인 / 페이지 구조 의심
+      if (lvLabel === LEVELS_TO_FETCH[0].label) {
+        alert('첫 페이지에서 곡을 못 찾았어요. 로그인 상태가 아니거나 페이지 구조가 변경됐을 수 있습니다.');
+        return false;
+      }
+      // LEVEL 11 등 추가 fetch 의 첫 페이지가 비면 그냥 skip
+      console.log(`[step2] LEVEL ${lvLabel} 데이터 없음 — skip`);
+      return true;
+    }
+    let hasNext = firstParse.hasNext;
+    lvOffset = STEP;
+
+    while (hasNext && lvPageCount < MAX_PAGES) {
+      // 사람처럼 페이지 사이에 대기 (요청 보내기 전에)
+      const wait = Math.round(randomDelay());
+      const waitStartTs = Date.now();
+      while (Date.now() - waitStartTs < wait) {
+        const remain = Math.ceil((wait - (Date.now() - waitStartTs)) / 1000);
+        updateProgress(
+          `LEVEL ${lvLabel} page ${lvPageCount + 1} (offset=${lvOffset}) 다음 요청까지 ${remain}초...`,
+          pctOf(lvPageCount / MAX_PAGES),
+        );
+        await new Promise((r) => setTimeout(r, 250));
+      }
+
+      const url = `${currentURL.origin}${currentURL.pathname}?difficult=${lvDifficult}&style=${style}&disp=${disp}&offset=${lvOffset}`;
+      try {
+        updateProgress(
+          `LEVEL ${lvLabel} page ${lvPageCount + 1} (offset=${lvOffset}) 요청 중...`,
+          pctOf((lvPageCount + 0.5) / MAX_PAGES),
+        );
+        const res = await fetch(url, { credentials: 'include' });
+        if (!res.ok) {
+          console.warn(`[step2] LEVEL ${lvLabel} HTTP ${res.status} at offset=${lvOffset}, 중단`);
+          updateProgress(`LEVEL ${lvLabel} HTTP ${res.status} 에러로 중단`, pctOf(1));
+          break;
+        }
+        const html = await res.text();
+        const doc = new DOMParser().parseFromString(html, 'text/html');
+        const parsed = parseDoc(doc);
+        allCharts.push(...parsed.charts);
+        lvPageCount++;
+        pageCount++;
+        console.log(`[step2] LEVEL ${lvLabel} page ${lvPageCount} (offset=${lvOffset}): ${parsed.charts.length}곡`);
+        updateProgress(
+          `LEVEL ${lvLabel} page ${lvPageCount} (offset=${lvOffset}): ${parsed.charts.length}곡 (총 ${allCharts.length}곡)`,
+          pctOf((lvPageCount + 1) / MAX_PAGES),
+        );
+        if (parsed.charts.length === 0) break;
+        hasNext = parsed.hasNext;
+        lvOffset += STEP;
+      } catch (e) {
+        console.error(`[step2] LEVEL ${lvLabel} fetch 실패 at offset=${lvOffset}:`, e);
+        updateProgress(`LEVEL ${lvLabel} fetch 실패: ${e.message}`, pctOf(1));
+        break;
+      }
+    }
+    console.log(`[step2] LEVEL ${lvLabel} 완료: ${lvPageCount}페이지`);
+    return true;
+  };
+
+  // 각 LEVEL 순차 실행 — 진행도 0~95% 까지 균등 분할
+  const SPAN = 95 / LEVELS_TO_FETCH.length;
+  for (let i = 0; i < LEVELS_TO_FETCH.length; i++) {
+    const { difficult: lvD, label: lvL } = LEVELS_TO_FETCH[i];
+    const ok = await fetchOneLevel(lvD, lvL, i * SPAN, (i + 1) * SPAN);
+    if (!ok) return; // 첫 LEVEL 실패하면 중단
   }
-  console.log(`[step2] 총 ${pageCount} 페이지 / ${allCharts.length}곡 파싱 완료`);
+  console.log(`[step2] 전 LEVEL 합산: ${pageCount}페이지 / ${allCharts.length}곡 파싱 완료`);
   updateProgress(`완료! ${pageCount}페이지 ${allCharts.length}곡`, 100);
   // 잠시 후 진행 패널 제거 (점수 패널이 같은 위치에 뜨므로)
   await new Promise(r => setTimeout(r, 500));
@@ -535,7 +569,12 @@
     unmatchedSamples.forEach(s => console.log('  -', s));
   }
 
-  // -------- 5.5. ★값 추정 (v3.3.1) --------
+  // -------- 5.5. ★값 추정 (v3.3.2) --------
+  // v3.3.2 변경:
+  //   - EC-only 사용자 (HC/EXH 클리어 < 10) 에 raw + max_clear 기반 선형 보정 추가
+  //     · 16명 EC-only 샘플 fit: true ≈ -0.158 + 0.761*raw_s + 0.250*fEc.max_clear
+  //     · MAE 0.637 → 0.374 (41% 감소), 11명 개선 / 3명 작은 악화
+  //     · 이레터★ 유무 무관 적용
   // v3.3.1 변경:
   //   - ohSorryRating.json (lv11/12 미등록 차트 추정) 통합 — fitData fallback + EC/HC 추천 풀 포함
   //   - 추정 하한 0.5 → 0.01 (LOW_FALLBACK + RAW_BOUNDS)
@@ -588,6 +627,9 @@
   // cutoff: n_cleared >= 50 (실전 평가에서 미달 시 v3.1.1 fallback)
   //
   let starEstimate = null;
+  // EC-only 사용자 (HC/EXH 클리어 부족) 식별 — 이레터★ 없을 때 EC 보정 적용용
+  let isEcOnlyValid = false;
+  let ecMaxClearForFallback = 0; // EC-only fallback 보정에 사용 (fEc.max_clear)
   let starRaw = null;
   if (fitData.length >= 30) {
     // ----- 모델 파라미터 (v3.2.9: v3.2.7 + ridge 음수 미적용) -----
@@ -642,6 +684,8 @@
       exh: byLamp.exh.filter(x => x.p === 1).length,
     };
     const validStages = ['ec', 'hc', 'exh'].filter(st => clearCounts[st] >= MIN_CLEAR_PER_LAMP);
+    // 이레터★ 없을 때 fallback 조건 식별 — EC 만 valid (HC/EXH 클리어 부족)
+    isEcOnlyValid = validStages.length === 1 && validStages[0] === 'ec';
 
     if (validStages.length === 0) {
       // 모든 lamp 에서 클리어 < 10: 저렙 fallback
@@ -742,6 +786,8 @@
       const fEc  = validStages.includes('ec')  ? lampFeats(byLamp.ec)  : { max_clear:0, min_fail:0, p50_clear:0, frac_clear:0, fail_below:0, clear_above:0 };
       const fHc  = validStages.includes('hc')  ? lampFeats(byLamp.hc)  : { max_clear:0, min_fail:0, p50_clear:0, frac_clear:0, fail_below:0, clear_above:0 };
       const fExh = validStages.includes('exh') ? lampFeats(byLamp.exh) : { max_clear:0, min_fail:0, p50_clear:0, frac_clear:0, fail_below:0, clear_above:0 };
+      // EC-only fallback 용 — fEc 가 이 scope 안에만 있어서 외부로 expose
+      ecMaxClearForFallback = fEc.max_clear;
 
       // v3.1 추가: AC (ASSIST 이상) / FC (FULL COMBO) feature 8개
       //   - pool: 시도한 곡 (lampNum > 0) 중 ★11.6 ~ ★12.7 + ereter 매칭
@@ -947,7 +993,7 @@
       // 출력 범위 클램프
       starEstimate = Math.max(0.0, Math.min(15.0, starEstimate));
 
-      console.log(`[step2] ★값 추정 (v3.3.1): ${starEstimate.toFixed(2)} (raw=${starRaw.toFixed(2)}, ridge 보정=${correction >= 0 ? '+' : ''}${correction.toFixed(3)}${ridgeMuted ? ' ★음소거' : ''}, post 보정=${postCorrection >= 0 ? '+' : ''}${postCorrection.toFixed(3)}, djBoost=${djBoost >= 0 ? '+' : ''}${djBoost.toFixed(3)}, 표본 ${fitData.length}, 사용 lamp: ${validStages.join('/')})`);
+      console.log(`[step2] ★값 추정 (v3.3.2): ${starEstimate.toFixed(2)} (raw=${starRaw.toFixed(2)}, ridge 보정=${correction >= 0 ? '+' : ''}${correction.toFixed(3)}${ridgeMuted ? ' ★음소거' : ''}, post 보정=${postCorrection >= 0 ? '+' : ''}${postCorrection.toFixed(3)}, djBoost=${djBoost >= 0 ? '+' : ''}${djBoost.toFixed(3)}, 표본 ${fitData.length}, 사용 lamp: ${validStages.join('/')})`);
       console.log(`[step2]   base: ec(max=${fEc.max_clear.toFixed(2)}, p50=${fEc.p50_clear.toFixed(2)}), hc(max=${fHc.max_clear.toFixed(2)}, p50=${fHc.p50_clear.toFixed(2)}), exh(max=${fExh.max_clear.toFixed(2)})`);
       console.log(`[step2]   AC/FC: ac_frac=${ac_frac.toFixed(3)}, ac_max=${ac_max_d.toFixed(2)}, fc_frac=${fc_frac.toFixed(3)}, fc_max=${fc_max_d.toFixed(2)}, fc_to_exh=${fc_to_exh_ratio.toFixed(3)}`);
       console.log(`[step2]   v3.2: M=${v32_M.toFixed(2)}, top10_avg=${v32_M_top10_avg.toFixed(2)}, gap_top10=${v32_gap_top10.toFixed(2)}, n_cleared=${n_cleared_v32}${isUnderCutoff ? ' (CUTOFF 미달!)' : ''}, prob_sum=${v32_prob_sum.toFixed(3)}`);
@@ -1030,6 +1076,24 @@
   // 추천곡 기준 ★값: ereter (이레터 원본) / ohsorry (우리 모델 추정) 토글로 선택 가능
   const idNormForRec = profile && profile.iidxId ? profile.iidxId.replace(/-/g, '') : null;
   const eraterTrueStar = (idNormForRec && ereterPlayers) ? ereterPlayers[idNormForRec] : null;
+
+  // EC-only 보정 — HC/EXH 클리어 부족 (validStages 가 ec 만) 인 사용자에게 적용.
+  // 16명 EC-only 샘플로 fit 한 linear regression: true ≈ -0.158 + 0.761*raw_s + 0.250*fEc.max_clear
+  // (정상 v3.3.1 est MAE 0.637 → 보정 후 MAE 0.374, 약 41% 감소; 11명 개선 / 3명 작은 악화)
+  // 정상 est 와 보정값 중 더 큰 쪽 채택 — collapse 방지 + 시스템 underestimate 보상.
+  // 이레터★ 유무 무관 (이레터에 등록된 EC-only 사용자에게도 동일 적용).
+  if (isEcOnlyValid && starRaw != null) {
+    const before = starEstimate;
+    const ecCorrected = -0.158 + 0.761 * starRaw + 0.250 * ecMaxClearForFallback;
+    const adjusted = Math.max(starEstimate, ecCorrected);
+    starEstimate = Math.max(0.01, Math.min(15.0, adjusted));
+    if (Math.abs(starEstimate - (before ?? 0)) > 0.005) {
+      console.log(
+        `[step2] ★값 EC-only 보정 적용 (HC/EXH 클리어 부족): ${before != null ? before.toFixed(2) : 'null'} → ${starEstimate.toFixed(2)} (raw=${starRaw.toFixed(2)}, max_clear=${ecMaxClearForFallback.toFixed(2)}, corrected=${ecCorrected.toFixed(2)})`,
+      );
+    }
+  }
+
   let recBaseMode = eraterTrueStar != null ? 'ereter' : 'ohsorry';
   let recBaseStar = recBaseMode === 'ereter' ? eraterTrueStar : starEstimate;
   console.log(`[step2] 추천곡 기준: ${recBaseMode} (★${recBaseStar != null ? recBaseStar.toFixed(2) : 'N/A'})`);
@@ -1275,7 +1339,8 @@
       document.addEventListener('touchstart', onDismiss, true);
     }, 0);
   };
-  const fmt = (n) => Math.round(n * 100) / 100;
+  // ★값 표시용 — 최소 0.1 (그 이하로 추정돼도 0.1 로 floor), 그 외 2자리 반올림
+  const fmt = (n) => Math.max(0.1, Math.round(n * 100) / 100);
   const escHtml = (s) => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const panel = document.createElement('div');
   panel.id = '__dp_score_panel';
@@ -1897,7 +1962,7 @@
       star_estimate: starEstimate != null ? Number(starEstimate.toFixed(4)) : null,
       ereter_star: eraterTrueStar != null ? Number(eraterTrueStar) : null,
       raw_s: starRaw != null ? Number(starRaw.toFixed(4)) : null,
-      version: 'v3.3.1',
+      version: 'v3.3.2',
       sp_rank: profile.spRank || null,
       dp_rank: profile.dpRank || null,
       n_cleared: nClearedLv12,
