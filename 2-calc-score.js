@@ -141,6 +141,27 @@
     console.warn('[step2] zasa fetch 실패 (무시 가능):', e.message);
   }
 
+  // -------- 0.6. ohSorryRating fetch (lv11 / lv12 미등록 차트의 추정 ec/hc) --------
+  // ereter 에 ★ 값이 없는 zasa 11.6~12.7 차트들의 EC/HC ★ 추정값.
+  // 용도: ★ 추정 모델 (fitData) 에서 ereter 매칭 실패 시 fallback. 점수 / 표시 / 추천 로직에는 사용 X.
+  // 실패해도 ohSorry 기존 동작에는 영향 없음.
+  const OHSORRY_RATING_URL = 'https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw/ohSorryRating.json';
+  let ohSorryRatings = [];
+  try {
+    const res = await fetch(OHSORRY_RATING_URL + '?t=' + Date.now(), { cache: 'no-store' });
+    if (res.ok) {
+      const raw = await res.json();
+      if (raw && Array.isArray(raw.ratings)) {
+        ohSorryRatings = raw.ratings;
+        console.log(
+          `[step2] ohSorry 추정 차트 ${ohSorryRatings.length}개 로드 (lv11/12 ereter 미등록 보강)`,
+        );
+      }
+    }
+  } catch (e) {
+    console.warn('[step2] ohSorryRating fetch 실패 (무시 가능):', e.message);
+  }
+
   // -------- 1. 곡명 정규화 + 인덱싱 --------
   const norm = (s) => (s || '')
     .toLowerCase()
@@ -198,6 +219,15 @@
     if (!c.title || !c.diff) continue;
     zasaMap.set(norm(c.title) + '|' + c.diff, c);
   }
+  // ohSorry 추정 차트 인덱스 (ereter 와 같은 키 형식, ec/hc 만 — exh 추정 X)
+  // ★ 추정 모델 (fitData) 의 fallback 으로만 사용. 다른 로직 영향 X.
+  const ratingMap = new Map();
+  for (const r of ohSorryRatings) {
+    if (!r.title || !r.diff) continue;
+    if (typeof r.estEc !== 'number' && typeof r.estHc !== 'number') continue;
+    ratingMap.set(norm(r.title) + '|' + r.diff, r);
+  }
+
   // ereter 에 없는 zasa 전용 차트 (★ 단위별 표의 곡 수 보강용)
   const zasaSupplemental = zasaData.filter((c) => {
     const k = norm(c.title) + '|' + c.diff;
@@ -442,9 +472,25 @@
   // ASSIST 는 ereter 에서 FAILED 로 처리됨 (모든 단계 fail)
   const fitData = [];
 
+  // ohSorry 추정값으로 보강된 fitData 카운트 (디버그용)
+  let ratingFitDataCount = 0;
   for (const c of allCharts) {
     const e = ereterMap.get(norm(c.title) + '|' + c.diff);
     if (!e) {
+      // ereter 미등록 — ohSorryRating 의 추정 ec/hc 로 ★ 추정용 fitData 만 보강
+      // 점수 / dp12 표시 / 추천 풀 등에는 영향 X (unmatched 로 처리됨).
+      const r = ratingMap.get(norm(c.title) + '|' + c.diff);
+      if (r && c.lampNum > 0 && r.zasaLevel >= 11.6 && r.zasaLevel <= 12.7) {
+        if (typeof r.estEc === 'number') {
+          fitData.push({ d: r.estEc, p: c.lampNum >= 3 ? 1 : 0, stage: 'ec' });
+          ratingFitDataCount++;
+        }
+        if (typeof r.estHc === 'number') {
+          fitData.push({ d: r.estHc, p: c.lampNum >= 5 ? 1 : 0, stage: 'hc' });
+          ratingFitDataCount++;
+        }
+        // EXH 는 추정 신뢰 부족으로 ohSorryRating 에 없음 — skip
+      }
       unmatched++;
       if (c.lampNum > 0 && unmatchedSamples.length < 10) {
         unmatchedSamples.push(`${c.title} [${c.diff}] (lamp=${c.lamp})`);
@@ -479,12 +525,21 @@
   details.sort((a, b) => b.score - a.score);
 
   console.log(`[step2] 매칭 ${matched} / 미매칭 ${unmatched} / 총점 ${total.toFixed(2)}`);
+  if (ratingFitDataCount > 0) {
+    console.log(
+      `[step2] ohSorryRating 보강: ereter 미등록 차트로부터 fitData ${ratingFitDataCount}개 추가 (★ 추정 향상)`,
+    );
+  }
   if (unmatchedSamples.length > 0) {
     console.log('미매칭된 곡 (플레이 흔적 있는 것 중):');
     unmatchedSamples.forEach(s => console.log('  -', s));
   }
 
-  // -------- 5.5. ★값 추정 (v3.2.10: v3.2.9 + 추천곡 로직 정리) --------
+  // -------- 5.5. ★값 추정 (v3.3.1) --------
+  // v3.3.1 변경:
+  //   - ohSorryRating.json (lv11/12 미등록 차트 추정) 통합 — fitData fallback + EC/HC 추천 풀 포함
+  //   - 추정 하한 0.5 → 0.01 (LOW_FALLBACK + RAW_BOUNDS)
+  //   - lv11 추정 차트 추천 시 곡명 연한 연두색 표시
   //
   // v3.2.10 변경 (★값 추정 모델 자체는 v3.2.9 그대로):
   //   - 추천곡 challenge offset 동적화: ★0.5 → +1.2, ★14.0 → +0.3 선형 보간
@@ -570,8 +625,8 @@
 
     const MARGIN_TH = 1.3;
     const MIN_CLEAR_PER_LAMP = 10;
-    const LOW_FALLBACK = 0.5;
-    const RAW_BOUNDS = [0.5, 14.5];
+    const LOW_FALLBACK = 0.01;
+    const RAW_BOUNDS = [0.01, 14.5];
 
     const alphaOf = (S, st) => {
       const [a0, a1, a2] = ALPHA_COEFF[st];
@@ -617,7 +672,7 @@
         return total;
       };
 
-      // grid search (0.5 ~ 14.5, step 0.01)
+      // grid search (0.01 ~ 14.5, step 0.01)
       const lo = Math.round(RAW_BOUNDS[0] * 100);
       const hi = Math.round(RAW_BOUNDS[1] * 100);
       let bestS = RAW_BOUNDS[0], bestNll = Infinity;
@@ -892,7 +947,7 @@
       // 출력 범위 클램프
       starEstimate = Math.max(0.0, Math.min(15.0, starEstimate));
 
-      console.log(`[step2] ★값 추정 (v3.2.10): ${starEstimate.toFixed(2)} (raw=${starRaw.toFixed(2)}, ridge 보정=${correction >= 0 ? '+' : ''}${correction.toFixed(3)}${ridgeMuted ? ' ★음소거' : ''}, post 보정=${postCorrection >= 0 ? '+' : ''}${postCorrection.toFixed(3)}, djBoost=${djBoost >= 0 ? '+' : ''}${djBoost.toFixed(3)}, 표본 ${fitData.length}, 사용 lamp: ${validStages.join('/')})`);
+      console.log(`[step2] ★값 추정 (v3.3.1): ${starEstimate.toFixed(2)} (raw=${starRaw.toFixed(2)}, ridge 보정=${correction >= 0 ? '+' : ''}${correction.toFixed(3)}${ridgeMuted ? ' ★음소거' : ''}, post 보정=${postCorrection >= 0 ? '+' : ''}${postCorrection.toFixed(3)}, djBoost=${djBoost >= 0 ? '+' : ''}${djBoost.toFixed(3)}, 표본 ${fitData.length}, 사용 lamp: ${validStages.join('/')})`);
       console.log(`[step2]   base: ec(max=${fEc.max_clear.toFixed(2)}, p50=${fEc.p50_clear.toFixed(2)}), hc(max=${fHc.max_clear.toFixed(2)}, p50=${fHc.p50_clear.toFixed(2)}), exh(max=${fExh.max_clear.toFixed(2)})`);
       console.log(`[step2]   AC/FC: ac_frac=${ac_frac.toFixed(3)}, ac_max=${ac_max_d.toFixed(2)}, fc_frac=${fc_frac.toFixed(3)}, fc_max=${fc_max_d.toFixed(2)}, fc_to_exh=${fc_to_exh_ratio.toFixed(3)}`);
       console.log(`[step2]   v3.2: M=${v32_M.toFixed(2)}, top10_avg=${v32_M_top10_avg.toFixed(2)}, gap_top10=${v32_gap_top10.toFixed(2)}, n_cleared=${n_cleared_v32}${isUnderCutoff ? ' (CUTOFF 미달!)' : ''}, prob_sum=${v32_prob_sum.toFixed(3)}`);
@@ -1016,8 +1071,23 @@
     const easyMin = baseStar - (isEC ? 0.1 : 0);
     for (const c of allCharts) {
       if (c.lampNum >= threshold) continue;
-      const e = ereterMap.get(norm(c.title) + '|' + c.diff);
-      if (!e || e.level == null) continue;
+      let e = ereterMap.get(norm(c.title) + '|' + c.diff);
+      let gameLevel = null; // ratingMap fallback 의 게임 LEVEL (11 / 12)
+      if (!e || e.level == null) {
+        // fallback: ohSorryRating 으로 lv11/12 미등록 차트 보강 (EC/HC 추천 풀에 포함)
+        const r = ratingMap.get(norm(c.title) + '|' + c.diff);
+        if (!r || typeof r.zasaLevel !== 'number') continue;
+        e = {
+          level: r.zasaLevel,
+          ec: typeof r.estEc === 'number' ? r.estEc : null,
+          hc: typeof r.estHc === 'number' ? r.estHc : null,
+          exh: null,
+          ec_n: r.nEcCleared || 0,
+          hc_n: r.nHcCleared || 0,
+          exh_n: 0,
+        };
+        gameLevel = r.gameLevel ?? null;
+      }
       if (e.level < 11.6 || e.level > 12.7) continue;
       const dv = e[getDiffField];
       if (typeof dv !== 'number') continue;
@@ -1027,6 +1097,7 @@
         ec_n: e.ec_n, hc_n: e.hc_n, exh_n: e.exh_n,
         diffValue: dv, currentLamp: c.lamp,
         margin: baseStar - dv,
+        gameLevel, // 11 이면 lv11 추정 차트 (ohSorryRating fallback) → UI 에서 색상 구분
       };
       // 하드 우선 (overlap 시 약 도전과 중복 방지)
       if (dv >= hardMin && dv <= hardMax && dv > easyMax) {
@@ -1432,10 +1503,13 @@
         return recs.map(r => {
           const chartLetter = (r.chart || '?')[0];
           const cColor = chartColor(r.chart);
+          // lv11 추정 차트: 곡명을 연한 연두색으로 (ohSorryRating fallback 표시)
+          const titleStyle = r.gameLevel === 11 ? ' style="color:#c5e1a5"' : '';
+          const titleTooltip = r.gameLevel === 11 ? ' title="ohSorry 추정 ★ (게임 LEVEL 11, ereter 미등록)"' : '';
           return `
             <div class="rec-item">
               <span class="rec-chart" style="color:${cColor}" title="${r.chart || ''}">${chartLetter}</span>
-              <div class="rec-title">${escHtml(r.title)}<span style="color:#aaa;font-weight:400;margin-left:4px;font-size:10.5px">${r.currentLamp || ''}</span></div>
+              <div class="rec-title"${titleTooltip}><span${titleStyle}>${escHtml(r.title)}</span><span style="color:#aaa;font-weight:400;margin-left:4px;font-size:10.5px">${r.currentLamp || ''}</span></div>
               <span class="rec-diff" style="color:${color}" title="실력 ★">★${r.diffValue.toFixed(2)}</span>
               <span class="rec-level" title="서열표 ☆">☆${r.level.toFixed(1)}</span>
             </div>
@@ -1823,7 +1897,7 @@
       star_estimate: starEstimate != null ? Number(starEstimate.toFixed(4)) : null,
       ereter_star: eraterTrueStar != null ? Number(eraterTrueStar) : null,
       raw_s: starRaw != null ? Number(starRaw.toFixed(4)) : null,
-      version: 'v3.2.10',
+      version: 'v3.3.1',
       sp_rank: profile.spRank || null,
       dp_rank: profile.dpRank || null,
       n_cleared: nClearedLv12,

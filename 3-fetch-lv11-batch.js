@@ -1,9 +1,12 @@
 // ============================================================
-// 3-fetch-lv12-batch.js  (브라우저 콘솔에서 실행)
+// 3-fetch-lv11-batch.js  (브라우저 콘솔에서 실행)
 // ------------------------------------------------------------
-//   ereter.net 의 /level/12/ 페이지를 104개 사용자에 대해 순회 fetch.
+//   ereter.net 의 /level/11/ 페이지를 104개 사용자에 대해 순회 fetch.
 //   각 페이지에서 곡별 lamp / EX score / 스코어 랭크 추출.
-//   완료 후 lv12-batch.json 파일로 자동 다운로드.
+//   완료 후 lv11-batch.json 파일로 자동 다운로드.
+//
+//   목적: zasa★ 11.6~12.1 인 곡 중 게임 LEVEL=11 로 분류된 차트의
+//        모집단 lamp 분포를 ereter 에서 추가 확보 (test-fill-stars.js 보강용).
 //
 //   실행 위치: ereter.net 어느 페이지에서나 (CORS 회피 위해 같은 도메인)
 //   소요 시간: 104명 × 1.5초 ≈ 3분
@@ -21,15 +24,15 @@
   }
 
   // ---------- 진행 패널 ----------
-  document.getElementById('__lv12_progress')?.remove();
+  document.getElementById('__lv11_progress')?.remove();
   const panel = document.createElement('div');
-  panel.id = '__lv12_progress';
+  panel.id = '__lv11_progress';
   panel.style.cssText = 'position:fixed;top:10px;right:10px;z-index:99999;background:#1a1a1a;color:#eee;padding:14px 18px;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,.5);font:13px/1.5 monospace;min-width:300px';
-  panel.innerHTML = '<div style="font-weight:bold;margin-bottom:6px;color:#ffd166">lv12 batch fetch</div><div id="__lv12_status">준비 중...</div><div id="__lv12_log" style="margin-top:8px;max-height:200px;overflow-y:auto;font-size:11px;color:#aaa"></div>';
+  panel.innerHTML = '<div style="font-weight:bold;margin-bottom:6px;color:#ffd166">lv11 batch fetch</div><div id="__lv11_status">준비 중...</div><div id="__lv11_log" style="margin-top:8px;max-height:200px;overflow-y:auto;font-size:11px;color:#aaa"></div>';
   document.body.appendChild(panel);
-  const setStatus = (s) => { document.getElementById('__lv12_status').textContent = s; };
+  const setStatus = (s) => { document.getElementById('__lv11_status').textContent = s; };
   const log = (s, color) => {
-    const l = document.getElementById('__lv12_log');
+    const l = document.getElementById('__lv11_log');
     const line = document.createElement('div');
     if (color) line.style.color = color;
     line.textContent = s;
@@ -37,7 +40,7 @@
     l.scrollTop = l.scrollHeight;
   };
 
-  // ---------- 파서 (parse-raw-lv12.js 와 동일 로직) ----------
+  // ---------- 파서 (parse-raw-lv12.js 와 동일 로직 — 페이지 구조 동일) ----------
   const ENTITY = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#039;': "'", '&apos;': "'", '&nbsp;': ' ' };
   const decode = (s) =>
     s
@@ -72,7 +75,7 @@
     return { title, diff, level, rank, exScore, pgreat, great, scorePercent, scoreRank, lampNum, lampText };
   }
 
-  function parseLv12(html, iidxId) {
+  function parseLv11(html, iidxId) {
     const djMatch = html.match(/<h3>([^<]+?)<\/h3>\s*<h5>\(IIDX ID\s*:/);
     const djName = djMatch ? decode(djMatch[1].trim()) : null;
     const tStart = html.indexOf('data-sort="table"');
@@ -98,10 +101,10 @@
     const id = IDS[i];
     setStatus(`[${i+1}/${IDS.length}] ${id} fetch 중... (성공 ${success}, 실패 ${failed})`);
     try {
-      const r = await fetch(`/iidxplayerdata/${id}/level/12/`, { credentials: 'same-origin' });
+      const r = await fetch(`/iidxplayerdata/${id}/level/11/`, { credentials: 'same-origin' });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const html = await r.text();
-      const data = parseLv12(html, id);
+      const data = parseLv11(html, id);
       results.push(data);
       success++;
       log(`[${i+1}/${IDS.length}] ${id} ${data.djName}: ${data.chartCount}곡`, '#bfffb4');
@@ -115,17 +118,17 @@
 
   setStatus(`완료: 성공 ${success} / 실패 ${failed} — 다운로드 중...`);
 
-  const payload = { collectedAt: new Date().toISOString(), source: 'ereter.net /level/12/', count: results.length, users: results };
+  const payload = { collectedAt: new Date().toISOString(), source: 'ereter.net /level/11/', count: results.length, users: results };
   const json = JSON.stringify(payload, null, 2);
 
   // 파일 다운로드
   const blob = new Blob([json], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  a.href = url; a.download = 'lv12-batch.json'; a.click();
+  a.href = url; a.download = 'lv11-batch.json'; a.click();
   URL.revokeObjectURL(url);
 
-  setStatus(`✅ lv12-batch.json 다운로드됨 (성공 ${success}/${IDS.length})`);
-  console.log('window.__lv12_results 에 결과 보관됨');
-  window.__lv12_results = payload;
+  setStatus(`✅ lv11-batch.json 다운로드됨 (성공 ${success}/${IDS.length})`);
+  console.log('window.__lv11_results 에 결과 보관됨');
+  window.__lv11_results = payload;
 })();

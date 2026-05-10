@@ -11,6 +11,9 @@ loocv-base.json
 loocv-extra.json
 ereter-data.json
 
+# 분석 결과 / dev artifacts (test-fill-stars.js 등)
+dist/
+
 # 운영 / 캐시
 node_modules/
 .DS_Store

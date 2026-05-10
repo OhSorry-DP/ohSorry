@@ -1,15 +1,15 @@
 // ============================================================
 // STEP 3 (선택): zasa.sakura.ne.jp/dp/run.php 보충 데이터 추출
 // ============================================================
-// ereter.net 에 없는 ☆12 차트를 보완하기 위해 zasa 의 비공식 난이도표를 긁어옵니다.
-// 결과는 추천곡 / ★값 추정에는 사용 X — 오로지 "★ 단위별 클리어 램프 표" 의 곡 수
-// 보강용으로만 사용 (ereter 미등록 차트 검증).
+// ereter.net 에 없는 차트를 보완하기 위해 zasa 의 비공식 난이도표를 긁어옵니다.
+// zasa 페이지에는 ☆10/11/12 차트가 모두 있고, 각각 decimal 난이도 (11.7, 12.3 등) 가 매겨져 있어요.
+// 우리는 이 중 decimal 11.6~12.7 차트만 추출하되, 게임 LEVEL (☆10/11/12) 도 함께 보존해서
+// 나중에 레벨별로 분리해 검증할 수 있게 합니다.
 //
 // 사용 방법:
 //   1. https://zasa.sakura.ne.jp/dp/run.php 페이지 열기
 //   2. F12 → Console → 이 스크립트 붙여넣기 + Enter
-//   3. 클립보드에 복사된 JSON 을 Gist 의 새 파일 zasa-data.json 에 붙여넣기
-//   4. 2-calc-score.js 가 이 데이터를 함께 fetch (Gist 같은 위치)
+//   3. 클립보드에 복사된 JSON 을 Gist 의 zasa-data.json 에 붙여넣기 (또는 __zasa_download())
 // ============================================================
 
 (async () => {
@@ -47,20 +47,32 @@
       if (!span) continue;
       const diff = SPAN_TO_DIFF[span.className];
       if (!diff) continue;
-      const m = span.textContent.trim().match(/☆12 \(([0-9]+\.[0-9]+)\)/);
+      // 게임 LEVEL 무관 — ☆10/11/12 등 어느 prefix 든 매칭. gameLevel 도 같이 캡처.
+      // (이전 버전은 ☆12 prefix 만 잡아서 게임 L11 의 zasa★ 11.6~12.1 차트가 다 누락됐음.)
+      const m = span.textContent.trim().match(/☆(\d+)\s*\(([0-9]+\.[0-9]+)\)/);
       if (!m) continue;
-      const level = parseFloat(m[1]);
+      const gameLevel = parseInt(m[1], 10);
+      const level = parseFloat(m[2]);
       if (!Number.isFinite(level) || level < 11.6 || level > 12.7) continue;
-      charts.push({ title, diff, level });
+      charts.push({ title, diff, gameLevel, level });
     }
   });
 
-  console.log(`[zasa] 추출된 ☆12 차트 (★11.6~12.7): ${charts.length}개`);
+  // 게임 LEVEL 별 분포 통계
+  const byGameLevel = {};
+  for (const c of charts) {
+    byGameLevel[c.gameLevel] = (byGameLevel[c.gameLevel] || 0) + 1;
+  }
+  console.log(`[zasa] 추출된 차트 (decimal ★11.6~12.7): ${charts.length}개`);
+  for (const k of Object.keys(byGameLevel).sort()) {
+    console.log(`   게임 LEVEL ${k}: ${byGameLevel[k]}곡`);
+  }
 
   const payload = {
     extractedAt: new Date().toISOString(),
     source: location.href,
     count: charts.length,
+    countByGameLevel: byGameLevel,
     charts,
   };
   const json = JSON.stringify(payload);
@@ -70,12 +82,8 @@
     .then(() => {
       console.log('%c[zasa] ✅ JSON 이 클립보드에 복사되었습니다!', 'color:#1d9e75;font-weight:bold;font-size:14px');
       console.log(`   추출 일시: ${payload.extractedAt}`);
-      console.log(`   차트 수:   ${payload.count}`);
-      console.log('Gist 에 zasa-data.json 파일을 새로 만들거나 갱신하세요.');
-      console.log('  1) https://gist.github.com 에서 해당 Gist 편집');
-      console.log('  2) "Add file" → 파일명 zasa-data.json');
-      console.log('  3) Ctrl+V');
-      console.log('  4) "Update gist" 클릭');
+      console.log(`   총 차트 수: ${payload.count}`);
+      console.log('Gist 의 zasa-data.json 을 갱신하거나 __zasa_download() 로 파일 저장.');
     })
     .catch((err) => {
       console.warn('클립보드 복사 실패. 수동으로 JSON 을 복사하세요:');
