@@ -1555,8 +1555,10 @@
       #__dp_score_panel .profile-star-value { font-size: 22px; font-weight: 700; color: #212529; line-height: 1.1; margin: 2px 0; }
       #__dp_score_panel .profile-star-note { font-size: 9px; color: #888; line-height: 1.1; }
       /* ノーツレーダー — 기본 숨김, 프로필 카드의 토글 버튼으로 노출 (.open 클래스) */
-      #__dp_score_panel .notes-radar { display: none; gap: 6px; padding: 0 8px 8px 8px; background: #f8f9fb; border-radius: 0 0 6px 6px; margin-top: 0; margin-bottom: 10px; }
+      #__dp_score_panel .notes-radar { display: none; gap: 6px; padding: 0 8px 8px 8px; background: #f8f9fb; border-radius: 0 0 6px 6px; margin-top: 0; margin-bottom: 10px; position: relative; }
       #__dp_score_panel .notes-radar.open { display: flex; }
+      #__dp_score_panel .nr-close { position: absolute; top: 4px; right: 6px; z-index: 2; background: none; border: none; padding: 0; cursor: pointer; color: #888; font-size: 14px; line-height: 1; }
+      #__dp_score_panel .nr-close:hover { color: #212529; }
       #__dp_score_panel .nr-box { flex: 1; min-width: 0; background: transparent; padding: 4px 6px; margin: 0; display: flex; flex-direction: column; gap: 4px; align-items: center; }
       #__dp_score_panel .nr-header { text-align: center; font-weight: 700; font-size: 12px; letter-spacing: 1.5px; }
       #__dp_score_panel .nr-header.sp { color: #52a447; }
@@ -1770,6 +1772,7 @@
       };
       return `
         <div class="notes-radar">
+          <button type="button" class="nr-close" onclick="window.__dp_hideRadar()" title="노트레이더 숨기기">×</button>
           ${renderBox('SP', profile.spRadar)}
           ${renderBox('DP', profile.dpRadar)}
         </div>
@@ -2182,24 +2185,29 @@
   document.body.appendChild(panel);
 
   // 상세통계 토글 — 프로필 카드의 "상세통계 ▼" 클릭 시 .notes-radar + #__detail_stats 둘 다 같이 보이기/숨기기
+  // 노트레이더 안의 X 버튼 (window.__dp_hideRadar) 은 노트레이더만 숨김 — 토글 상태에는 영향 X
   if (panel.querySelector('#__detail_stats')) {
     panel.querySelector('#__detail_stats').style.display = 'none';
   }
+  let __radarToggleOpen = false;  // X 와 독립적인 토글 자체 상태
   window.__dp_toggleRadar = () => {
+    __radarToggleOpen = !__radarToggleOpen;
     const nr = panel.querySelector('.notes-radar');
     const ds = panel.querySelector('#__detail_stats');
     const btn = panel.querySelector('.profile-star .nr-toggle');
-    if (!btn) return;
-    let isOpen;
-    if (nr) {
-      isOpen = nr.classList.toggle('open');
-    } else if (ds) {
-      isOpen = ds.style.display === 'none';
+    if (__radarToggleOpen) {
+      if (nr) nr.classList.add('open');
+      if (ds) ds.style.display = '';
+      if (btn) btn.textContent = '상세통계 ▲';
     } else {
-      return;
+      if (nr) nr.classList.remove('open');
+      if (ds) ds.style.display = 'none';
+      if (btn) btn.textContent = '상세통계 ▼';
     }
-    if (ds) ds.style.display = isOpen ? '' : 'none';
-    btn.textContent = isOpen ? '상세통계 ▲' : '상세통계 ▼';
+  };
+  window.__dp_hideRadar = () => {
+    const nr = panel.querySelector('.notes-radar');
+    if (nr) nr.classList.remove('open');
   };
 
   // 표시 순서: 프로필 → 노트레이더 → 상세통계 → 추천곡 (제일 아래)
