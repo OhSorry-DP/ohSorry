@@ -141,25 +141,70 @@
     console.warn('[step2] zasa fetch 실패 (무시 가능):', e.message);
   }
 
-  // -------- 0.6. ohSorryRating fetch (lv11 / lv12 미등록 차트의 추정 ec/hc) --------
-  // ereter 에 ★ 값이 없는 zasa 11.6~12.7 차트들의 EC/HC ★ 추정값.
-  // 용도: ★ 추정 모델 (fitData) 에서 ereter 매칭 실패 시 fallback. 점수 / 표시 / 추천 로직에는 사용 X.
-  // 실패해도 ohSorry 기존 동작에는 영향 없음.
-  const OHSORRY_RATING_URL = 'https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw/ohSorryRating.json';
-  let ohSorryRatings = [];
-  try {
-    const res = await fetch(OHSORRY_RATING_URL + '?t=' + Date.now(), { cache: 'no-store' });
-    if (res.ok) {
-      const raw = await res.json();
-      if (raw && Array.isArray(raw.ratings)) {
-        ohSorryRatings = raw.ratings;
-        console.log(
-          `[step2] ohSorry 추정 차트 ${ohSorryRatings.length}개 로드 (lv11/12 ereter 미등록 보강)`,
-        );
+  // -------- 0.6. ohSorryRating 데이터 + 외부 ★ 추정 lib fetch (localStorage 캐시) --------
+  // v3.3.4: user ★ 추정 로직을 외부 lib 으로 분리. 본체는 fetch + ensemble (oldOSR + OSR) / 2 만.
+  //   fetch 실패 시 localStorage 캐시 사용. 캐시도 없으면 ohSorry 동작 불가 (에러 표시).
+  const GIST_RAW = 'https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw';
+  const OHSORRY_RATING_URL = GIST_RAW + '/ohSorryRating.json';
+  const CALC_OLD_OSR_URL = GIST_RAW + '/calc-Old-OSR.js';
+  const CALC_OSR_URL = GIST_RAW + '/calc-OSRating.js';
+
+  // localStorage 캐시 헬퍼 — fetch 실패 시 이전 성공 결과 복원
+  const loadWithCache = async (url, cacheKey, isJson) => {
+    try {
+      const res = await fetch(url + '?t=' + Date.now(), { cache: 'no-store' });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const data = isJson ? await res.json() : await res.text();
+      try {
+        localStorage.setItem(cacheKey, isJson ? JSON.stringify(data) : data);
+        localStorage.setItem(cacheKey + ':ts', new Date().toISOString());
+      } catch {}
+      return { data, source: 'fetch' };
+    } catch (e) {
+      const cached = localStorage.getItem(cacheKey);
+      if (cached != null) {
+        const ts = localStorage.getItem(cacheKey + ':ts') || '시간 불명';
+        console.warn(`[step2] ${cacheKey} fetch 실패 (${e.message}) → localStorage 캐시 사용 (${ts})`);
+        return { data: isJson ? JSON.parse(cached) : cached, source: 'cache' };
       }
+      throw new Error(`${cacheKey}: fetch 실패 + 캐시 없음 — ${e.message}`);
+    }
+  };
+
+  // ohSorryRating.json — chart 별 EC/HC/EXH 추정값 (v0.0.2)
+  let ohSorryRatings = [], ratingData = null;
+  try {
+    const { data, source } = await loadWithCache(OHSORRY_RATING_URL, 'ohSorry:ratingData', true);
+    ratingData = data;
+    if (data && Array.isArray(data.ratings)) {
+      ohSorryRatings = data.ratings;
+      console.log(`[step2] ohSorryRating ${ohSorryRatings.length}곡 로드 (${source})`);
     }
   } catch (e) {
-    console.warn('[step2] ohSorryRating fetch 실패 (무시 가능):', e.message);
+    console.error('[step2] ohSorryRating 로드 실패:', e.message);
+  }
+
+  // calc-Old-OSR.js (v3.3.3 모델) + calc-OSRating.js (v0.0.2 모델) lib fetch + eval
+  //   eval 은 UMD wrapper 라 window.oldOSR / window.ohSorryRating 글로벌 등록
+  let oldOSR = null, ohSorryRatingLib = null;
+  try {
+    const { data: oldOSRSrc, source: oldSrc } = await loadWithCache(CALC_OLD_OSR_URL, 'ohSorry:libOldOSR', false);
+    // UMD 가 window 에 등록 — IIFE 실행
+    (new Function(oldOSRSrc))();
+    oldOSR = window.oldOSR;
+    if (!oldOSR) throw new Error('oldOSR global 등록 실패');
+    console.log(`[step2] calc-Old-OSR.js v${oldOSR.VERSION} 로드 (${oldSrc})`);
+  } catch (e) {
+    console.error('[step2] calc-Old-OSR.js 로드 실패:', e.message);
+  }
+  try {
+    const { data: osrSrc, source: newSrc } = await loadWithCache(CALC_OSR_URL, 'ohSorry:libOSR', false);
+    (new Function(osrSrc))();
+    ohSorryRatingLib = window.ohSorryRating;
+    if (!ohSorryRatingLib) throw new Error('ohSorryRating global 등록 실패');
+    console.log(`[step2] calc-OSRating.js 로드 (${newSrc})`);
+  } catch (e) {
+    console.error('[step2] calc-OSRating.js 로드 실패:', e.message);
   }
 
   // -------- 1. 곡명 정규화 + 인덱싱 --------
@@ -507,43 +552,20 @@
   // 사용자가 시도한 곡(NO PLAY 제외)에 대해 EC/HC/EXH 각 단계마다 한 점씩
   // ASSIST 는 ereter 에서 FAILED 로 처리됨 (모든 단계 fail)
   //
-  // 4개의 fitData scope 를 동시에 수집해서 동일 모델로 각각 추정 → 비교 표시:
-  //   - fitDataEreterOnly: 이레터넷 등록곡만 (lv12 내부의 ★11.6~12.7)
-  //   - fitDataLv12Only:   이레터 + gameLevel===12 ratingMap (lv12 전체 곡)
-  //   - fitDataAll:        이레터 + ratingMap (lv11+lv12 / ★11.6~12.7 전체)
-  // 통계/매칭 카운트/Supabase 업로드 등 다른 로직은 useOnlyLv12 모드 그대로.
-  const fitDataEreterOnly = [];
-  const fitDataLv12Only = [];
-  const fitDataAll = [];
+  // v3.3.4: fitData 생성 + runStarModel 호출은 외부 lib (calc-Old-OSR.js / calc-OSRating.js) 안에서 수행.
+  // 본체에서는 matched / unmatched / perLamp / details / score 통계만 계산 — 점수 합계 + UI 표시 용도.
 
-  // 모드 결정 — LEVEL 12 플레이 곡 ≥ 30 이면 lv12 only (이레터 등록곡만), else lv11+lv12 통합
-  // 영향 범위: matched / unmatched / 통계 / Supabase 카운트 (fitData 는 위 4종 모두 항상 수집됨)
+  // 모드 결정 — LEVEL 12 플레이 곡 ≥ 30 이면 lv12 only 통계, else lv11+lv12 통합 통계
   const nLv12PlayedAll = allCharts.filter((c) => c.gameLevel === 12 && c.lampNum > 0).length;
   const useOnlyLv12 = nLv12PlayedAll >= 30;
   console.log(
-    `[step2] LEVEL 12 플레이 ${nLv12PlayedAll}곡 → ${useOnlyLv12 ? 'lv12 only (이레터 대상곡만)' : 'lv11+lv12 통합 (ohSorryRating 포함)'} 모드`,
+    `[step2] LEVEL 12 플레이 ${nLv12PlayedAll}곡 → ${useOnlyLv12 ? 'lv12 only (이레터 대상곡만)' : 'lv11+lv12 통합'} 통계 모드`,
   );
 
-  // ohSorry 추정값으로 보강된 fitDataAll 카운트 (디버그용)
-  let ratingFitDataCount = 0;
   for (const c of allCharts) {
     const skipForStats = useOnlyLv12 && c.gameLevel !== 12;
-
     const e = ereterMap.get(norm(c.title) + '|' + c.diff);
     if (!e) {
-      // ereter 미등록 — ratingMap fallback
-      const r = ratingMap.get(norm(c.title) + '|' + c.diff);
-      if (r && c.lampNum > 0 && r.zasaLevel >= 11.6 && r.zasaLevel <= 12.7) {
-        const items = [];
-        if (typeof r.estEc === 'number') items.push({ d: r.estEc, p: c.lampNum >= 3 ? 1 : 0, stage: 'ec' });
-        if (typeof r.estHc === 'number') items.push({ d: r.estHc, p: c.lampNum >= 5 ? 1 : 0, stage: 'hc' });
-        if (items.length > 0) {
-          fitDataAll.push(...items);
-          if (c.gameLevel === 12) fitDataLv12Only.push(...items);
-          // 이레터 only set: ratingMap fallback skip
-          ratingFitDataCount += items.length;
-        }
-      }
       if (!skipForStats) {
         unmatched++;
         if (c.lampNum > 0 && unmatchedSamples.length < 10) {
@@ -565,36 +587,10 @@
         });
       }
     }
-
-    // ★값 추정용 데이터 수집 (NO PLAY 제외, ★11.6 ~ ★12.7)
-    // ereter 의 ASSIST → FAILED 처리 규칙 적용:
-    //   lamp >= 3: EC pass / lamp <  3: EC fail (ASSIST 포함)
-    //   lamp >= 5: HC pass / lamp <  5: HC fail
-    //   lamp >= 6: EXH pass / lamp < 6: EXH fail
-    // 4개 scope 모두 동일하게 수집 (이레터곡은 모두 lv12 내부 ★11.6~12.7 — 모든 set 에 들어감)
-    if (c.lampNum > 0 && e.level != null && e.level >= 11.6 && e.level <= 12.7) {
-      const items = [];
-      if (typeof e.ec  === 'number') items.push({ d: e.ec,  p: c.lampNum >= 3 ? 1 : 0, stage: 'ec' });
-      if (typeof e.hc  === 'number') items.push({ d: e.hc,  p: c.lampNum >= 5 ? 1 : 0, stage: 'hc' });
-      if (typeof e.exh === 'number') items.push({ d: e.exh, p: c.lampNum >= 6 ? 1 : 0, stage: 'exh' });
-      if (items.length > 0) {
-        fitDataEreterOnly.push(...items);
-        fitDataAll.push(...items);
-        if (c.gameLevel === 12) fitDataLv12Only.push(...items);
-      }
-    }
   }
-
-  // primary fitData — 기존 useOnlyLv12 분기 그대로 유지
-  const fitData = useOnlyLv12 ? fitDataLv12Only : fitDataAll;
   details.sort((a, b) => b.score - a.score);
 
   console.log(`[step2] 매칭 ${matched} / 미매칭 ${unmatched} / 총점 ${total.toFixed(2)}`);
-  if (ratingFitDataCount > 0) {
-    console.log(
-      `[step2] ohSorryRating 보강: ereter 미등록 차트로부터 fitData ${ratingFitDataCount}개 추가 (★ 추정 향상)`,
-    );
-  }
   if (unmatchedSamples.length > 0) {
     console.log('미매칭된 곡 (플레이 흔적 있는 것 중):');
     unmatchedSamples.forEach(s => console.log('  -', s));
@@ -672,453 +668,61 @@
   //
   // cutoff: n_cleared >= 50 (실전 평가에서 미달 시 v3.1.1 fallback)
   //
-  // ★ 추정 모델 함수 — fit (fitData JSON) 를 받아서 starEstimate 계산
-  // useOnlyLv12 / 11.6+ 전체 / 이레터넷만 등 다양한 scope 의 fitData 로 호출 가능
-  // opts.silent: true 면 모든 console.log 억제 (secondary 비교용 호출에 사용)
-  // opts.label : 로그 prefix 에 추가
-  const runStarModel = (fit, opts) => {
-    const silent = !!(opts && opts.silent);
-    const labelTag = opts && opts.label ? `[${opts.label}] ` : '';
-    const log = silent ? () => {} : (...a) => console.log(...a);
-    let starEstimate = null;
-    // EC-only 사용자 (HC/EXH 클리어 부족) 식별 — 이레터★ 없을 때 EC 보정 적용용
-    let isEcOnlyValid = false;
-    let ecMaxClearForFallback = 0; // EC-only fallback 보정에 사용 (fEc.max_clear)
-    let starRaw = null;
-    let validStages = [];
-    if (fit.length >= 30) {
-    // ----- 모델 파라미터 (v3.2.9: v3.2.7 + ridge 음수 미적용) -----
-    //
-    // ALPHA_COEFF 는 v3.1.1 그대로 (HC × 2)
-    const ALPHA_COEFF = {
-      ec:  [ 194.445153,   41.489739,    6.085698],
-      hc:  [ 119.451394,  295.165202,  -20.796304],  // × 2
-      exh: [   2.722775,    0.444754,    3.689284],
-    };
+  // v3.3.4: ★ 추정 모델 (runStarModel) 은 외부 lib (calc-Old-OSR.js, calc-OSRating.js) 으로 분리됨.
+  //   본체에는 stub 만 — 아래 dead code 는 일괄 제거. 외부 lib fetch + ensemble 흐름은 step2 끝에서 처리.
 
-    // Ridge 회귀 계수 (intercept 포함, 36차원, α=5.0)
-    // 순서: [intercept, raw_s, raw_s_sq,
-    //         (ec)  max_d_clear, min_d_fail, p50_d_clear, frac_clear, fail_below, clear_above,
-    //         (hc)  max_d_clear, min_d_fail, p50_d_clear, frac_clear, fail_below, clear_above,
-    //         (exh) max_d_clear, min_d_fail, p50_d_clear, frac_clear, fail_below, clear_above,
-    //         (AC)  ac_frac, ac_max_d, ac_p50_d,
-    //         (FC)  fc_frac, fc_max_d, fc_p50_d, fc_fail_near, fc_to_exh_ratio,
-    //         (v3.2) M, M_top10_avg, gap_top10, gap×is_ec, gap×is_hc, gap×is_exh, prob_sum]
-    const RIDGE_COEF = [
-      -0.006071, -0.464910, -0.011718,
-      +0.112154, -0.007165, -0.046545, -0.059173, -0.049017, +0.224936,
-      +0.056395, -0.009976, +0.050729, -0.032504, -0.007578, -0.000059,
-      +0.003160, +0.001351, -0.030269, +0.034971, -0.054444, +0.024824,
-      // AC/FC
-      -0.060741, -0.016712, -0.112941,
-      +0.019729, +0.132479, -0.115328, -0.038194, +0.036031,
-      // v3.2 추가 (M, M_top10_avg, gap_top10, gap×is_ec, gap×is_hc, gap×is_exh, prob_sum)
-      +0.210155, +0.368437, -0.139323, -0.019140, -0.092587, -0.027596, -0.004606,
-    ];
-
-    const CUTOFF_N_CLEARED = 50;
-    const SIGMA_PROB = 1.0;
-    const PROB_NOISE_THRESHOLD = 0.99;
-
-    const MARGIN_TH = 1.3;
-    const MIN_CLEAR_PER_LAMP = 10;
-    const LOW_FALLBACK = 0.01;
-    const RAW_BOUNDS = [0.01, 14.5];
-
-    const alphaOf = (S, st) => {
-      const [a0, a1, a2] = ALPHA_COEFF[st];
-      return Math.max(a2 * S * S + a1 * S + a0, 0.1);
-    };
-
-    // lamp 별 데이터 분리
-    const byLamp = { ec: [], hc: [], exh: [] };
-    for (const { d, p, stage } of fit) byLamp[stage].push({ d, p });
-    const clearCounts = {
-      ec:  byLamp.ec.filter(x => x.p === 1).length,
-      hc:  byLamp.hc.filter(x => x.p === 1).length,
-      exh: byLamp.exh.filter(x => x.p === 1).length,
-    };
-    const validStages = ['ec', 'hc', 'exh'].filter(st => clearCounts[st] >= MIN_CLEAR_PER_LAMP);
-    // 이레터★ 없을 때 fallback 조건 식별 — EC 만 valid (HC/EXH 클리어 부족)
-    isEcOnlyValid = validStages.length === 1 && validStages[0] === 'ec';
-
-    if (validStages.length === 0) {
-      // 모든 lamp 에서 클리어 < 10: 저렙 fallback
-      starRaw = LOW_FALLBACK;
-      starEstimate = LOW_FALLBACK;
-      log(`[step2] ${labelTag}★값 추정: ${LOW_FALLBACK.toFixed(2)} (저렙 fallback, 모든 lamp 에서 클리어 < ${MIN_CLEAR_PER_LAMP} 곡)`);
-    } else {
-      // 1단계: raw S grid search (negative log-likelihood 최소화)
-      // alpha 가 매우 큰 값이라 z 가 쉽게 ±수백에 도달 — clamp 로 안정화
-      const Z_CLAMP = 50;
-      const negLogLik = (S) => {
-        let total = 0;
-        for (const st of validStages) {
-          const a = alphaOf(S, st);
-          for (const { d, p } of byLamp[st]) {
-            // z = a × (d - S);  prob = 1/(1+exp(z))
-            // log_sigmoid(z) = -softplus(z),  log_1m(z) = z - softplus(z)
-            // softplus 안정형: max(z,0) + log(1+exp(-|z|))
-            let z = a * (d - S);
-            if (z > Z_CLAMP) z = Z_CLAMP;
-            else if (z < -Z_CLAMP) z = -Z_CLAMP;
-            const sp = Math.max(z, 0) + Math.log(1 + Math.exp(-Math.abs(z)));
-            const logSig = -sp;
-            const log1m = z - sp;
-            total -= (p === 1 ? logSig : log1m);
-          }
-        }
-        return total;
-      };
-
-      // grid search (0.01 ~ 14.5, step 0.01)
-      const lo = Math.round(RAW_BOUNDS[0] * 100);
-      const hi = Math.round(RAW_BOUNDS[1] * 100);
-      let bestS = RAW_BOUNDS[0], bestNll = Infinity;
-      for (let i = lo; i <= hi; i++) {
-        const S = i / 100;
-        const nll = negLogLik(S);
-        if (nll < bestNll) { bestNll = nll; bestS = S; }
-      }
-
-      // Golden-section refinement: grid 의 0.01 step 한계로 인한 정밀도 손실 보정
-      // raw_s 가 0.01 빗나가면 features 와의 상호작용으로 final ★ 가 0.07~0.10 차이날 수 있음
-      // 그래서 [bestS - 0.01, bestS + 0.01] 구간에서 더 정밀하게 찾음
-      const gsLo = Math.max(RAW_BOUNDS[0], bestS - 0.01);
-      const gsHi = Math.min(RAW_BOUNDS[1], bestS + 0.01);
-      const phi = (Math.sqrt(5) - 1) / 2;  // golden ratio reciprocal
-      let aGS = gsLo, bGS = gsHi;
-      let cGS = bGS - phi * (bGS - aGS);
-      let dGS = aGS + phi * (bGS - aGS);
-      let fc = negLogLik(cGS), fd = negLogLik(dGS);
-      for (let iter = 0; iter < 30; iter++) {
-        if (Math.abs(bGS - aGS) < 1e-5) break;
-        if (fc < fd) {
-          bGS = dGS; dGS = cGS; fd = fc;
-          cGS = bGS - phi * (bGS - aGS);
-          fc = negLogLik(cGS);
-        } else {
-          aGS = cGS; cGS = dGS; fc = fd;
-          dGS = aGS + phi * (bGS - aGS);
-          fd = negLogLik(dGS);
-        }
-      }
-      const refinedS = (aGS + bGS) / 2;
-      if (negLogLik(refinedS) < bestNll) bestS = refinedS;
-
-      starRaw = bestS;
-
-      // 2단계: feature 추출 (lamp 별)
-      const lampFeats = (lampData) => {
-        let max_clear = 0, min_fail = 0, p50_clear = 0, frac_clear = 0, fail_below = 0, clear_above = 0;
-        if (lampData.length === 0) return { max_clear, min_fail, p50_clear, frac_clear, fail_below, clear_above };
-        const cleared = lampData.filter(x => x.p === 1).map(x => x.d);
-        const failed  = lampData.filter(x => x.p === 0).map(x => x.d);
-        if (cleared.length > 0) {
-          max_clear = Math.max(...cleared);
-          const sorted = [...cleared].sort((a, b) => a - b);
-          const mid = Math.floor(sorted.length / 2);
-          p50_clear = sorted.length % 2 === 0 ? (sorted[mid-1] + sorted[mid]) / 2 : sorted[mid];
-        }
-        if (failed.length > 0) min_fail = Math.min(...failed);
-        frac_clear = cleared.length / lampData.length;
-        // raw 근처 fail/clear 분포
-        let nBelow = 0, failBelow = 0, nAbove = 0, clearAbove = 0;
-        for (const { d, p } of lampData) {
-          if (d >= bestS - MARGIN_TH && d < bestS) {
-            nBelow++;
-            if (p === 0) failBelow++;
-          }
-          if (d > bestS && d <= bestS + MARGIN_TH) {
-            nAbove++;
-            if (p === 1) clearAbove++;
-          }
-        }
-        if (nBelow > 0) fail_below = failBelow / nBelow;
-        if (nAbove > 0) clear_above = clearAbove / nAbove;
-        return { max_clear, min_fail, p50_clear, frac_clear, fail_below, clear_above };
-      };
-      const fEc  = validStages.includes('ec')  ? lampFeats(byLamp.ec)  : { max_clear:0, min_fail:0, p50_clear:0, frac_clear:0, fail_below:0, clear_above:0 };
-      const fHc  = validStages.includes('hc')  ? lampFeats(byLamp.hc)  : { max_clear:0, min_fail:0, p50_clear:0, frac_clear:0, fail_below:0, clear_above:0 };
-      const fExh = validStages.includes('exh') ? lampFeats(byLamp.exh) : { max_clear:0, min_fail:0, p50_clear:0, frac_clear:0, fail_below:0, clear_above:0 };
-      // EC-only fallback 용 — fEc 가 이 scope 안에만 있어서 외부로 expose
-      ecMaxClearForFallback = fEc.max_clear;
-
-      // v3.1 추가: AC (ASSIST 이상) / FC (FULL COMBO) feature 8개
-      //   - pool: 시도한 곡 (lampNum > 0) 중 ★11.6 ~ ★12.7 + ereter 매칭
-      //   - 각 곡의 EXH ★ 를 d 로 사용 (가장 정보량 풍부한 axis)
-      const acfcPool = [];
-      for (const c of allCharts) {
-        const e = ereterMap.get(norm(c.title) + '|' + c.diff);
-        if (!e || e.level == null || e.level < 11.6 || e.level > 12.7) continue;
-        if (c.lampNum > 0 && typeof e.exh === 'number') acfcPool.push({ lamp: c.lampNum, d: e.exh });
-      }
-      let ac_frac = 0, ac_max_d = 0, ac_p50_d = 0;
-      let fc_frac = 0, fc_max_d = 0, fc_p50_d = 0, fc_fail_near = 0, fc_to_exh_ratio = 0;
-      if (acfcPool.length > 0) {
-        const acClearedDs = acfcPool.filter(x => x.lamp >= 2).map(x => x.d);
-        const fcClearedDs = acfcPool.filter(x => x.lamp >= 7).map(x => x.d);
-        const exhClearedN = acfcPool.filter(x => x.lamp >= 6).length;
-        const p50 = arr => {
-          if (arr.length === 0) return 0;
-          const s = [...arr].sort((a, b) => a - b);
-          const mid = Math.floor(s.length / 2);
-          return s.length % 2 === 0 ? (s[mid-1] + s[mid]) / 2 : s[mid];
-        };
-        ac_frac = acClearedDs.length / acfcPool.length;
-        ac_max_d = acClearedDs.length ? Math.max(...acClearedDs) : 0;
-        ac_p50_d = p50(acClearedDs);
-        fc_frac = fcClearedDs.length / acfcPool.length;
-        fc_max_d = fcClearedDs.length ? Math.max(...fcClearedDs) : 0;
-        fc_p50_d = p50(fcClearedDs);
-        // FC fail near rawS (±MARGIN_TH)
-        let nNear = 0, fcFailNear = 0;
-        for (const x of acfcPool) {
-          if (x.d >= bestS - MARGIN_TH && x.d <= bestS + MARGIN_TH) {
-            nNear++;
-            if (x.lamp < 7) fcFailNear++;
-          }
-        }
-        fc_fail_near = nNear > 0 ? fcFailNear / nNear : 0;
-        fc_to_exh_ratio = exhClearedN > 0 ? fcClearedDs.length / exhClearedN : 0;
-      }
-
-      // v3.2.1 추가: M / top10 / gap / stage interaction / prob feature
-      //   - lv12 페이지 곡 (★11.6~12.7) 중 cleared (lamp >= 3) 의 도달 stage 별 ★
-      //     · lamp >= 6 → exh ★
-      //     · lamp == 5 → hc ★
-      //     · lamp 3,4 → ec ★
-      const v32Cleared = [];  // {d, lamp, djLevel} — djLevel 은 v3.2.6 에서 사용
-      const v32FailedEc = [];
-      for (const c of allCharts) {
-        const e = ereterMap.get(norm(c.title) + '|' + c.diff);
-        if (!e || e.level == null || e.level < 11.6 || e.level > 12.7) continue;
-        if (c.lampNum >= 6 && typeof e.exh === 'number') v32Cleared.push({ d: e.exh, lamp: c.lampNum, djLevel: c.djLevel });
-        else if (c.lampNum === 5 && typeof e.hc === 'number') v32Cleared.push({ d: e.hc, lamp: c.lampNum, djLevel: c.djLevel });
-        else if (c.lampNum >= 3 && typeof e.ec === 'number') v32Cleared.push({ d: e.ec, lamp: c.lampNum, djLevel: c.djLevel });
-        else if (c.lampNum === 1 && typeof e.ec === 'number') v32FailedEc.push(e.ec);
-      }
-      const n_cleared_v32 = v32Cleared.length;
-      let v32_M = 0, v32_M_top10_avg = 0, v32_gap_top10 = 0;
-      let v32_gap_x_is_ec = 0, v32_gap_x_is_hc = 0, v32_gap_x_is_exh = 0, v32_prob_sum = 0;
-      if (n_cleared_v32 > 0) {
-        v32Cleared.sort((a, b) => b.d - a.d);
-        v32_M = v32Cleared[0].d;
-        const M_lamp = v32Cleared[0].lamp;
-        const is_ec  = (M_lamp === 3 || M_lamp === 4) ? 1 : 0;
-        const is_hc  = (M_lamp === 5) ? 1 : 0;
-        const is_exh = (M_lamp >= 6) ? 1 : 0;
-        const padded = [];
-        for (let k = 0; k < 10; k++) padded.push(k < v32Cleared.length ? v32Cleared[k].d : v32Cleared[v32Cleared.length - 1].d);
-        v32_M_top10_avg = padded.reduce((s, x) => s + x, 0) / 10;
-        v32_gap_top10 = v32_M - padded[9];
-        v32_gap_x_is_ec  = v32_gap_top10 * is_ec;
-        v32_gap_x_is_hc  = v32_gap_top10 * is_hc;
-        v32_gap_x_is_exh = v32_gap_top10 * is_exh;
-        // prob_sum: S_hat = M_top10_avg, sigmoid prob > 0.99 인 fail 은 노이즈 처리 (제외)
-        const S_hat = v32_M_top10_avg;
-        for (const d of v32FailedEc) {
-          const p = 1 / (1 + Math.exp(-(S_hat - d) / SIGMA_PROB));
-          if (p > PROB_NOISE_THRESHOLD) continue;
-          v32_prob_sum += p;
-        }
-      }
-
-      // cutoff 미달이면 v3.1.1 패러다임 fallback
-      const isUnderCutoff = n_cleared_v32 < CUTOFF_N_CLEARED;
-
-      // feature vector (RIDGE_COEF 와 같은 순서, 36차원)
-      const features = [
-        1.0, bestS, bestS * bestS,
-        fEc.max_clear,  fEc.min_fail,  fEc.p50_clear,  fEc.frac_clear,  fEc.fail_below,  fEc.clear_above,
-        fHc.max_clear,  fHc.min_fail,  fHc.p50_clear,  fHc.frac_clear,  fHc.fail_below,  fHc.clear_above,
-        fExh.max_clear, fExh.min_fail, fExh.p50_clear, fExh.frac_clear, fExh.fail_below, fExh.clear_above,
-        // AC/FC
-        ac_frac, ac_max_d, ac_p50_d,
-        fc_frac, fc_max_d, fc_p50_d, fc_fail_near, fc_to_exh_ratio,
-        // v3.2 추가
-        v32_M, v32_M_top10_avg, v32_gap_top10,
-        v32_gap_x_is_ec, v32_gap_x_is_hc, v32_gap_x_is_exh,
-        v32_prob_sum,
-      ];
-
-      // 3단계: Ridge 보정 계산 (v3.2.9 조건부 적용 위해 일단 변수만 계산)
-      let correction = 0;
-      for (let i = 0; i < RIDGE_COEF.length; i++) correction += RIDGE_COEF[i] * features[i];
-
-      // 4단계 (v3.2.4 + v3.2.7 + v3.2.9): bin clear-rate 누적 post-correction
-      //   stage 별 0.1 단위 bin → rate ≥ 80% + MIN_SAMPLES 충족 → 누적 bonus
-      //   bonus 의 rate scaling: rateW = (rate - 0.8) / (1.0 - 0.8) [linear, 80~100% → 0~1]
-      //   누적: top1 ×1.0 / top2 ×0.5 / top3 ×0.25
-      //   stage 차등 bonus: EC=0.05 / HC=0.10 / EXH=0.15 (어려운 stage 일수록 강한 신호)
-      //   MIN_SAMPLES 차등: EC=4 / HC=3 / EXH=2 (어려운 stage 는 작은 표본도 valid)
-      //   단방향 (implied > pred 일 때만): final = pred + (implied - pred) × 0.7
-      //
-      //   v3.2.9: bin 보너스 활성 (implied > raw_s + ridge) AND ridge < 0 일 때
-      //     → ridge 의 음수 (페널티) 부분만 무시 (RAY 같이 ridge 가 잘못 페널티 준 경우)
-      const STAGE_BONUS_V324 = { ec: 0.05, hc: 0.10, exh: 0.15 };
-      const STAGE_MIN_V324   = { ec: 4,    hc: 3,    exh: 2    };
-      const NEXT_BIN_W_V324  = [1.0, 0.5, 0.25];
-      const POSTCOR_WEIGHT_V324 = 0.7;
-      const BIN_W_V324 = 0.1;
-      const RATE_LO_V327 = 0.8;  // v3.2.7: rate 80% 이상 인정 (linear scaling)
-
-      let bestImplied = null;
-      for (const stage of ['ec', 'hc', 'exh']) {
-        const bins = new Map();
-        for (const { d, p, stage: st } of fit) {
-          if (st !== stage) continue;
-          const start = Math.round(Math.floor(d / BIN_W_V324) * BIN_W_V324 * 10) / 10;
-          const key = start.toFixed(1);
-          let b = bins.get(key);
-          if (!b) { b = { start, total: 0, cleared: 0 }; bins.set(key, b); }
-          b.total++;
-          if (p === 1) b.cleared++;
-        }
-        const minSamples = STAGE_MIN_V324[stage];
-        const eligible = [];
-        for (const b of bins.values()) {
-          if (b.total < minSamples) continue;
-          const rate = b.cleared / b.total;
-          if (rate < RATE_LO_V327) continue;
-          // rate scaling: 0.8~1.0 → 0~1 (linear)
-          const rateW = (rate - RATE_LO_V327) / (1.0 - RATE_LO_V327);
-          if (rateW <= 0) continue;
-          eligible.push({ start: b.start, total: b.total, cleared: b.cleared, rate, rateW });
-        }
-        if (eligible.length === 0) continue;
-        eligible.sort((a, b) => b.start - a.start);
-        const used = eligible.slice(0, NEXT_BIN_W_V324.length);
-        let bonus = 0;
-        for (let i = 0; i < used.length; i++) bonus += STAGE_BONUS_V324[stage] * NEXT_BIN_W_V324[i] * used[i].rateW;
-        const stageImplied = used[0].start + bonus;
-        if (!bestImplied || stageImplied > bestImplied.implied) {
-          bestImplied = { stage, implied: stageImplied, bins: used, bonus };
-        }
-      }
-
-      // v3.2.9: ridge 음수 + bin 보너스 활성일 때 ridge 무시
-      const predRidgeApplied = bestS + correction;
-      const binActive = bestImplied != null && bestImplied.implied > predRidgeApplied;
-      const ridgeMuted = binActive && correction < 0;
-      if (ridgeMuted) correction = 0;
-
-      starEstimate = bestS + correction;
-
-      let postCorrection = 0;
-      if (bestImplied) {
-        const diff = bestImplied.implied - starEstimate;
-        if (diff > 0) postCorrection = diff * POSTCOR_WEIGHT_V324;
-      }
-      starEstimate += postCorrection;
-
-      // 5단계 (v3.2.6 추가): djLevel boost
-      //   max clear 곡 (M) 의 lamp 가 EC (3 또는 4) + djLevel ≥ A + raw_s ≥ 3
-      //   gap (M - rawS) 곡률 with cutoff: gap < LO 면 0, gap ≥ HI 면 1, 사이 linear
-      //   단방향: M > pred 일 때만 끌어올림
-      //   POCHI 같은 "lamp 약하지만 점수 좋은 max clear 곡" 사용자 보정
-      const DJ_ORD_V326 = { 'F': 0, 'E': 1, 'D': 2, 'C': 3, 'B': 4, 'A': 5, 'AA': 6, 'AAA': 7 };
-      const V326_MIN_DJ_ORD = 5;     // A 이상
-      const V326_MIN_RAW_S  = 3;
-      const V326_GAP_LO     = 2.5;
-      const V326_GAP_HI     = 4.0;
-      const V326_WEIGHT     = 0.7;
-
-      let djBoost = 0;
-      let djBoostInfo = null;
-      if (n_cleared_v32 > 0 && bestS >= V326_MIN_RAW_S) {
-        const M_lamp_v326 = v32Cleared[0].lamp;
-        // EC 만 적용 (HC/EXH/FC 는 ridge 가 이미 잡음)
-        if (M_lamp_v326 === 3 || M_lamp_v326 === 4) {
-          const M_djLevel = v32Cleared[0].djLevel;
-          const djOrd = M_djLevel != null ? DJ_ORD_V326[M_djLevel] : null;
-          if (djOrd != null && djOrd >= V326_MIN_DJ_ORD) {
-            const diff = v32_M - starEstimate;
-            if (diff > 0) {
-              const gap = Math.max(0, v32_M - bestS);
-              const curveW = Math.max(0, Math.min(1, (gap - V326_GAP_LO) / (V326_GAP_HI - V326_GAP_LO)));
-              djBoost = diff * V326_WEIGHT * curveW;
-              djBoostInfo = { djLevel: M_djLevel, gap, curveW };
-            }
-          }
-        }
-      }
-      starEstimate += djBoost;
-
-      // 출력 범위 클램프
-      starEstimate = Math.max(0.0, Math.min(15.0, starEstimate));
-
-      log(`[step2] ${labelTag}★값 추정 (v3.3.4): ${starEstimate.toFixed(2)} (raw=${starRaw.toFixed(2)}, ridge 보정=${correction >= 0 ? '+' : ''}${correction.toFixed(3)}${ridgeMuted ? ' ★음소거' : ''}, post 보정=${postCorrection >= 0 ? '+' : ''}${postCorrection.toFixed(3)}, djBoost=${djBoost >= 0 ? '+' : ''}${djBoost.toFixed(3)}, 표본 ${fit.length}, 사용 lamp: ${validStages.join('/')})`);
-      log(`[step2] ${labelTag}  base: ec(max=${fEc.max_clear.toFixed(2)}, p50=${fEc.p50_clear.toFixed(2)}), hc(max=${fHc.max_clear.toFixed(2)}, p50=${fHc.p50_clear.toFixed(2)}), exh(max=${fExh.max_clear.toFixed(2)})`);
-      log(`[step2] ${labelTag}  AC/FC: ac_frac=${ac_frac.toFixed(3)}, ac_max=${ac_max_d.toFixed(2)}, fc_frac=${fc_frac.toFixed(3)}, fc_max=${fc_max_d.toFixed(2)}, fc_to_exh=${fc_to_exh_ratio.toFixed(3)}`);
-      log(`[step2] ${labelTag}  v3.2: M=${v32_M.toFixed(2)}, top10_avg=${v32_M_top10_avg.toFixed(2)}, gap_top10=${v32_gap_top10.toFixed(2)}, n_cleared=${n_cleared_v32}${isUnderCutoff ? ' (CUTOFF 미달!)' : ''}, prob_sum=${v32_prob_sum.toFixed(3)}`);
-      if (bestImplied) {
-        const binStr = bestImplied.bins.map(b => `${b.start.toFixed(1)}(${b.cleared}/${b.total},${(b.rate*100).toFixed(0)}%→w${b.rateW.toFixed(2)})`).join(', ');
-        log(`[step2] ${labelTag}  v3.2.7 post-correction: ${bestImplied.stage} bins [${binStr}] → implied ${bestImplied.implied.toFixed(3)}`);
-      } else {
-        log(`[step2] ${labelTag}  v3.2.7 post-correction: no eligible bin`);
-      }
-      if (djBoostInfo) {
-        log(`[step2] ${labelTag}  v3.2.6 djLevel boost: M lamp=EC, djLv=${djBoostInfo.djLevel}, gap=${djBoostInfo.gap.toFixed(2)}, curveW=${djBoostInfo.curveW.toFixed(2)}, boost=+${djBoost.toFixed(3)}`);
-      } else {
-        log(`[step2] ${labelTag}  v3.2.6 djLevel boost: 적용 X (조건 불만족)`);
-      }
+  // ----- v3.3.4: 외부 lib (oldOSR + OSR) ensemble 평균 -----
+  //   oldOSR (v3.3.3): runStarModel 동일 — 4종 fitData 자체 호출 + max 채택
+  //   OSR (v0.0.2):    IRT + ridge OLS 기반 user★ 추정 (ereter scale)
+  //   ensemble: (starEstimate_old + ereterCompatStar) / 2 — 측정 MAE 0.329/0.375 → 0.304
+  //   둘 중 하나만 가능하면 그 결과 단독 사용 (fallback)
+  let starEstimate = null;
+  let starRaw = null;
+  let starEstimateOld = null;
+  let starEstimateNew = null;
+  // 4종 모드별 비교용 (상세통계 패널에 작은 텍스트 표시 유지)
+  let starEstimateEreterOnly = null;
+  let starEstimateLv12Only = null;
+  let starEstimateAll = null;
+  if (oldOSR && ratingData && Array.isArray(ereterData) && ereterData.length > 0) {
+    try {
+      const ereterPayload = { charts: ereterData, players: ereterPlayers || {} };
+      const r = oldOSR.inferUser(allCharts, ratingData, ereterPayload);
+      starEstimateOld = r.starEstimate;
+      starRaw = r.starRaw;
+      starEstimateEreterOnly = r.starEstimates?.ereterOnly ?? null;
+      starEstimateLv12Only = r.starEstimates?.lv12Only ?? null;
+      starEstimateAll = r.starEstimates?.all ?? null;
+      console.log(`[step2] oldOSR (v3.3.3): ★${starEstimateOld != null ? starEstimateOld.toFixed(2) : 'N/A'} (raw=${starRaw != null ? starRaw.toFixed(2) : 'N/A'}, adopted=${r.adopted}, n=${r.fitLen}, lamps=${r.validStages.join('/')})`);
+    } catch (e) {
+      console.error('[step2] oldOSR.inferUser 실패:', e.message);
     }
+  }
+  if (ohSorryRatingLib && ratingData) {
+    try {
+      // v3.3.4: tiered 사용 (그룹별 scope + B 보정) — lib 에 inferUserTiered 가 있으면 사용
+      const useTiered = typeof ohSorryRatingLib.inferUserTiered === 'function';
+      const r = useTiered ? ohSorryRatingLib.inferUserTiered(allCharts, ratingData) : ohSorryRatingLib.inferUser(allCharts, ratingData);
+      starEstimateNew = typeof r.ereterCompatStar === 'number' ? r.ereterCompatStar : null;
+      const tieredInfo = useTiered && r.group ? ` [tiered:${r.group} lv12cl=${r.nLv12Cleared} z12cl=${r.nZ12_0upCleared} corr=${r.bandCorrection >= 0 ? '+' : ''}${r.bandCorrection?.toFixed(3) ?? 0}]` : '';
+      console.log(`[step2] OSR (v0.0.2${useTiered ? ' tiered' : ''}): ★${starEstimateNew != null ? starEstimateNew.toFixed(2) : 'N/A'}${tieredInfo} (native=${typeof r.nativeStar === 'number' ? r.nativeStar.toFixed(2) : 'N/A'}, n_enriched=${r.nEnriched || 0})`);
+    } catch (e) {
+      console.error('[step2] ohSorryRating.inferUser 실패:', e.message);
+    }
+  }
+  // ensemble — max 채택 (둘 중 더 큰 값, 보수적 underestimate 방지)
+  if (starEstimateOld != null && starEstimateNew != null) {
+    starEstimate = Math.max(starEstimateOld, starEstimateNew);
+    console.log(`[step2] max ★ = max(${starEstimateOld.toFixed(2)}, ${starEstimateNew.toFixed(2)}) = ${starEstimate.toFixed(2)}`);
+  } else if (starEstimateOld != null) {
+    starEstimate = starEstimateOld;
+    console.warn('[step2] OSR (v0.0.2) 결과 없음 → oldOSR 단독 사용');
+  } else if (starEstimateNew != null) {
+    starEstimate = starEstimateNew;
+    console.warn('[step2] oldOSR (v3.3.3) 결과 없음 → OSR 단독 사용');
   } else {
-    log(`[step2] ${labelTag}★값 추정: 표본 부족 (${fit.length}개)`);
+    console.error('[step2] 양쪽 lib 모두 실패 — ★ 추정 불가. lib fetch + localStorage 캐시 모두 실패 가능성');
   }
-
-  // EC-only 보정 — HC/EXH 클리어 부족 (validStages 가 ec 만) 인 사용자에게 적용.
-  // 16명 EC-only 샘플로 fit 한 linear regression: true ≈ -0.158 + 0.761*raw_s + 0.250*fEc.max_clear
-  // (정상 v3.3.1 est MAE 0.637 → 보정 후 MAE 0.374, 약 41% 감소; 11명 개선 / 3명 작은 악화)
-  // 정상 est 와 보정값 중 더 큰 쪽 채택 — collapse 방지 + 시스템 underestimate 보상.
-  // 이레터★ 유무 무관 (이레터에 등록된 EC-only 사용자에게도 동일 적용).
-  if (isEcOnlyValid && starRaw != null) {
-    const before = starEstimate;
-    const ecCorrected = -0.158 + 0.761 * starRaw + 0.250 * ecMaxClearForFallback;
-    const adjusted = Math.max(starEstimate, ecCorrected);
-    starEstimate = Math.max(0.01, Math.min(15.0, adjusted));
-    if (Math.abs(starEstimate - (before ?? 0)) > 0.005) {
-      log(
-        `[step2] ${labelTag}★값 EC-only 보정 적용 (HC/EXH 클리어 부족): ${before != null ? before.toFixed(2) : 'null'} → ${starEstimate.toFixed(2)} (raw=${starRaw.toFixed(2)}, max_clear=${ecMaxClearForFallback.toFixed(2)}, corrected=${ecCorrected.toFixed(2)})`,
-      );
-    }
-  }
-
-    return { starEstimate, starRaw, isEcOnlyValid, ecMaxClearForFallback, validStages, fitLen: fit.length };
-  };
-
-  // ----- 4종 fitData 로 모델 호출 -----
-  // primary 호출은 useOnlyLv12 분기 (모드 로그 / 매칭 카운트 표시용) — 결과는 max 로 결정
-  const __primaryRes  = runStarModel(fitData,           { label: useOnlyLv12 ? 'lv12-only' : 'lv11+12' });
-  const __ereterRes   = runStarModel(fitDataEreterOnly, { silent: true, label: 'ereter-only' });
-  const __lv12Res     = runStarModel(fitDataLv12Only,   { silent: true, label: 'lv12-only' });
-  const __allRes      = runStarModel(fitDataAll,        { silent: true, label: 'all-11.6+' });
-  // 4개 결과 중 가장 높은 starEstimate 채택 — 저렙 fallback (★0.01) 같은 데이터 부족 케이스 자동 보완
-  const __candidates = [
-    { name: 'primary',     res: __primaryRes },
-    { name: 'ereter-only', res: __ereterRes  },
-    { name: 'lv12-only',   res: __lv12Res    },
-    { name: 'all-11.6+',   res: __allRes     },
-  ];
-  const __best = __candidates.reduce((best, cur) => {
-    if (cur.res.starEstimate == null) return best;
-    if (best == null || cur.res.starEstimate > best.res.starEstimate) return cur;
-    return best;
-  }, null);
-  let starEstimate              = __best ? __best.res.starEstimate : null;
-  let starRaw                   = __best ? __best.res.starRaw      : null;
-  // secondary 비교 표시용 (상세통계 패널에 작은 텍스트로)
-  const starEstimateEreterOnly  = __ereterRes.starEstimate;
-  const starEstimateLv12Only    = __lv12Res.starEstimate;
-  const starEstimateAll         = __allRes.starEstimate;
-  console.log(
-    `[step2] ★ 비교: primary=${__primaryRes.starEstimate != null ? __primaryRes.starEstimate.toFixed(2) : 'N/A'} | ` +
-    `ereter-only=${starEstimateEreterOnly != null ? starEstimateEreterOnly.toFixed(2) : 'N/A'} (n=${__ereterRes.fitLen}) | ` +
-    `lv12-only=${starEstimateLv12Only != null ? starEstimateLv12Only.toFixed(2) : 'N/A'} (n=${__lv12Res.fitLen}) | ` +
-    `all-11.6+=${starEstimateAll != null ? starEstimateAll.toFixed(2) : 'N/A'} (n=${__allRes.fitLen}) ` +
-    `→ 채택: ${__best ? __best.name : 'N/A'} ★${starEstimate != null ? starEstimate.toFixed(2) : 'N/A'}`,
-  );
 
   // -------- 5.6. status 페이지에서 프로필 정보 fetch --------
   // 쿠프로(クプロ) 이미지, DJ 이름, IIDX ID, SP/DP 단위(段位), 노트레이더 등
@@ -1555,12 +1159,12 @@
       #__dp_score_panel .profile-star-value { font-size: 22px; font-weight: 700; color: #212529; line-height: 1.1; margin: 2px 0; }
       #__dp_score_panel .profile-star-note { font-size: 9px; color: #888; line-height: 1.1; }
       /* ノーツレーダー — 기본 숨김, 프로필 카드의 토글 버튼으로 노출 (.open 클래스) */
-      #__dp_score_panel .notes-radar { display: none; gap: 6px; padding: 0 8px 8px 8px; background: #f8f9fb; border-radius: 0 0 6px 6px; margin-top: 0; margin-bottom: 10px; position: relative; }
+      #__dp_score_panel .notes-radar { display: none; gap: 6px; padding: 8px; background: #f8f9fb; border-radius: 0 0 6px 6px; margin-top: 0; margin-bottom: 10px; position: relative; }
       #__dp_score_panel .notes-radar.open { display: flex; }
-      #__dp_score_panel .nr-close { position: absolute; top: 4px; right: 6px; z-index: 2; background: none; border: none; padding: 0; cursor: pointer; color: #888; font-size: 14px; line-height: 1; }
+      #__dp_score_panel .nr-close { position: absolute; top: 4px; right: 8px; z-index: 2; background: none; border: none; padding: 0; cursor: pointer; color: #888; font-size: 11px; line-height: 1; text-decoration: underline; }
       #__dp_score_panel .nr-close:hover { color: #212529; }
-      #__dp_score_panel .nr-box { flex: 1; min-width: 0; background: transparent; padding: 4px 6px; margin: 0; display: flex; flex-direction: column; gap: 4px; align-items: center; }
-      #__dp_score_panel .nr-header { text-align: center; font-weight: 700; font-size: 12px; letter-spacing: 1.5px; }
+      #__dp_score_panel .nr-box { flex: 1; min-width: 0; background: transparent; padding: 4px 6px; margin: 0; display: flex; flex-direction: column; gap: 2px; align-items: center; }
+      #__dp_score_panel .nr-header { text-align: center; font-weight: 700; font-size: 12px; letter-spacing: 1.5px; margin: 0; padding: 0; line-height: 1.1; }
       #__dp_score_panel .nr-header.sp { color: #52a447; }
       #__dp_score_panel .nr-header.dp { color: #b066d8; }
       #__dp_score_panel .nr-svg { display: block; overflow: visible; }
@@ -1751,8 +1355,8 @@
         const color = LABEL_COLOR[topCat];
         return `
           <div class="nr-box">
-            <div class="nr-header ${cls}">${style}</div>
             ${renderSvg(radar, color)}
+            <div class="nr-header ${cls}" style="color: ${color}">${style}</div>
             <div class="nr-detail">
               <div class="nr-stats">
                 ${CATS.map(c => `
@@ -1772,7 +1376,7 @@
       };
       return `
         <div class="notes-radar">
-          <button type="button" class="nr-close" onclick="window.__dp_hideRadar()" title="노트레이더 숨기기">×</button>
+          <button type="button" class="nr-close" onclick="window.__dp_hideRadar()" title="노트레이더 숨기기">레이더 닫기</button>
           ${renderBox('SP', profile.spRadar)}
           ${renderBox('DP', profile.dpRadar)}
         </div>
@@ -2141,11 +1745,12 @@
           ${(() => {
             const fmtStar = v => v != null ? `★${v.toFixed(2)}` : '—';
             const rows = [
-              { label: '이레터넷 대상곡만',    val: starEstimateEreterOnly, n: __ereterRes.fitLen },
-              { label: 'LEVEL 12 (이레터+추정)', val: starEstimateLv12Only,   n: __lv12Res.fitLen   },
-              { label: '11.6+ 전체 (lv11+12)',  val: starEstimateAll,         n: __allRes.fitLen    },
+              { label: '이레터넷 대상곡만',    val: starEstimateEreterOnly },
+              { label: 'LEVEL 12 (이레터+추정)', val: starEstimateLv12Only   },
+              { label: '11.6+ 전체 (lv11+12)',  val: starEstimateAll        },
+              { label: 'OSR v0.0.2 (zasa+plays)', val: starEstimateNew },
             ];
-            const items = rows.map(r => `<div style="color:#888">${r.label}: <b style="color:#444">${fmtStar(r.val)}</b> <span style="color:#aaa">(n=${r.n})</span></div>`).join('');
+            const items = rows.map(r => `<div style="color:#888">${r.label}: <b style="color:#444">${fmtStar(r.val)}</b></div>`).join('');
             return `<div class="meta" style="margin:6px 0 0;font-size:11px;line-height:1.6">${items}</div>`;
           })()}
         `;
