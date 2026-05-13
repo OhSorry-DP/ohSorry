@@ -148,6 +148,8 @@
   const OHSORRY_RATING_URL = GIST_RAW + '/ohSorryRating.json';
   const CALC_OLD_OSR_URL = GIST_RAW + '/calc-Old-OSR.js';
   const CALC_OSR_URL = GIST_RAW + '/calc-OSRating.js';
+  // v3.3.5: OSR13.5+ (bin50 + 50% 임계 + 상향 bin 부분 보너스) — 13.5 이상 시 ensemble 오버라이드
+  const CALC_OSR135_URL = GIST_RAW + '/OSR13.5%2B.js';
 
   // localStorage 캐시 헬퍼 — fetch 실패 시 이전 성공 결과 복원
   const loadWithCache = async (url, cacheKey, isJson) => {
@@ -184,16 +186,16 @@
     console.error('[step2] ohSorryRating 로드 실패:', e.message);
   }
 
-  // calc-Old-OSR.js (v3.3.3 모델) + calc-OSRating.js (v0.0.2 모델) lib fetch + eval
-  //   eval 은 UMD wrapper 라 window.oldOSR / window.ohSorryRating 글로벌 등록
-  let oldOSR = null, ohSorryRatingLib = null;
+  // calc-Old-OSR.js (v3.3.3 모델) + calc-OSRating.js (v0.0.2 모델) + OSR13.5+.js lib fetch + eval
+  //   eval 은 UMD wrapper 라 window.oldOSR / window.ohSorryRating / window.OSR135 글로벌 등록
+  let oldOSR = null, ohSorryRatingLib = null, osr135Lib = null;
   try {
     const { data: oldOSRSrc, source: oldSrc } = await loadWithCache(CALC_OLD_OSR_URL, 'ohSorry:libOldOSR', false);
     // UMD 가 window 에 등록 — IIFE 실행
     (new Function(oldOSRSrc))();
     oldOSR = window.oldOSR;
     if (!oldOSR) throw new Error('oldOSR global 등록 실패');
-    console.log(`[step2] calc-Old-OSR.js v${oldOSR.VERSION} 로드 (${oldSrc})`);
+    console.log(`[step2] calc-Old-OSR.js v${oldOSR.version} 로드 (${oldSrc})`);
   } catch (e) {
     console.error('[step2] calc-Old-OSR.js 로드 실패:', e.message);
   }
@@ -205,6 +207,16 @@
     console.log(`[step2] calc-OSRating.js 로드 (${newSrc})`);
   } catch (e) {
     console.error('[step2] calc-OSRating.js 로드 실패:', e.message);
+  }
+  // v3.3.5: OSR13.5+ lib (13.5 이상 ★ 정확도 ↑)
+  try {
+    const { data: osr135Src, source: src135 } = await loadWithCache(CALC_OSR135_URL, 'ohSorry:libOSR135', false);
+    (new Function(osr135Src))();
+    osr135Lib = window.OSR135;
+    if (!osr135Lib) throw new Error('OSR135 global 등록 실패');
+    console.log(`[step2] OSR13.5+.js v${osr135Lib.version} 로드 (${src135})`);
+  } catch (e) {
+    console.error('[step2] OSR13.5+.js 로드 실패:', e.message);
   }
 
   // -------- 1. 곡명 정규화 + 인덱싱 --------
@@ -596,7 +608,12 @@
     unmatchedSamples.forEach(s => console.log('  -', s));
   }
 
-  // -------- 5.5. ★값 추정 (v3.3.4) --------
+  // -------- 5.5. ★값 추정 (v3.3.5) --------
+  // v3.3.5 변경 (분기 D2):
+  //   - OSR13.5+.js 추가, OSR135 ≥ 13.0 → OSR135 / else → OSR / fallback → oldOSR
+  //   - max(oldOSR, OSR) ensemble 폐기, oldOSR 는 fallback 으로만 유지
+  //   - 1021명 검증: 전체 MAE 0.398 → 0.363, max|err| 6.989 → 4.264, bias +0.192 → +0.016
+  //   - (표기 변경) 13.0 미만 영역은 OSR 대신 oldOSR (v3.3.3) 값으로 표기 — 내부 starEstimateNew 는 유지 (추천 풀 baseStar 용)
   // v3.3.4 변경:
   //   - 상세통계 패널 UX 정리: 난이도 선택 토글 (Lv12 / Lv11+) 추가
   //     · DOM in-place 갱신 → details 펼침/닫힘 상태 보존
@@ -671,11 +688,11 @@
   // v3.3.4: ★ 추정 모델 (runStarModel) 은 외부 lib (calc-Old-OSR.js, calc-OSRating.js) 으로 분리됨.
   //   본체에는 stub 만 — 아래 dead code 는 일괄 제거. 외부 lib fetch + ensemble 흐름은 step2 끝에서 처리.
 
-  // ----- v3.3.4: 외부 lib (oldOSR + OSR) ensemble 평균 -----
-  //   oldOSR (v3.3.3): runStarModel 동일 — 4종 fitData 자체 호출 + max 채택
-  //   OSR (v0.0.2):    IRT + ridge OLS 기반 user★ 추정 (ereter scale)
-  //   ensemble: (starEstimate_old + ereterCompatStar) / 2 — 측정 MAE 0.329/0.375 → 0.304
-  //   둘 중 하나만 가능하면 그 결과 단독 사용 (fallback)
+  // ----- v3.3.5: 외부 lib 3종 (oldOSR + OSR + OSR135) 분기 채택 -----
+  //   oldOSR (v3.3.3): runStarModel — fallback 용 (OSR 실패 시)
+  //   OSR (v0.0.2):    IRT + ridge OLS 기반 user★ 추정 (ereter scale) — 13 미만 영역 메인
+  //   OSR135 (v0.0.2): bin50 + 50% 임계 + 상향 bin 부분 보너스 — 13+ 영역 메인 (14+ MAE 0.014)
+  //   분기 (D2): OSR135 ≥ 13.0 → OSR135 / else → OSR / 둘 다 없으면 oldOSR
   let starEstimate = null;
   let starRaw = null;
   let starEstimateOld = null;
@@ -710,18 +727,36 @@
       console.error('[step2] ohSorryRating.inferUser 실패:', e.message);
     }
   }
-  // ensemble — max 채택 (둘 중 더 큰 값, 보수적 underestimate 방지)
-  if (starEstimateOld != null && starEstimateNew != null) {
-    starEstimate = Math.max(starEstimateOld, starEstimateNew);
-    console.log(`[step2] max ★ = max(${starEstimateOld.toFixed(2)}, ${starEstimateNew.toFixed(2)}) = ${starEstimate.toFixed(2)}`);
+  // v3.3.5: OSR13.5+ 계산 — OSR >= 13.5 + OSR135 >= 13.5 면 오버라이드, 아니면 oldOSR
+  let starEstimate135 = null;
+  if (osr135Lib && ereterData && Array.isArray(ereterData) && ereterData.length > 0) {
+    try {
+      const r135 = osr135Lib.inferUser(allCharts, { charts: ereterData });
+      starEstimate135 = r135.starEstimate;
+      console.log(`[step2] OSR13.5+ (v${osr135Lib.version}): ★${starEstimate135 != null ? starEstimate135.toFixed(2) : 'N/A'} (adopted=${r135.adopted}, EC=${r135.ec.final.toFixed(2)}, HC=${r135.hc.final.toFixed(2)}, EXH=${r135.exh.final.toFixed(2)})`);
+    } catch (e) {
+      console.error('[step2] OSR13.5+.inferUser 실패:', e.message);
+    }
+  }
+
+  // 채택 로직 (표기용):
+  //   OSR135 ≥ 13.0 → OSR135 (13.0+ 영역 가장 정확, MAE 0.121)
+  //   else → oldOSR (v3.3.3) — 표기 ★ 는 OSR (v0.0.2) 대신 oldOSR 채택
+  //   oldOSR 도 없으면 OSR 로 fallback
+  // 내부 계산용 starEstimateNew (OSR) 는 그대로 유지 — 추천 풀 baseStar (ohsorryRecBase) 에서 사용
+  if (starEstimate135 != null && starEstimate135 >= 13.0) {
+    starEstimate = starEstimate135;
+    console.log(`[step2] ★ = OSR13.5+ ${starEstimate.toFixed(2)} (≥ 13.0)`);
   } else if (starEstimateOld != null) {
     starEstimate = starEstimateOld;
-    console.warn('[step2] OSR (v0.0.2) 결과 없음 → oldOSR 단독 사용');
+    const reason = starEstimate135 == null ? 'OSR135 결과 없음'
+      : `OSR135(${starEstimate135.toFixed(2)}) < 13.0`;
+    console.log(`[step2] ★ = oldOSR ${starEstimate.toFixed(2)} (${reason})`);
   } else if (starEstimateNew != null) {
     starEstimate = starEstimateNew;
-    console.warn('[step2] oldOSR (v3.3.3) 결과 없음 → OSR 단독 사용');
+    console.warn('[step2] oldOSR 결과 없음 → OSR (v0.0.2) 단독 fallback');
   } else {
-    console.error('[step2] 양쪽 lib 모두 실패 — ★ 추정 불가. lib fetch + localStorage 캐시 모두 실패 가능성');
+    console.error('[step2] 모든 lib 실패 — ★ 추정 불가. lib fetch + localStorage 캐시 모두 실패 가능성');
   }
 
   // -------- 5.6. status 페이지에서 프로필 정보 fetch --------
@@ -817,9 +852,13 @@
 
   // EC-only 보정은 runStarModel 함수 내부에서 이미 적용됨 (모든 4종 결과 모두 보정 완료)
 
+  // v3.3.5: D2 의 표기 ★ (starEstimate) 대신 OSR (v0.0.2) 단독값을 추천 baseStar 로 사용
+  //   이유: OSR135 의 over-estimation (12점대 +0.46 bias) 을 추천 풀 결정에서 배제
+  //   OSR 결과 없으면 starEstimate (D2) 로 fallback
+  const ohsorryRecBase = starEstimateNew != null ? starEstimateNew : starEstimate;
   let recBaseMode = eraterTrueStar != null ? 'ereter' : 'ohsorry';
-  let recBaseStar = recBaseMode === 'ereter' ? eraterTrueStar : starEstimate;
-  console.log(`[step2] 추천곡 기준: ${recBaseMode} (★${recBaseStar != null ? recBaseStar.toFixed(2) : 'N/A'})`);
+  let recBaseStar = recBaseMode === 'ereter' ? eraterTrueStar : ohsorryRecBase;
+  console.log(`[step2] 추천곡 기준: ${recBaseMode} (★${recBaseStar != null ? recBaseStar.toFixed(2) : 'N/A'}, ohsorry=OSR단독 ${ohsorryRecBase != null ? ohsorryRecBase.toFixed(2) : 'N/A'})`);
 
   const recsEC = [], recsHC = [], recsEXH = [];
 
@@ -957,8 +996,9 @@
       if (!e || e.level == null) continue;
       if (e.level < 11.6 || e.level > 12.7) continue;
       if (typeof e.exh !== 'number') continue;
-      // 실력 이상 곡 제외
-      if (e.exh > baseStar) continue;
+      // 실력 +1 이상 곡 제외 (도전 살짝 허용) + 실력 -2 미만 곡 제외 (너무 쉬움)
+      if (e.exh > baseStar + 1) continue;
+      if (e.exh < baseStar - 2) continue;
       candidates.push({
         title: c.title, chart: c.diff, level: e.level,
         ec: e.ec, hc: e.hc, exh: e.exh,
@@ -1487,7 +1527,7 @@
       window.__dp_setRecBase = (mode) => {
         if (mode === 'ereter' && eraterTrueStar == null) return;
         recBaseMode = mode;
-        recBaseStar = mode === 'ereter' ? eraterTrueStar : starEstimate;
+        recBaseStar = mode === 'ereter' ? eraterTrueStar : ohsorryRecBase;
         for (const stage of ['ec', 'hc', 'exh']) {
           const newRecs = window.__dp_rerollRecs(stage);
           const container = document.getElementById(`__dp_recs_${stage}`);
@@ -1844,7 +1884,6 @@
 
   // -------- 7. Supabase user_profiles UPSERT --------
   //   user_profiles: iidx_id PK 로 UPSERT (매번 덮어쓰기 + charts_json 저장)
-  //   DB trigger: ★값 변화 있으면 무조건 user_changes 에 INSERT (1일 cooldown 없음)
   //   실패해도 사용자 경험에 영향 없도록 fire-and-forget
   (async () => {
     const SUPABASE_URL = 'https://ryesiijulrlmstmhzpnv.supabase.co';
@@ -1889,7 +1928,7 @@
       star_estimate: starEstimate != null ? Number(starEstimate.toFixed(4)) : null,
       ereter_star: eraterTrueStar != null ? Number(eraterTrueStar) : null,
       raw_s: starRaw != null ? Number(starRaw.toFixed(4)) : null,
-      version: 'v3.3.4',
+      version: 'v3.3.5',
       sp_rank: profile.spRank || null,
       dp_rank: profile.dpRank || null,
       n_cleared: nClearedLv12,

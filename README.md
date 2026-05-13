@@ -100,7 +100,7 @@ javascript:fetch('https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f43
 
 ---
 
-## ★값 추정 원리 (v3.3.3 — 모델 코어는 v3.2.9 그대로, v3.3.x 는 보정 / 풀 / 표시 개선)
+## ★값 추정 원리 (v3.3.5 — 모델 코어는 v3.2.9 그대로, v3.3.x 는 보정 / 풀 / 표시 개선)
 
 ### 모델 구조
 
@@ -206,6 +206,8 @@ v3.3 부터는 **모델 자체는 그대로** 두고 보정 로직 / 추천 풀 
 | v3.3.1 | `ohSorryRating.json` 도입 — ereter 미등록 lv11/12 차트의 estEc/estHc 추정 (104명 데이터 기반). fitData fallback + 추천 풀에 통합. lv11 추정 차트 곡명 연두색 표시. 하한 0.5 → 0.01. |
 | v3.3.2 | EC-only 사용자 (HC/EXH 클리어 < 10) 에 raw + max_clear 기반 선형 보정 (16명 fit, MAE 0.637 → 0.374, 41% 감소). |
 | v3.3.3 | **4종 fitData 동시 수집 + 모델 함수 분리**: 이레터넷만 / lv12-only / 11.6+ 전체 / primary (useOnlyLv12 분기) → max 채택해서 저렙 fallback (★0.01) 자동 보완. 상세통계 패널에 ★ 추정 비교 표시. lv12 ratingMap fallback 곡명 하늘색 (#87ceeb) / lv11 진한 연두색 (#9ccc65). 추천 풀 lv11+lv12 전곡으로 확장 (zasa < 11.6 lv11 lower-tier 포함). EC 정리곡: HC < baseStar - 3 미만 곡 제외 (시간 낭비 방지). bug fix: runStarModel 내부 closure 변수 fitData → fit (4 호출이 모두 동일 데이터로 돌던 문제). |
+| v3.3.4 | ★ 추정 로직 외부 lib 분리 (calc-Old-OSR.js v3.3.3 + calc-OSRating.js v0.0.2), max(oldOSR, OSR) ensemble 채택. |
+| v3.3.5 | **OSR13.5+.js (bin50 + 50% 임계 + 상향 bin 부분 보너스)** 추가. 채택 분기 (D2): OSR135 ≥ 13.0 → OSR135 / else → OSR / 둘 다 없으면 oldOSR (fallback). 1021명 검증: 전체 MAE **0.398 → 0.363**, max\|err\| **6.989 → 4.264**, bias **+0.192 → +0.016**. 영역별: 14+ 0.014, 13+ 0.121, 12+ 0.248, 11+ 0.268, 0+ 0.363. v3.3.4 의 max(oldOSR, OSR) ensemble 폐기, oldOSR 는 fallback 으로만 유지. **표기 변경**: 13.0 미만 영역의 표시 ★ 는 OSR (v0.0.2) 대신 oldOSR (v3.3.3) 값으로 표기 — 내부 starEstimateNew 는 추천 풀 baseStar (`ohsorryRecBase`) 용으로 유지. |
 
 `useOnlyLv12` 분기: LEVEL 12 플레이 곡 ≥ 30 → primary 호출은 lv12-only fitData. 단 v3.3.3 부터는 4 scope 모두 계산해서 max 채택하므로 분기 결과가 저렙 fallback 떨어져도 다른 scope 가 보완.
 
