@@ -613,7 +613,7 @@
   //   - OSR13.5+.js 추가, OSR135 ≥ 13.0 → OSR135 / else → OSR / fallback → oldOSR
   //   - max(oldOSR, OSR) ensemble 폐기, oldOSR 는 fallback 으로만 유지
   //   - 1021명 검증: 전체 MAE 0.398 → 0.363, max|err| 6.989 → 4.264, bias +0.192 → +0.016
-  //   - (표기 변경) 13.0 미만 영역은 OSR 대신 oldOSR (v3.3.3) 값으로 표기 — 내부 starEstimateNew 는 유지 (추천 풀 baseStar 용)
+  //   - (표기 변경) group C (12.0+ 클리어 ≥ 30) + OSR135 < 13.0 영역만 oldOSR 로 표기. group A/B (저클리어) 는 OSR 유지. 내부 starEstimateNew 는 추천 풀 baseStar 용으로 유지.
   // v3.3.4 변경:
   //   - 상세통계 패널 UX 정리: 난이도 선택 토글 (Lv12 / Lv11+) 추가
   //     · DOM in-place 갱신 → details 펼침/닫힘 상태 보존
@@ -715,12 +715,14 @@
       console.error('[step2] oldOSR.inferUser 실패:', e.message);
     }
   }
+  let osrGroup = null;  // tiered 그룹 (A/B/C) — 표기 분기에서 사용
   if (ohSorryRatingLib && ratingData) {
     try {
       // v3.3.4: tiered 사용 (그룹별 scope + B 보정) — lib 에 inferUserTiered 가 있으면 사용
       const useTiered = typeof ohSorryRatingLib.inferUserTiered === 'function';
       const r = useTiered ? ohSorryRatingLib.inferUserTiered(allCharts, ratingData) : ohSorryRatingLib.inferUser(allCharts, ratingData);
       starEstimateNew = typeof r.ereterCompatStar === 'number' ? r.ereterCompatStar : null;
+      osrGroup = r.group || null;
       const tieredInfo = useTiered && r.group ? ` [tiered:${r.group} lv12cl=${r.nLv12Cleared} z12cl=${r.nZ12_0upCleared} corr=${r.bandCorrection >= 0 ? '+' : ''}${r.bandCorrection?.toFixed(3) ?? 0}]` : '';
       console.log(`[step2] OSR (v0.0.2${useTiered ? ' tiered' : ''}): ★${starEstimateNew != null ? starEstimateNew.toFixed(2) : 'N/A'}${tieredInfo} (native=${typeof r.nativeStar === 'number' ? r.nativeStar.toFixed(2) : 'N/A'}, n_enriched=${r.nEnriched || 0})`);
     } catch (e) {
@@ -740,18 +742,25 @@
   }
 
   // 채택 로직 (표기용):
-  //   OSR135 ≥ 13.0 → OSR135 (13.0+ 영역 가장 정확, MAE 0.121)
-  //   else → oldOSR (v3.3.3) — 표기 ★ 는 OSR (v0.0.2) 대신 oldOSR 채택
+  //   OSR135 ≥ 13.0                    → OSR135 (13.0+ 영역 가장 정확, MAE 0.121)
+  //   else if group A or B + OSR 결과   → OSR (v0.0.2) — 저클리어 사용자 (lv12 < 30 또는 12.0+ < 30) 는 OSR 채택
+  //   else                              → oldOSR (v3.3.3) — group C (12.0+ ≥ 30) + OSR135 < 13.0 영역
   //   oldOSR 도 없으면 OSR 로 fallback
   // 내부 계산용 starEstimateNew (OSR) 는 그대로 유지 — 추천 풀 baseStar (ohsorryRecBase) 에서 사용
   if (starEstimate135 != null && starEstimate135 >= 13.0) {
     starEstimate = starEstimate135;
     console.log(`[step2] ★ = OSR13.5+ ${starEstimate.toFixed(2)} (≥ 13.0)`);
+  } else if ((osrGroup === 'A' || osrGroup === 'B') && starEstimateNew != null) {
+    starEstimate = starEstimateNew;
+    const reason = starEstimate135 == null ? 'OSR135 결과 없음'
+      : `OSR135(${starEstimate135.toFixed(2)}) < 13.0`;
+    console.log(`[step2] ★ = OSR ${starEstimate.toFixed(2)} (group ${osrGroup}, ${reason})`);
   } else if (starEstimateOld != null) {
     starEstimate = starEstimateOld;
     const reason = starEstimate135 == null ? 'OSR135 결과 없음'
       : `OSR135(${starEstimate135.toFixed(2)}) < 13.0`;
-    console.log(`[step2] ★ = oldOSR ${starEstimate.toFixed(2)} (${reason})`);
+    const groupInfo = osrGroup ? `group ${osrGroup}, ` : '';
+    console.log(`[step2] ★ = oldOSR ${starEstimate.toFixed(2)} (${groupInfo}${reason})`);
   } else if (starEstimateNew != null) {
     starEstimate = starEstimateNew;
     console.warn('[step2] oldOSR 결과 없음 → OSR (v0.0.2) 단독 fallback');
