@@ -741,10 +741,20 @@
     }
   }
 
+  // group C 인 경우 oldOSR 의 4종 max 에서 all-11.6+ scope 제외 — ereterOnly / lv12Only 중 max 로 재계산
+  //   이유: group C (12.0+ 클리어 ≥ 30) 고수는 ratingMap 의 lv11 추정곡 보강이 오히려 잡음
+  //   group C 면 useOnlyLv12=true 보장 (12.0+ 클리어 30+ → lv12 플레이 30+) → primary === lv12Only 라 추가 채택 불필요
+  if (osrGroup === 'C' && (starEstimateEreterOnly != null || starEstimateLv12Only != null)) {
+    const cands = [starEstimateEreterOnly, starEstimateLv12Only].filter(x => typeof x === 'number');
+    const newOldStar = Math.max(...cands);
+    console.log(`[step2] group C → oldOSR all-11.6+ 제외, max(ereter=${starEstimateEreterOnly?.toFixed(2) ?? 'N/A'}, lv12=${starEstimateLv12Only?.toFixed(2) ?? 'N/A'}) = ${newOldStar.toFixed(2)} (기존 4종 max ${starEstimateOld?.toFixed(2) ?? 'N/A'})`);
+    starEstimateOld = newOldStar;
+  }
+
   // 채택 로직 (표기용):
   //   OSR135 ≥ 13.0                    → OSR135 (13.0+ 영역 가장 정확, MAE 0.121)
   //   else if group A or B + OSR 결과   → OSR (v0.0.2) — 저클리어 사용자 (lv12 < 30 또는 12.0+ < 30) 는 OSR 채택
-  //   else                              → oldOSR (v3.3.3) — group C (12.0+ ≥ 30) + OSR135 < 13.0 영역
+  //   else                              → oldOSR (v3.3.3) — group C (12.0+ ≥ 30) + OSR135 < 13.0 영역 (all-11.6+ 제외 후 max)
   //   oldOSR 도 없으면 OSR 로 fallback
   // 내부 계산용 starEstimateNew (OSR) 는 그대로 유지 — 추천 풀 baseStar (ohsorryRecBase) 에서 사용
   if (starEstimate135 != null && starEstimate135 >= 13.0) {
