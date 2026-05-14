@@ -175,6 +175,8 @@ window.__dp_render = async (dbData) => {
   const CALC_OSR_URL = GIST_RAW + '/calc-OSRating.js';
   // v3.3.5: OSR13.5+ (bin50 + 50% 임계 + 상향 bin 부분 보너스) — 13.5 이상 시 ensemble 오버라이드
   const CALC_OSR135_URL = GIST_RAW + '/OSR13.5%2B.js';
+  // ohsorry-shelf.js — renderChartRow (추천곡 곡명 클릭 토스트용). 실패해도 무시.
+  const CALC_SHELF_URL = GIST_RAW + '/ohsorry-shelf.js';
 
   // localStorage 캐시 헬퍼 — fetch 실패 시 이전 성공 결과 복원
   const loadWithCache = async (url, cacheKey, isJson) => {
@@ -213,7 +215,7 @@ window.__dp_render = async (dbData) => {
 
   // calc-Old-OSR.js (v3.3.3 모델) + calc-OSRating.js (v0.0.2 모델) + OSR13.5+.js lib fetch + eval
   //   eval 은 UMD wrapper 라 window.oldOSR / window.ohSorryRating / window.OSR135 글로벌 등록
-  let oldOSR = null, ohSorryRatingLib = null, osr135Lib = null;
+  let oldOSR = null, ohSorryRatingLib = null, osr135Lib = null, shelfLib = null;
   try {
     const { data: oldOSRSrc, source: oldSrc } = await loadWithCache(CALC_OLD_OSR_URL, 'ohSorry:libOldOSR', false);
     // UMD 가 window 에 등록 — IIFE 실행
@@ -242,6 +244,18 @@ window.__dp_render = async (dbData) => {
     console.log(`[step2] OSR13.5+.js v${osr135Lib.version} 로드 (${src135})`);
   } catch (e) {
     console.error('[step2] OSR13.5+.js 로드 실패:', e.message);
+  }
+  // ohsorry-shelf.js — 추천곡 곡명 클릭 토스트 (renderChartRow) 용. 실패해도 무시 (토스트만 비활성).
+  try {
+    const { data: shelfSrc, source: shelfSrcType } = await loadWithCache(CALC_SHELF_URL, 'ohSorry:libShelf', false);
+    (new Function(shelfSrc))();
+    shelfLib = window.OhSorryShelf;
+    if (shelfLib) {
+      shelfLib.injectStyle();
+      console.log(`[step2] ohsorry-shelf.js v${shelfLib.version} 로드 (${shelfSrcType})`);
+    }
+  } catch (e) {
+    console.warn('[step2] ohsorry-shelf.js 로드 실패 (무시 가능):', e.message);
   }
 
   // -------- 1. 곡명 정규화 + 인덱싱 --------
@@ -580,11 +594,12 @@ window.__dp_render = async (dbData) => {
   }
   }
 
-  // -------- 4.5. textage 채보 메타로 noteCount / missCount 보강 --------
-  // textage notes (DN/DH/DA/DX) → noteCount. 플레이한 곡은 missCount = noteCount - pgreat - great
-  // (EX 점수 표기 2392(986/420) 에서 986=pgreat, 420=great → EX = pgreat*2 + great).
-  //   - noteCount: 이미 있으면 (INF charts) 유지, 없으면 (오소리) textage 로 채움
-  //   - missCount: pgreat/great 있는 오소리 charts 만 재계산 (eagate 파싱 missCount 보다 신뢰도 높음)
+  // -------- 4.5. textage 채보 메타로 noteCount 보강 --------
+  // textage notes (DN/DH/DA/DX) → noteCount. 이미 있으면 (INF charts) 유지, 없으면 (오소리) textage 로 채움.
+  //
+  // missCount 는 보강 X — IIDX 판정은 Pgreat/Great/Good/Bad/Poor 이고 MISS COUNT(BP) = Bad+Poor 인데
+  // EX 표기 2392(986/420) 에선 Pgreat/Great 만 알 수 있고 Good 을 모름 → BP 계산 불가.
+  // (noteCount - pgreat - great = Good+Bad+Poor 라 MISS 가 아님.) EXH 추천은 rate(%) 로 정렬.
   if (textageSongs) {
     // norm(title) → notes 인덱스
     const textageMap = {};
@@ -597,7 +612,7 @@ window.__dp_render = async (dbData) => {
       textageMap[key] = s.notes;  // 충돌 시 마지막 우선 (드묾)
     }
     const DIFF_TO_TEXTAGE = { NORMAL: 'DN', HYPER: 'DH', ANOTHER: 'DA', LEGGENDARIA: 'DX', BEGINNER: 'DB' };
-    let filledNote = 0, filledMiss = 0;
+    let filledNote = 0;
     for (const c of allCharts) {
       const notes = textageMap[norm(c.title)];
       if (!notes) continue;
@@ -605,13 +620,8 @@ window.__dp_render = async (dbData) => {
       const nc = tKey ? notes[tKey] : null;
       if (typeof nc !== 'number' || nc <= 0) continue;
       if (typeof c.noteCount !== 'number') { c.noteCount = nc; filledNote++; }
-      // missCount = noteCount - pgreat - great (플레이한 오소리 charts 만 — pgreat/great 보유)
-      if (c.lampNum > 0 && typeof c.pgreat === 'number' && typeof c.great === 'number') {
-        c.missCount = Math.max(0, nc - c.pgreat - c.great);
-        filledMiss++;
-      }
     }
-    console.log(`[step2] textage 보강 — noteCount ${filledNote}곡 / missCount ${filledMiss}곡 (norm 충돌 ${dup})`);
+    console.log(`[step2] textage 보강 — noteCount ${filledNote}곡 (norm 충돌 ${dup})`);
   }
 
   // -------- 5. 매칭 + 점수 계산 --------
@@ -1138,8 +1148,9 @@ window.__dp_render = async (dbData) => {
 
   // EXH 전용 추천 — EC/HC 와 별개 로직.
   //   EXH 미클리어 (lamp < 6) 곡 중 자기 실력 (baseStar) 이하인 곡만,
-  //   EXH ★ 낮은 순으로 30곡 → 미스 카운트 낮은 순으로 정렬 → 10곡 표시.
-  //   미스 카운트 없는 곡은 뒤로 밀어서 정렬.
+  //   EXH ★ 낮은 순으로 30곡 → rate(%) 높은 순으로 정렬 → 10곡 표시.
+  //   (미스 카운트는 Good 수치를 몰라 못 구함 → rate = exScore / (noteCount*2) 로 클리어 근접도 판단.)
+  //   rate 없는 곡 (noteCount 미보강 / 미플레이) 은 뒤로 밀어서 정렬.
   //   baseStar 가 없으면 (실력값 추정 불가) 빈 배열 반환.
   const buildExhRecs = (baseStar) => {
     if (baseStar == null) return [];
@@ -1153,25 +1164,28 @@ window.__dp_render = async (dbData) => {
       // 실력 +1 이상 곡 제외 (도전 살짝 허용) + 실력 -2 미만 곡 제외 (너무 쉬움)
       if (e.exh > baseStar + 1) continue;
       if (e.exh < baseStar - 2) continue;
+      // rate = EX 점수 / 만점 (= noteCount*2). noteCount 없거나 미플레이면 null.
+      const rate = (typeof c.exScore === 'number' && typeof c.noteCount === 'number' && c.noteCount > 0)
+        ? c.exScore / (c.noteCount * 2) : null;
       candidates.push({
         title: c.title, chart: c.diff, level: e.level,
         ec: e.ec, hc: e.hc, exh: e.exh,
         ec_n: e.ec_n, hc_n: e.hc_n, exh_n: e.exh_n,
         diffValue: e.exh, currentLamp: c.lamp,
-        missCount: c.missCount,
+        rate: rate,
       });
     }
     // 1. EXH ★ 낮은 순 → top 30
     candidates.sort((a, b) => a.diffValue - b.diffValue);
     const top30 = candidates.slice(0, 30);
-    // 2. 미스 카운트 낮은 순 (null 은 뒤로) → 10곡
+    // 2. rate 높은 순 (null 은 뒤로) → 10곡
     top30.sort((a, b) => {
-      const ma = a.missCount;
-      const mb = b.missCount;
-      if (ma == null && mb == null) return 0;
-      if (ma == null) return 1;
-      if (mb == null) return -1;
-      return ma - mb;
+      const ra = a.rate;
+      const rb = b.rate;
+      if (ra == null && rb == null) return 0;
+      if (ra == null) return 1;
+      if (rb == null) return -1;
+      return rb - ra;
     });
     return top30.slice(0, 10);
   };
@@ -1420,6 +1434,8 @@ window.__dp_render = async (dbData) => {
       #__dp_score_panel .rec-item { padding: 4px 0; font-size: 12px; display: flex; align-items: center; gap: 6px; border-bottom: 1px solid #eee; }
       #__dp_score_panel .rec-item:last-child { border-bottom: none; }
       #__dp_score_panel .rec-item .rec-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      #__dp_score_panel .rec-item .rec-title-clickable { cursor: pointer; }
+      #__dp_score_panel .rec-item .rec-title-clickable:hover { text-decoration: underline; }
       /* 우측 3개 컬럼 정렬: 실력난이도 ★ / 서열표 ☆ / 보면종류 */
       #__dp_score_panel .rec-item .rec-diff { flex: 0 0 42px; text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
       #__dp_score_panel .rec-item .rec-level { flex: 0 0 32px; text-align: right; color: #888; font-variant-numeric: tabular-nums; font-size: 11px; }
@@ -1614,7 +1630,7 @@ window.__dp_render = async (dbData) => {
           return `
             <div class="rec-item">
               <span class="rec-chart" style="color:${cColor}" title="${r.chart || ''}">${chartLetter}</span>
-              <div class="rec-title"${titleTooltip}><span${titleStyle}>${escHtml(r.title)}</span><span style="color:#aaa;font-weight:400;margin-left:4px;font-size:10.5px">${r.currentLamp || ''}</span></div>
+              <div class="rec-title rec-title-clickable" data-t="${escHtml(r.title)}" data-c="${escHtml(r.chart || '')}"${titleTooltip}><span${titleStyle}>${escHtml(r.title)}</span><span style="color:#aaa;font-weight:400;margin-left:4px;font-size:10.5px">${r.currentLamp || ''}</span></div>
               <span class="rec-diff" style="color:${color}" title="실력 ★">★${r.diffValue.toFixed(2)}</span>
               <span class="rec-level" title="서열표 ☆">☆${r.level.toFixed(1)}</span>
             </div>
@@ -1987,6 +2003,35 @@ window.__dp_render = async (dbData) => {
     })() : ''}
   `;
   document.body.appendChild(panel);
+
+  // 추천곡 곡명 클릭 → 차트 row 토스트 (ohsorry-shelf renderChartRow) — 클릭 위치에 표시.
+  // 이벤트 위임 — rec 항목은 다시뽑기 / 모드변경 시 재렌더되므로 panel 에 한 번만 바인딩.
+  const showRowToast = (chartObj, x, y) => {
+    if (!shelfLib || !shelfLib.renderChartRow) return;
+    document.getElementById('__dp_row_toast')?.remove();
+    const t = document.createElement('div');
+    t.id = '__dp_row_toast';
+    t.innerHTML = shelfLib.renderChartRow(chartObj);
+    t.style.cssText = 'position:fixed;left:0;top:0;width:320px;max-width:calc(100vw - 16px);z-index:9999999;box-shadow:0 6px 24px rgba(0,0,0,.5);border-radius:4px;cursor:pointer';
+    document.body.appendChild(t);
+    const rect = t.getBoundingClientRect();
+    const m = 8;
+    let left = x - rect.width / 2, top = y + 14;
+    left = Math.max(m, Math.min(left, window.innerWidth - rect.width - m));
+    if (top + rect.height + m > window.innerHeight) top = y - rect.height - 14;
+    top = Math.max(m, top);
+    t.style.left = left + 'px';
+    t.style.top = top + 'px';
+    t.addEventListener('click', () => t.remove());
+    clearTimeout(showRowToast.__timer);
+    showRowToast.__timer = setTimeout(() => t.remove(), 4000);
+  };
+  panel.addEventListener('click', (e) => {
+    const el = e.target.closest('.rec-title-clickable');
+    if (!el) return;
+    const found = allCharts.find((c) => c.title === el.dataset.t && c.diff === el.dataset.c);
+    if (found) showRowToast(found, e.clientX, e.clientY);
+  });
 
   // 상세통계 토글 — 프로필 카드의 "상세통계 ▼" 클릭 시 .notes-radar + #__detail_stats 둘 다 같이 보이기/숨기기
   // 노트레이더 안의 X 버튼 (window.__dp_hideRadar) 은 노트레이더만 숨김 — 토글 상태에는 영향 X
