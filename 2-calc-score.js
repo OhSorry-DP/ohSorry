@@ -19,8 +19,15 @@
 // 딜레이 조정: DELAY_MIN_MS / DELAY_MAX_MS 변수 변경
 //   기본: 600~1800ms (12레벨 8페이지면 총 약 5~14초)
 // ============================================================
+//
+// [DB 모드] window.__dp_render(dbData) 로 호출하면 eagate fetch 없이
+//   supabase user_profiles row (dbData) 로 바로 렌더 → 아무 사이트에서나 사용 가능.
+//   dbData 없이 호출 (또는 eagate 도메인 자동 실행) 하면 기존 eagate fetch 모드.
+//   dbData 형식: { iidx_id, dj_name, sp_rank, dp_rank, charts_json, notes_radar, ... }
+// ============================================================
 
-(async () => {
+window.__dp_render = async (dbData) => {
+  dbData = dbData || null;
   // -------- 0. ereter 데이터 로드 (Gist 에서 자동 fetch) --------
   // ereter.net 데이터는 Gist 에 ereter-data.json 으로 올려둔 걸 가져옵니다.
   // 형식: { extractedAt: "ISO 일시", source, count, charts: [...] }
@@ -316,7 +323,8 @@
   const levelText = LEVELS_TO_FETCH[0].label;
 
   // 도메인 체크 (잘못된 사이트에서 실행하면 의미 없으니 안내)
-  if (!location.hostname.endsWith('p.eagate.573.jp')) {
+  // DB 모드 (dbData 주어짐) 에서는 eagate fetch 를 안 하므로 도메인 체크 스킵
+  if (!dbData && !location.hostname.endsWith('p.eagate.573.jp')) {
     alert(
       'p.eagate.573.jp 도메인에서 실행해야 합니다.\n' +
       '먼저 https://p.eagate.573.jp 의 아무 페이지나 열어서 로그인 후, 그 페이지의 콘솔에서 실행하세요.'
@@ -385,7 +393,7 @@
   };
 
   // -------- 4. offset=0,50,100,... 순회 (LEVEL 별로) --------
-  const allCharts = [];
+  let allCharts = [];
   const STEP = 50;
   const MAX_PAGES = 30;  // 무한 루프 방어
   // 사람이 페이지 넘기는 속도와 비슷하게: 페이지마다 3~6초 사이 랜덤 대기
@@ -394,7 +402,18 @@
   const randomDelay = () => DELAY_MIN_MS + Math.random() * (DELAY_MAX_MS - DELAY_MIN_MS);
   let pageCount = 0;
 
-  // 진행 상황을 화면에 표시 (긴 대기 시간 동안 사용자가 진행도 볼 수 있게)
+  // DB 모드 — charts_json 으로 allCharts 를 바로 채우고 아래 eagate fetch 블록은 전부 스킵.
+  if (dbData) {
+    allCharts = Array.isArray(dbData.charts_json) ? dbData.charts_json.slice() : [];
+    console.log(`[오소리] DB 모드 — charts_json ${allCharts.length}곡 (eagate fetch 스킵)`);
+    if (allCharts.length === 0) {
+      alert('DB 데이터에 charts_json 이 없습니다.');
+      return;
+    }
+  }
+
+  // 진행 상황을 화면에 표시 (긴 대기 시간 동안 사용자가 진행도 볼 수 있게) — eagate 모드만
+  if (!dbData) {
   document.getElementById('__dp_progress')?.remove();
   const progress = document.createElement('div');
   progress.id = '__dp_progress';
@@ -414,6 +433,7 @@
     </div>
   `;
   document.body.appendChild(progress);
+  }
   const updateProgress = (text, pct) => {
     const t = document.getElementById('__dp_progress_text');
     const b = document.getElementById('__dp_progress_bar');
@@ -521,7 +541,8 @@
     return true;
   };
 
-  // 각 LEVEL 순차 실행 — 진행도 0~95% 까지 균등 분할
+  // 각 LEVEL 순차 실행 — 진행도 0~95% 까지 균등 분할 (eagate 모드만)
+  if (!dbData) {
   const SPAN = 95 / LEVELS_TO_FETCH.length;
   for (let i = 0; i < LEVELS_TO_FETCH.length; i++) {
     const { difficult: lvD, label: lvL } = LEVELS_TO_FETCH[i];
@@ -537,6 +558,7 @@
   if (allCharts.length === 0) {
     alert('곡을 하나도 못 찾았어요. 페이지 구조가 변경됐을 수 있습니다.');
     return;
+  }
   }
 
   // -------- 5. 매칭 + 점수 계산 --------
@@ -701,6 +723,17 @@
   let starEstimateEreterOnly = null;
   let starEstimateLv12Only = null;
   let starEstimateAll = null;
+  // INF DB 데이터 판별 — INFOhSorry 가 series:'INF' / version:'INFv...' 로 업로드함
+  const isInfData = !!dbData && (dbData.series === 'INF' ||
+    (typeof dbData.version === 'string' && dbData.version.indexOf('INF') === 0));
+  if (isInfData) {
+    // INF DB — INFOhSorry 가 이미 추정한 ★ 를 그대로 사용 (오소리 ★ 모델 재실행 X).
+    // INF 와 오소리(아케이드) 는 게임이 달라 오소리 모델을 INF lamp 에 돌리는 건 의미 없음.
+    starEstimate = typeof dbData.star_estimate === 'number' ? dbData.star_estimate : null;
+    starRaw = typeof dbData.raw_s === 'number' ? dbData.raw_s : null;
+    starEstimateNew = starEstimate;  // 추천 풀 baseStar (ohsorryRecBase) 용
+    console.log(`[오소리] INF DB 데이터 — ★ 모델 스킵, INF 추정값 ★${starEstimate != null ? starEstimate.toFixed(2) : 'N/A'} 그대로 사용`);
+  } else {
   if (oldOSR && ratingData && Array.isArray(ereterData) && ereterData.length > 0) {
     try {
       const ereterPayload = { charts: ereterData, players: ereterPlayers || {} };
@@ -800,10 +833,27 @@
   } else {
     console.error('[step2] 모든 lib 실패 — ★ 추정 불가. lib fetch + localStorage 캐시 모두 실패 가능성');
   }
+  }
 
   // -------- 5.6. status 페이지에서 프로필 정보 fetch --------
   // 쿠프로(クプロ) 이미지, DJ 이름, IIDX ID, SP/DP 단위(段位), 노트레이더 등
   let profile = null;
+  if (dbData) {
+    // DB 모드 — supabase row 에서 프로필 구성 (status.html fetch 스킵).
+    // 쿠프로 이미지는 DB 에 없음. 노트레이더는 notes_radar 있으면 복원, 없으면 미표시.
+    profile = {
+      djName: dbData.dj_name || null,
+      iidxId: dbData.iidx_id || null,
+      spRank: dbData.sp_rank || null,
+      dpRank: dbData.dp_rank || null,
+    };
+    const nr = dbData.notes_radar;
+    if (nr && typeof nr === 'object') {
+      if (nr.sp && typeof nr.sp === 'object') profile.spRadar = nr.sp;
+      if (nr.dp && typeof nr.dp === 'object') profile.dpRadar = nr.dp;
+    }
+    console.log('[오소리] DB 모드 프로필:', profile);
+  } else {
   updateProgress('프로필 정보 fetch 중...', 96);
   try {
     const statusUrl = 'https://p.eagate.573.jp/game/2dx/33/djdata/status.html';
@@ -886,6 +936,15 @@
   } catch (e) {
     console.warn('[step2] 프로필 fetch 실패:', e);
   }
+  }
+
+  // 레이더 데이터 유효성 — 객체이고 6개 카테고리 중 하나라도 숫자값이 있어야 함.
+  // (null / undefined / 빈 객체 {} 면 레이더 영역 자체를 만들지 않음)
+  const RADAR_CATS = ['NOTES', 'CHORD', 'PEAK', 'CHARGE', 'SCRATCH', 'SOF-LAN'];
+  const hasRadarData = (r) =>
+    !!r && typeof r === 'object' &&
+    (RADAR_CATS.some((c) => typeof r[c] === 'number') || typeof r.total === 'number');
+  const profileHasRadar = !!profile && (hasRadarData(profile.spRadar) || hasRadarData(profile.dpRadar));
 
   // -------- 5.7. 추천곡 계산 (EC/HC/EXH 3종류) --------
   // 추천곡 기준 ★값: ereter (이레터 원본) / ohsorry (우리 모델 추정) 토글로 선택 가능
@@ -1090,11 +1149,16 @@
 
   // -------- 6. 화면에 표시 --------
   document.getElementById('__dp_score_panel')?.remove();
-  // 다시 계산 — 패널 제거 후 같은 Gist 다시 fetch + eval (캐시 우회)
+  // 다시 계산 — 패널 제거 후 같은 Gist 다시 fetch + eval (캐시 우회).
+  // DB 모드는 재 fetch 없이 같은 dbData 로 다시 렌더.
   window.__dp_rerun = () => {
     document.getElementById('__dp_score_panel')?.remove();
     document.getElementById('__dp_progress')?.remove();
     document.getElementById('__dp_confirm_rerun')?.remove();
+    if (dbData) {
+      window.__dp_render(dbData);
+      return;
+    }
     fetch('https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw/2-calc-score.js?t=' + Date.now())
       .then(r => r.text())
       .then(eval);
@@ -1362,7 +1426,7 @@
           })() : ''}
         </div>
         ${starEstimate != null ? (() => {
-          const hasRadar = profile && (profile.spRadar || profile.dpRadar);
+          const hasRadar = profileHasRadar;
           const radarToggle = hasRadar
             ? `<div class="nr-toggle" onclick="window.__dp_toggleRadar()">상세통계 ▼</div>`
             : '';
@@ -1390,7 +1454,7 @@
       </div>
     ` : '<div class="meta">프로필 정보를 가져올 수 없었어요</div>'}
 
-    ${profile && (profile.spRadar || profile.dpRadar) ? (() => {
+    ${profileHasRadar ? (() => {
       const CATS = ['NOTES', 'CHORD', 'PEAK', 'CHARGE', 'SCRATCH', 'SOF-LAN'];
       // SVG 레이더 배치 (시계방향): 위(NOTES) → 우상(PEAK) → 우하(SCRATCH) → 아래(SOF-LAN) → 좌하(CHARGE) → 좌상(CHORD)
       const SVG_ORDER = ['NOTES', 'PEAK', 'SCRATCH', 'SOF-LAN', 'CHARGE', 'CHORD'];
@@ -1430,7 +1494,7 @@
         </svg>`;
       };
       const renderBox = (style, radar) => {
-        if (!radar) return '';
+        if (!hasRadarData(radar)) return '';
         const cls = style.toLowerCase();
         // 폴리곤 색 = 6개 수치 중 최댓값 카테고리의 색
         const topCat = CATS.reduce((top, c) => (radar[c] || 0) > (radar[top] || 0) ? c : top, CATS[0]);
@@ -1927,7 +1991,12 @@
   // -------- 7. Supabase user_profiles UPSERT --------
   //   user_profiles: iidx_id PK 로 UPSERT (매번 덮어쓰기 + charts_json 저장)
   //   실패해도 사용자 경험에 영향 없도록 fire-and-forget
+  //   DB 모드는 조회용 렌더라 재업로드 안 함 (DB 데이터를 그대로 덮어쓰는 의미 없음)
   (async () => {
+    if (dbData) {
+      console.log('[오소리] DB 모드 — user_profiles 재업로드 skip');
+      return;
+    }
     const SUPABASE_URL = 'https://ryesiijulrlmstmhzpnv.supabase.co';
     // Legacy JWT anon key (publishable key 는 RLS 호환성 문제로 사용 X)
     const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ5ZXNpaWp1bHJsbXN0bWh6cG52Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgxNzAxNDAsImV4cCI6MjA5Mzc0NjE0MH0.KaKa241XpXbRkdM0C3euyUM3jOX673ijd319HFFFxwA';
@@ -1981,8 +2050,8 @@
       level_filter: 'lv12',
       series: SERIES,
       charts_json: allCharts,
-      notes_radar: (profile.spRadar || profile.dpRadar)
-        ? { sp: profile.spRadar || null, dp: profile.dpRadar || null }
+      notes_radar: profileHasRadar
+        ? { sp: hasRadarData(profile.spRadar) ? profile.spRadar : null, dp: hasRadarData(profile.dpRadar) ? profile.dpRadar : null }
         : null,
     };
 
@@ -2007,4 +2076,12 @@
       console.warn('[step2] user_profiles 실패:', e.message);
     }
   })();
-})();
+};
+
+// eagate 도메인이면 자동 실행 (콘솔에 붙여넣는 기존 사용법 그대로).
+// 그 외 사이트는 window.__dp_render(dbData) 로 DB 데이터를 넘겨 호출.
+if (location.hostname.endsWith('p.eagate.573.jp')) {
+  window.__dp_render(null);
+} else {
+  console.log('[오소리] eagate 외 도메인 — window.__dp_render(dbData) 로 DB 데이터를 넘겨 호출하세요.');
+}
