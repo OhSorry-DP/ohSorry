@@ -38,6 +38,8 @@ window.__dp_render = async (dbData) => {
   // zasa.sakura.ne.jp 의 비공식 ☆12 난이도표 — ereter 미등록 차트 검증용 (보충).
   // 추천곡 / ★값 추정에는 사용 X. "★ 단위별 클리어 램프 표" 의 곡 수 보강만.
   const ZASA_DATA_URL = 'https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw/zasa-data.json';
+  // textage 채보 메타 — 채보별 총 노트 수 (notes.DN/DH/DA/DX). noteCount 보강 + missCount 계산용.
+  const TEXTAGE_DATA_URL = 'https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw/textage-meta.json';
   const CACHE_KEY = 'ereter_dp_diff_v4';
   const CACHE_TTL_MS = 24 * 60 * 60 * 1000;  // 24시간
 
@@ -146,6 +148,22 @@ window.__dp_render = async (dbData) => {
     }
   } catch (e) {
     console.warn('[step2] zasa fetch 실패 (무시 가능):', e.message);
+  }
+
+  // -------- 0.55. textage 채보 메타 fetch (선택, 실패해도 무시) --------
+  // 채보별 총 노트 수 → charts 의 noteCount 보강 + missCount 계산 (noteCount - pgreat - great).
+  let textageSongs = null;
+  try {
+    const res = await fetch(TEXTAGE_DATA_URL + '?t=' + Date.now(), { cache: 'no-store' });
+    if (res.ok) {
+      const raw = await res.json();
+      if (raw && raw.songs && typeof raw.songs === 'object') {
+        textageSongs = raw.songs;
+        console.log(`[step2] textage 채보 메타 ${Object.keys(textageSongs).length}곡 로드`);
+      }
+    }
+  } catch (e) {
+    console.warn('[step2] textage fetch 실패 (무시 가능):', e.message);
   }
 
   // -------- 0.6. ohSorryRating 데이터 + 외부 ★ 추정 lib fetch (localStorage 캐시) --------
@@ -560,6 +578,40 @@ window.__dp_render = async (dbData) => {
     alert('곡을 하나도 못 찾았어요. 페이지 구조가 변경됐을 수 있습니다.');
     return;
   }
+  }
+
+  // -------- 4.5. textage 채보 메타로 noteCount / missCount 보강 --------
+  // textage notes (DN/DH/DA/DX) → noteCount. 플레이한 곡은 missCount = noteCount - pgreat - great
+  // (EX 점수 표기 2392(986/420) 에서 986=pgreat, 420=great → EX = pgreat*2 + great).
+  //   - noteCount: 이미 있으면 (INF charts) 유지, 없으면 (오소리) textage 로 채움
+  //   - missCount: pgreat/great 있는 오소리 charts 만 재계산 (eagate 파싱 missCount 보다 신뢰도 높음)
+  if (textageSongs) {
+    // norm(title) → notes 인덱스
+    const textageMap = {};
+    let dup = 0;
+    for (const id in textageSongs) {
+      const s = textageSongs[id];
+      if (!s || !s.notes || !s.title) continue;
+      const key = norm(s.title);
+      if (textageMap[key]) dup++;
+      textageMap[key] = s.notes;  // 충돌 시 마지막 우선 (드묾)
+    }
+    const DIFF_TO_TEXTAGE = { NORMAL: 'DN', HYPER: 'DH', ANOTHER: 'DA', LEGGENDARIA: 'DX', BEGINNER: 'DB' };
+    let filledNote = 0, filledMiss = 0;
+    for (const c of allCharts) {
+      const notes = textageMap[norm(c.title)];
+      if (!notes) continue;
+      const tKey = DIFF_TO_TEXTAGE[c.diff];
+      const nc = tKey ? notes[tKey] : null;
+      if (typeof nc !== 'number' || nc <= 0) continue;
+      if (typeof c.noteCount !== 'number') { c.noteCount = nc; filledNote++; }
+      // missCount = noteCount - pgreat - great (플레이한 오소리 charts 만 — pgreat/great 보유)
+      if (c.lampNum > 0 && typeof c.pgreat === 'number' && typeof c.great === 'number') {
+        c.missCount = Math.max(0, nc - c.pgreat - c.great);
+        filledMiss++;
+      }
+    }
+    console.log(`[step2] textage 보강 — noteCount ${filledNote}곡 / missCount ${filledMiss}곡 (norm 충돌 ${dup})`);
   }
 
   // -------- 5. 매칭 + 점수 계산 --------
