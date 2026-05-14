@@ -1298,7 +1298,11 @@ window.__dp_render = async (dbData) => {
         box-shadow: 0 6px 24px rgba(0,0,0,.18);
         padding: 12px 14px;
         box-sizing: border-box;
+        /* 패널 전체 줄바뀜 방지 — 모든 하위 요소가 상속 (긴 텍스트는 overflow:auto 로 스크롤) */
+        white-space: nowrap;
       }
+      /* 명시적으로 줄바뀜 막아야 하는 하위 요소들 (자체 white-space 룰 가진 것 덮어쓰기) */
+      #__dp_score_panel * { white-space: nowrap; }
       @media (min-width: 768px) {
         /* 데스크톱: 우상단 고정, 너비 고정 (다시 뽑기 시 출렁임 방지) */
         #__dp_score_panel { left: auto; top: 16px; right: 16px; padding: 14px 16px; width: 380px; }
