@@ -752,28 +752,35 @@
   }
 
   // 채택 로직 (표기용):
-  //   OSR135 ≥ 13.0                    → OSR135 (13.0+ 영역 가장 정확, MAE 0.121)
-  //   else if group A or B + OSR 결과   → OSR (v0.0.2) — 저클리어 사용자 (lv12 < 30 또는 12.0+ < 30) 는 OSR 채택
-  //   else                              → oldOSR (v3.3.3) — group C (12.0+ ≥ 30) + OSR135 < 13.0 영역 (all-11.6+ 제외 후 max)
-  //   oldOSR 도 없으면 OSR 로 fallback
+  //   OSR135 ≥ 11.0                  → 무조건 OSR13.5+ (11.0+ 영역 담당)
+  //   OSR135 10.5~11.0               → OSR135 ↔ group값 선형 보간 (경계 점프 방지)
+  //   OSR135 < 10.5 (또는 없음)       → group 별: A·B → OSR / C → oldOSR
+  //   group lib 도 없으면 OSR135 로 fallback
   // 내부 계산용 starEstimateNew (OSR) 는 그대로 유지 — 추천 풀 baseStar (ohsorryRecBase) 에서 사용
-  if (starEstimate135 != null && starEstimate135 >= 13.0) {
+  const OSR135_TH = 11.0;       // OSR135 담당 하한
+  const BLEND_W = 0.5;          // (OSR135_TH - BLEND_W) ~ OSR135_TH 선형 보간 폭
+  const isAB135 = osrGroup === 'A' || osrGroup === 'B';
+  const groupStar = isAB135 ? starEstimateNew : starEstimateOld;        // 주 채택 (group 별)
+  const groupStarFb = isAB135 ? starEstimateOld : starEstimateNew;      // 주 없을 때 fallback
+  const baseStar2 = groupStar != null ? groupStar : groupStarFb;       // group 측 최종값
+  const groupLib = groupStar != null
+    ? (isAB135 ? 'OSR' : 'oldOSR')
+    : (isAB135 ? 'oldOSR(fb)' : 'OSR(fb)');
+  if (starEstimate135 != null && starEstimate135 >= OSR135_TH) {
     starEstimate = starEstimate135;
-    console.log(`[step2] ★ = OSR13.5+ ${starEstimate.toFixed(2)} (≥ 13.0)`);
-  } else if ((osrGroup === 'A' || osrGroup === 'B') && starEstimateNew != null) {
-    starEstimate = starEstimateNew;
+    console.log(`[step2] ★ = OSR13.5+ ${starEstimate.toFixed(2)} (≥ ${OSR135_TH})`);
+  } else if (starEstimate135 != null && starEstimate135 >= OSR135_TH - BLEND_W && baseStar2 != null) {
+    const t = (starEstimate135 - (OSR135_TH - BLEND_W)) / BLEND_W; // 0~1 (1 이면 OSR135 쪽)
+    starEstimate = baseStar2 * (1 - t) + starEstimate135 * t;
+    console.log(`[step2] ★ = blend ${starEstimate.toFixed(2)} (OSR135 ${starEstimate135.toFixed(2)} ↔ ${groupLib} ${baseStar2.toFixed(2)}, t=${t.toFixed(2)}, group ${osrGroup})`);
+  } else if (baseStar2 != null) {
+    starEstimate = baseStar2;
     const reason = starEstimate135 == null ? 'OSR135 결과 없음'
-      : `OSR135(${starEstimate135.toFixed(2)}) < 13.0`;
-    console.log(`[step2] ★ = OSR ${starEstimate.toFixed(2)} (group ${osrGroup}, ${reason})`);
-  } else if (starEstimateOld != null) {
-    starEstimate = starEstimateOld;
-    const reason = starEstimate135 == null ? 'OSR135 결과 없음'
-      : `OSR135(${starEstimate135.toFixed(2)}) < 13.0`;
-    const groupInfo = osrGroup ? `group ${osrGroup}, ` : '';
-    console.log(`[step2] ★ = oldOSR ${starEstimate.toFixed(2)} (${groupInfo}${reason})`);
-  } else if (starEstimateNew != null) {
-    starEstimate = starEstimateNew;
-    console.warn('[step2] oldOSR 결과 없음 → OSR (v0.0.2) 단독 fallback');
+      : `OSR135(${starEstimate135.toFixed(2)}) < ${OSR135_TH - BLEND_W}`;
+    console.log(`[step2] ★ = ${groupLib} ${starEstimate.toFixed(2)} (group ${osrGroup}, ${reason})`);
+  } else if (starEstimate135 != null) {
+    starEstimate = starEstimate135;
+    console.warn('[step2] group lib 결과 없음 → OSR135 단독 fallback');
   } else {
     console.error('[step2] 모든 lib 실패 — ★ 추정 불가. lib fetch + localStorage 캐시 모두 실패 가능성');
   }
