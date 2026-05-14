@@ -600,28 +600,39 @@ window.__dp_render = async (dbData) => {
   // missCount 는 보강 X — IIDX 판정은 Pgreat/Great/Good/Bad/Poor 이고 MISS COUNT(BP) = Bad+Poor 인데
   // EX 표기 2392(986/420) 에선 Pgreat/Great 만 알 수 있고 Good 을 모름 → BP 계산 불가.
   // (noteCount - pgreat - great = Good+Bad+Poor 라 MISS 가 아님.) EXH 추천은 rate(%) 로 정렬.
+  //
+  // 매칭 주의:
+  //   - textage title 에 HTML 태그 (<font ...>) 가 섞인 곡 多 → norm 전에 태그 제거.
+  //   - norm 충돌 (예: "Fly Away" lv8 ↔ "FlyAway" lv12 둘 다 norm "flyaway") → 한 키에 엔트리 배열로
+  //     보관하고, 매칭 시 levels[slot] 이 차트 gameLevel 과 일치하는 엔트리를 우선 선택.
+  //     (안 그러면 lv12 곡이 lv8 노트수에 매칭돼 rate 가 100% 초과 등 오류)
   if (textageSongs) {
-    // norm(title) → notes 인덱스
+    const stripHtml = (s) => (s || '').replace(/<[^>]*>/g, '');
+    // norm(태그제거 title) → [{ notes, levels }, ...]
     const textageMap = {};
-    let dup = 0;
     for (const id in textageSongs) {
       const s = textageSongs[id];
       if (!s || !s.notes || !s.title) continue;
-      const key = norm(s.title);
-      if (textageMap[key]) dup++;
-      textageMap[key] = s.notes;  // 충돌 시 마지막 우선 (드묾)
+      const key = norm(stripHtml(s.title));
+      (textageMap[key] = textageMap[key] || []).push({ notes: s.notes, levels: s.levels || {} });
     }
     const DIFF_TO_TEXTAGE = { NORMAL: 'DN', HYPER: 'DH', ANOTHER: 'DA', LEGGENDARIA: 'DX', BEGINNER: 'DB' };
     let filledNote = 0;
     for (const c of allCharts) {
-      const notes = textageMap[norm(c.title)];
-      if (!notes) continue;
+      const entries = textageMap[norm(c.title)];
+      if (!entries) continue;
       const tKey = DIFF_TO_TEXTAGE[c.diff];
-      const nc = tKey ? notes[tKey] : null;
+      if (!tKey) continue;
+      // norm 충돌 시 — levels[slot] 이 차트 gameLevel 과 일치하는 엔트리 우선 (없으면 첫 엔트리)
+      let chosen = entries[0];
+      if (entries.length > 1) {
+        chosen = entries.find((e) => e.levels[tKey] === c.gameLevel) || entries[0];
+      }
+      const nc = chosen.notes[tKey];
       if (typeof nc !== 'number' || nc <= 0) continue;
       if (typeof c.noteCount !== 'number') { c.noteCount = nc; filledNote++; }
     }
-    console.log(`[step2] textage 보강 — noteCount ${filledNote}곡 (norm 충돌 ${dup})`);
+    console.log(`[step2] textage 보강 — noteCount ${filledNote}곡`);
   }
 
   // -------- 5. 매칭 + 점수 계산 --------
