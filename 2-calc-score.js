@@ -1435,7 +1435,7 @@ window.__dp_render = async (dbData) => {
       #__dp_score_panel .rec-item:last-child { border-bottom: none; }
       #__dp_score_panel .rec-item .rec-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       #__dp_score_panel .rec-item .rec-title-clickable { cursor: pointer; }
-      #__dp_score_panel .rec-item .rec-title-clickable:hover { text-decoration: underline; }
+      #__dp_score_panel .rec-item .rec-title-clickable:hover { font-weight: 700; }
       /* 우측 3개 컬럼 정렬: 실력난이도 ★ / 서열표 ☆ / 보면종류 */
       #__dp_score_panel .rec-item .rec-diff { flex: 0 0 42px; text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
       #__dp_score_panel .rec-item .rec-level { flex: 0 0 32px; text-align: right; color: #888; font-variant-numeric: tabular-nums; font-size: 11px; }
