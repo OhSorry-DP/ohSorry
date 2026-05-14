@@ -403,8 +403,9 @@ window.__dp_render = async (dbData) => {
   let pageCount = 0;
 
   // DB 모드 — charts_json 으로 allCharts 를 바로 채우고 아래 eagate fetch 블록은 전부 스킵.
+  // deep copy — 외부 lib / 본체가 차트 객체를 in-place 가공하므로 호출자 원본 (서열표 등) 오염 방지.
   if (dbData) {
-    allCharts = Array.isArray(dbData.charts_json) ? dbData.charts_json.slice() : [];
+    allCharts = Array.isArray(dbData.charts_json) ? JSON.parse(JSON.stringify(dbData.charts_json)) : [];
     console.log(`[오소리] DB 모드 — charts_json ${allCharts.length}곡 (eagate fetch 스킵)`);
     if (allCharts.length === 0) {
       alert('DB 데이터에 charts_json 이 없습니다.');
