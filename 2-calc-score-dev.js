@@ -1427,10 +1427,10 @@ window.__dp_render = async (dbData) => {
           })() : ''}
         </div>
         ${starEstimate != null ? (() => {
-          const hasRadar = profileHasRadar;
-          const radarToggle = hasRadar
-            ? `<div class="nr-toggle" onclick="window.__dp_toggleRadar()">상세통계 ▼</div>`
-            : '';
+          // 상세통계 토글 — 레이더 유무와 무관하게 항상 표시 (starEstimate 있으면 #__detail_stats 가 있음).
+          // 이전엔 hasRadar 일 때만 버튼이 떠서, 레이더 없는 (DB 모드 / 구버전 업로드) 유저는
+          // #__detail_stats 가 display:none 인 채로 열 방법이 없었음.
+          const radarToggle = `<div class="nr-toggle" onclick="window.__dp_toggleRadar()">상세통계 ▼</div>`;
           // 위에서 이미 계산한 eraterTrueStar 변수 재사용
           if (eraterTrueStar != null) {
             const diff = starEstimate - eraterTrueStar;
