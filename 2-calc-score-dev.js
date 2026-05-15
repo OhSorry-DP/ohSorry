@@ -428,9 +428,9 @@ window.__dp_render = async (dbData) => {
   let allCharts = [];
   const STEP = 50;
   const MAX_PAGES = 30;  // 무한 루프 방어
-  // 사람이 페이지 넘기는 속도와 비슷하게: 페이지마다 3~6초 사이 랜덤 대기
-  const DELAY_MIN_MS = 600;
-  const DELAY_MAX_MS = 1800;
+  // 사람이 페이지 넘기는 속도와 비슷하게: 페이지마다 0.8~1.2초 사이 랜덤 대기 (평균 1초)
+  const DELAY_MIN_MS = 800;
+  const DELAY_MAX_MS = 1200;
   const randomDelay = () => DELAY_MIN_MS + Math.random() * (DELAY_MAX_MS - DELAY_MIN_MS);
   let pageCount = 0;
 
