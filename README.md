@@ -100,126 +100,12 @@ javascript:fetch('https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f43
 
 ---
 
-## ★값 추정 원리 (v3.3.5 — 모델 코어는 v3.2.9 그대로, v3.3.x 는 보정 / 풀 / 표시 개선)
+## ★값 추정 원리
 
-### 모델 구조
+ohSorry 본체의 ★ 추정 모델 / LOOCV / v3.0.x ~ v3.3.x 변경표는 [ohSorryRating README](../ohSorryRating/README.md) 의 "OSR 추정모델 변경사항 (oldOSR)" 섹션 참고.
 
-**v3.1.1 의 stage1 logistic + v3.2 의 robust feature 통합** 한 2단계 Ridge 회귀 모델. 우리 자체 수집한 104명 사용자 데이터 (lv12 lamp 기준) 로 학습.
+ohSorry 는 외부 ★ 추정 lib (`oldOSR.js` / `osr.js` / `OSR13.5+.js`) 를 fetch 해서 사용하고, 곡 별 estimate (`ohSorryRating.json`) 도 ohSorryRating 에서 빌드한 산출물을 사용.
 
-**1단계: stage 별 logistic 모델 (raw_s 추정)**
-
-P(clear | S, d, stage) = 1 / (1 + exp( α_s(S) × (d − S) ))
-
-- α_s(S) = a0_s + a1_s · S + a2_s · S²   (사용자 S 의 2차 함수)
-- 학습 input 형식 = 실전 input 형식 (lv12 lamp): lamp ≥ 3=EC, ≥ 5=HC, ≥ 6=EXH
-
-stage 별 α 계수 (a0, a1, a2):
-- EC  : α(S) = 194.445153 +  41.489739·S +  6.085698·S²
-- HC  : α(S) = 119.451394 + 295.165202·S − 20.796304·S² (× 2 적용)
-- EXH : α(S) =   2.722775 +   0.444754·S +  3.689284·S²
-
-α 값이 큰 이유는 binary input 에 대해 sigmoid 가 step function 에 가까운 형태로 fit 되기 때문. 수치 안정성을 위해 z = α(d − S) 를 ±50 범위로 clamp.
-
-raw_s 는 **0.01 step grid search + golden-section refinement** 로 negative log-likelihood 최소화.
-
-**안전 규칙:**
-- 한 lamp 에서 클리어한 곡이 10 미만이면 그 lamp 의 base feature 6개 = 0
-- 모든 lamp 에서 클리어 < 10 이면 → ★ 0.5 (저렙 fallback)
-- raw_s 의 grid 상한 14.50: ☆12 곡 데이터로는 ★14.5 이상 영역의 정밀 분리가 어려워 cap
-
-**2단계: 36-feature Ridge 회귀 보정 (raw → final)**
-
-final = raw_s + Σ coef_i × feature_i (intercept 포함)
-
-| 그룹 | feature 수 | 내용 |
-|---|---|---|
-| Base (raw_s) | 3 | intercept, raw_s, raw_s² |
-| Stage 별 분포 (×3) | 18 | 각 lamp 마다 6개 (max_d_clear, min_d_fail, p50_d_clear, frac_clear, fail_below, clear_above) |
-| AC/FC (v3.1) | 8 | ASSIST 이상 / FULL COMBO 곡 통계 |
-| v3.2 robust | 7 | M, M_top10_avg, gap_top10, gap × is_ec/hc/exh, prob_sum |
-| **합계** | **36** | |
-
-v3.2 추가 7개 feature 의 의미:
-- **M**: 사용자 도달 stage 의 max ★ (lamp ≥ 6 → exh, =5 → hc, 3-4 → ec)
-- **M_top10_avg**: cleared 곡 top 1~10 의 평균 (robust max estimator)
-- **gap_top10**: M − top10 (M 이 outlier 인지의 신호 — 클수록 운빨)
-- **gap × is_ec/hc/exh**: M 의 stage 별 차등 페널티 (interaction)
-- **prob_sum**: S_hat = M_top10_avg 기준 sigmoid prob > 0.99 제외한 failed 곡들의 페널티 합
-
-Ridge 회귀의 정규화 강도 α = 5.0.
-
-전체 계수 표는 `2-calc-score.js` 의 `RIDGE_COEF` 배열 참고.
-
-### 정확도 (LOOCV)
-
-**cutoff = n_cleared ≥ 50** (학습 데이터에 포함될 사용자의 최소 12렙 cleared 곡 수). 이 미만인 사용자는 통계 신뢰도 부족으로 학습/평가 X.
-
-| 지표 | 값 |
-|---|---|
-| 학습 데이터 | 86명 (cutoff 통과) |
-| **LOOCV 평균 \|err\|** | **0.1989** |
-| LOOCV 중간값 | 0.1519 |
-| LOOCV 최대 | 1.2657 |
-| LOOCV RMSE | 0.2941 |
-
-LOOCV 분포:
-- ≤0.05 ★ : 18 / 86 (20.9%)
-- ≤0.10 ★ : 27 / 86 (31.4%)
-- ≤0.30 ★ : 74 / 86 (86.0%)
-
-**핵심 사용자 결과:**
-- A.OUT (★11.14): pred 11.17 (오차 +0.03)
-- SILENT (★14.54): pred 14.52 (오차 +0.02)
-- GROM (★4.96): pred 4.81 (오차 -0.15)
-- POCHI (★10.41): pred 9.14 (오차 -1.27, 시도 수 적은 outlier)
-
-남은 약점은 **★1~5 영역 + 시도 곡 수가 적은 사용자**. 이 영역은 lamp 만으로는 추정 불가능하고 ereter 가 다른 정보 (시도 횟수 normalize 등) 를 활용하는 듯하지만 우리 데이터로는 reverse-engineer 불가능.
-
-### 데이터 범위
-
-- ☆11.6 ~ ☆12.7 모든 곡 (이레터넷 페이지 기준 공식 ☆12 전체)
-- NO PLAY (lamp 0) 곡은 Stage 1 에서 제외
-- 표본 (★값 추정용 fitData) 30개 미만이면 추정 X
-
-### v3.0.3 → v3.2.1 변경 요약
-
-| 항목 | v3.0.3 | v3.1 | v3.1.1 | v3.2 | v3.2.1 |
-|---|---|---|---|---|---|
-| 학습 데이터 | 103명 (ereter prob) | 104명 (lv12 lamp) | 동일 | 동일 | 동일 |
-| 학습 input 형식 | binary clear (ereter prob ≥ 50%) | lv12 lamp | 동일 | 동일 | 동일 |
-| Stage 1 alpha (HC) | × 2 | × 1 | × 2 | × 1 | × 2 |
-| Stage 2 feature 수 | 21 | 29 (+ AC/FC) | 29 | 11 (단일 모델) | 36 (통합) |
-| Stage 2 ridge α | 0.5 | 5.0 | 5.0 | 10.0 | 5.0 |
-| cutoff (n_cleared) | 없음 | 없음 | 없음 | 없음 | **≥ 50** |
-| Golden-section | X | O | O | O | O |
-| Invalid lamp = 0 | O | O | O | O | O |
-| LOOCV 평균 \|err\| (우리 데이터) | 0.5393 | 0.2829 | 0.2917 | 0.378 | **0.1989** |
-
-이전 버전들 (v3.0.x ~ v3.2) 의 코드는 [logic/](logic/) 폴더에 archive.
-
-### v3.3 시리즈 변경 요약 (모델 코어는 v3.2.9 그대로)
-
-v3.3 부터는 **모델 자체는 그대로** 두고 보정 로직 / 추천 풀 / UI 개선에 집중.
-
-| 버전 | 변경 |
-|---|---|
-| v3.3.1 | `ohSorryRating.json` 도입 — ereter 미등록 lv11/12 차트의 estEc/estHc 추정 (104명 데이터 기반). fitData fallback + 추천 풀에 통합. lv11 추정 차트 곡명 연두색 표시. 하한 0.5 → 0.01. |
-| v3.3.2 | EC-only 사용자 (HC/EXH 클리어 < 10) 에 raw + max_clear 기반 선형 보정 (16명 fit, MAE 0.637 → 0.374, 41% 감소). |
-| v3.3.3 | **4종 fitData 동시 수집 + 모델 함수 분리**: 이레터넷만 / lv12-only / 11.6+ 전체 / primary (useOnlyLv12 분기) → max 채택해서 저렙 fallback (★0.01) 자동 보완. 상세통계 패널에 ★ 추정 비교 표시. lv12 ratingMap fallback 곡명 하늘색 (#87ceeb) / lv11 진한 연두색 (#9ccc65). 추천 풀 lv11+lv12 전곡으로 확장 (zasa < 11.6 lv11 lower-tier 포함). EC 정리곡: HC < baseStar - 3 미만 곡 제외 (시간 낭비 방지). bug fix: runStarModel 내부 closure 변수 fitData → fit (4 호출이 모두 동일 데이터로 돌던 문제). |
-| v3.3.4 | ★ 추정 로직 외부 lib 분리 (calc-Old-OSR.js v3.3.3 + calc-OSRating.js v0.0.2), max(oldOSR, OSR) ensemble 채택. |
-| v3.3.5 | **OSR13.5+.js (bin50 + 50% 임계 + 상향 bin 부분 보너스)** 추가. 채택 분기 (D2): OSR135 ≥ 13.0 → OSR135 / else → OSR / 둘 다 없으면 oldOSR (fallback). 1021명 검증: 전체 MAE **0.398 → 0.363**, max\|err\| **6.989 → 4.264**, bias **+0.192 → +0.016**. 영역별: 14+ 0.014, 13+ 0.121, 12+ 0.248, 11+ 0.268, 0+ 0.363. v3.3.4 의 max(oldOSR, OSR) ensemble 폐기, oldOSR 는 fallback 으로만 유지. **표기 변경**: group C (12.0+ 클리어 ≥ 30) + OSR135 < 13.0 영역만 표시 ★ 를 OSR (v0.0.2) 대신 oldOSR (v3.3.3) 값으로 표기. group A (lv12 < 30) / B (12.0+ < 30) 는 OSR 표기 유지. 내부 starEstimateNew 는 추천 풀 baseStar (`ohsorryRecBase`) 용으로 유지. **group C 의 oldOSR 4종 max 에서 `all-11.6+` scope 제외** — lv11 추정 보강이 고수에게는 잡음으로 작용. group C 면 useOnlyLv12=true 보장이므로 `ereterOnly` / `lv12Only` 중 max 로 재계산 (primary === lv12Only). |
-| v3.3.5 (D3) | **채택 분기 재정의 + OSR (v0.0.5) + OSR13.5+ (v0.0.3) 개선** — 1021명 검증 영역별 최강 lib 기준. 분기: OSR135 ≥ 13.0 → 무조건 OSR135 (13+ 압도) / 12.5~13.0 → OSR135↔group값 선형 보간 / 그 미만 → group 별 base (A·B → OSR / **C → OSR값 ≥ 11.0 이면 OSR, < 11.0 이면 oldOSR, 10.5~11.0 보간** — 11~13 은 OSR 가 최강). **OSR (calc-OSRating) v0.0.5**: bandCorr 0.5 bin → 선형 보간, 그룹 A/B/C 경계 30±5 soft transition, nativeStar shrinkage, ASSIST(lamp=2) fitData 제외, M feature top-3 평균 robust 화 + 재학습 (1187 ratings). **OSR13.5+ v0.0.3**: bonus down-scale (baseStar 낮을수록 bonus 적게 — 14+ 0.014 유지하면서 저렙 over-estimation 억제, 10.0+ MAE 0.325 → 0.305). 1021명 검증: D3 분기 누적 MAE 14+ **0.014**, 13+ **0.116**, 12+ **0.232**, 11+ **0.256**, 10+ **0.244** (v3.3.4 0.291 대비 -16%). |
-| v3.3.5 (v335E) | **v335E 채택 분기 (spread gate)** — D3 분기 업그레이드. ① OSR135 세 분기(EC/HC/EXH) 중 0(데이터 없음) 제외 `max-min spread > 2.5` 면 OSR135 내부 불일치 → 신뢰 X, baseStar2 직행 (LISASU 같은 하드 특화 / `33055059` 같은 OSR135 폭주 잡음). ② `≥13.5 직행, 12.5~13.5 블렌드` (기존 ≥13.0 / 12.5~13.0 에서 확장). ③ 블렌드 안 gap guard — `osr > osr135` 면 OSR135 직행, blend ↔ OSR135 를 `gapW=clamp((osr135-osr)/3)` 로 가중. 1021명 검증: 14+ 0.014 (그대로), 12.5+ 0.178 → 0.167, 12.0+ 0.232 → 0.221, 10.0+ 0.244 → 0.222 — **12.5 이하 전 구간 개선**. 13.0+ 만 0.116 → 0.134 (+0.018, 13~14 진짜 고렙 일부도 끌려서). |
-| v3.3.5 (rec토스트) | **추천곡 곡명 클릭 → 차트 row 토스트** — `ohsorry-shelf.js` 를 lib 으로 로드 (`renderChartRow`), EC/HC/EXH 추천곡 항목의 곡명 클릭 시 INFOhSorry DP탭 모바일 1행 스타일 토스트를 클릭 위치에 표시. 이벤트 위임으로 다시뽑기/모드변경 후에도 동작. |
-| v3.3.5 (textage 매칭) | **textage 매칭 버그 수정** — ① textage title 의 HTML 태그 (`<font ...>`) 제거 후 norm ② norm 충돌 (`"Fly Away"` lv8 ↔ `"FlyAway"` lv12) 시 한 키에 엔트리 배열로 보관하고 `levels[slot]` 이 차트 `gameLevel` 과 일치하는 엔트리 우선 선택. 이전엔 lv12 곡이 lv8 노트수에 잘못 매칭돼 rate 가 100% 초과되는 곡 발생 (FlyAway 등). |
-| v3.3.5 (textage) | **textage 채보 메타로 noteCount 보강** — `textage-meta.json` (채보별 총 노트 수) 을 gist 에서 fetch, `norm(곡명)` 매칭으로 charts 에 `noteCount` 채움 (없을 때만 — INF charts 는 tsv 값 유지). supabase `charts_json` 업로드에도 포함 → 게스트 서열표 곡 클릭 토스트의 rate 바 등에 사용. **missCount 는 보강 불가** — IIDX 판정 Pgreat/Great/Good/Bad/Poor 중 MISS COUNT(BP)=Bad+Poor 인데 EX 표기 `2392(986/420)` 에선 Pgreat/Great 만 알고 Good 을 몰라 BP 계산 불가. → **EXH 추천곡은 미스카운트 대신 rate(%) (= exScore / noteCount×2) 높은 순으로 정렬**. |
-| v3.3.5 (DB모드) | **DB 모드 추가** — `window.__dp_render(dbData)` 로 호출하면 eagate fetch 없이 supabase `user_profiles` row 로 바로 렌더. eagate 도메인이면 기존처럼 자동 실행, 그 외 도메인은 `__dp_render(dbData)` 호출 대기 → **아무 사이트에서나 DB 데이터로 패널 표시 가능** (게스트 페이지 서열표 탭 연동용). DB 모드는 difficulty.html / status.html fetch · 진행 패널 · supabase 재업로드 전부 스킵, `__dp_rerun` 도 재 fetch 없이 같은 데이터로 재렌더. **INF DB 데이터** (`series:'INF'` / `version:'INFv…'`) 면 오소리 ★ 모델을 안 돌리고 INFOhSorry 가 추정한 `star_estimate` 를 그대로 사용 (게임이 달라 오소리 모델을 INF lamp 에 돌리는 건 무의미). **레이더 가드** — `notes_radar` 가 null / 빈 객체면 레이더 영역 자체를 안 만듦 (`hasRadarData` 헬퍼로 토글·SVG·업로드 3곳 통일). DB 모드는 `charts_json` 을 deep copy 해서 사용 — 외부 lib / 본체가 차트 객체를 in-place 가공해도 호출자 원본 (게스트 서열표 등) 이 오염되지 않음. **상세통계 토글 (`상세통계 ▼`) 은 레이더 유무와 무관하게 항상 표시** — 레이더 가드를 추가하면서 이 토글까지 같이 숨어 `#__detail_stats` 를 열 방법이 없던 버그 수정. |
-
-`useOnlyLv12` 분기: LEVEL 12 플레이 곡 ≥ 30 → primary 호출은 lv12-only fitData. 단 v3.3.3 부터는 4 scope 모두 계산해서 max 채택하므로 분기 결과가 저렙 fallback 떨어져도 다른 scope 가 보완.
-
-추천 풀 (v3.3.3): zasa★ ≥ 11.6 필터 제거 → lv11 zasa 10.2~11.5 lower-tier 곡들도 추천 후보. 저실력 사용자 (BAGUET 케이스) 도 lv11 추천이 정상적으로 노출됨.
-
----
 
 ## 트러블슈팅
 
@@ -370,6 +256,74 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 ```
 
 캐시 우회는 URL 뒤에 `?t=` + Date.now() 붙이면 됨.
+
+---
+
+## 모듈 구조 (v3.3.6 / core v0.0.335 부터)
+
+기존 단일 `2-calc-score.js` (~2230줄) 가 책임별 5개 모듈로 분리됨. 사용자가 콘솔에 붙여넣는 URL 은 그대로 — wrapper 가 나머지 모듈을 자동 fetch.
+
+| 파일 | 버전 | 줄수 | 역할 |
+|---|---|---|---|
+| `ohsorry.js` | v3.3.6 | ~54 | **본체 wrapper** — eagate 도메인 자동 실행. core/render/db 셋 다 fetch+eval 한 뒤 `Core.compute({mode:'own'})` 호출. `window.__dp_render(dbData)` 노출 (DB 모드). |
+| `rivalOhsorry.js` | v3.3.6 | ~112 | **라이벌 wrapper** — 라이벌 페이지 (difficulty_rival.html?rival=&lt;토큰&gt;) 자동 실행. `__dp_fetch_rival_token` / `__dp_batch_rival_by_iidx` 헬퍼 + `Core.compute({mode:'rival'})`. IIDX ID prompt → 토큰 검색 → batch 흐름. |
+| `calcOhsorryCore.js` | v0.0.335 | ~1366 | **계산 core** — ereter / zasa / textage / ohSorryRating + 외부 lib (oldOSR / OSR / OSR135) fetch + 캐시, difficulty.html 페이지 순회 fetch, parseDoc, ★ 추정 (v335E 채택 분기), 추천곡 계산, 프로필 fetch. 결과 객체 (`result`) 를 반환하고 `Render.show(result)` 호출. DOM 안 만짐 (UI 는 render). |
+| `ohsorryRender.js` | v0.0.335 | ~854 | **UI render** — 진행률 UI (`showProgress`/`hideProgress`), 결과 패널 (프로필 / ★ / 노트레이더 / 추천곡 sortable / 상세통계), `__dp_rerun` / `__dp_confirmRerun` / `__dp_toggleRadar` 등. core 의 `result` 객체 받아서 표시 + `OhsorryDb.upsertUserProfile` 호출. |
+| `dbConn.js` | v0.0.335 | ~73 | **supabase 통신** — `upsertUserProfile(payload)` / `fetchUserProfile(iidxId)` 두 RPC 호출만 담당. SUPABASE_URL / SUPABASE_KEY 캡슐화. |
+| `2-calc-score.js` | (legacy) | ~9 | **호환용 redirect** — 기존 사용자가 콘솔에 붙여넣던 URL 그대로 유지. 내부에서 `ohsorry.js` 를 fetch + eval 만 함. |
+
+**의존 흐름**:
+```
+사용자 콘솔 / 북마크렛
+     │ (fetch + eval)
+     ▼
+2-calc-score.js (legacy) ──redirect──► ohsorry.js (본체)
+                                       │
+                                       │ loadModule (fetch + eval)
+                                       ├──► dbConn.js          (window.OhsorryDb)
+                                       ├──► ohsorryRender.js   (window.OhsorryRender)
+                                       └──► calcOhsorryCore.js (window.OhsorryCore)
+                                                │
+                                                │ Core.compute(opts)
+                                                │   eagate fetch + ★ 추정 + 추천곡
+                                                │   → result 객체 build
+                                                ▼
+                                           Render.show(result)
+                                                │   panel DOM 만들기
+                                                ▼
+                                           Db.upsertUserProfile(result.dbPayload)
+```
+
+**Supabase 의 `version` 컬럼**: `${wrapperVersion}-core${CORE_VERSION_SHORT}` 조합 (예: `v3.3.6-core335`). wrapper 버전업 / core 버전업 모두 식별 가능.
+
+**아카이브**: `archive/` 폴더에 각 모듈의 버전 박힌 사본 (`ohsorry-3.3.6.js` / `calcOhsorryCore-0.0.335.js` 등) 보존. 모델 코드 (구버전) 는 `logic/` 폴더.
+
+---
+
+## 변경 이력
+
+### v3.3.6 / core v0.0.335 — 모듈 분리
+- 단일 `2-calc-score.js` (~2230줄) 를 5개 모듈로 분리: `calcOhsorryCore.js` (계산) / `ohsorryRender.js` (UI) / `dbConn.js` (DB) / `ohsorry.js` (본체 wrapper) / `rivalOhsorry.js` (라이벌 wrapper)
+- 기존 `2-calc-score.js` 는 호환 redirect (`ohsorry.js` fetch + eval) 로 축소 — 콘솔/북마크렛 URL 그대로 사용 가능
+- 함수명 `__dp_render = run(...)` → `OhsorryCore.compute(opts)` 로 정리, core 가 `result` 객체 반환 / `Render.show(result)` 호출 / `OhsorryDb.upsertUserProfile()` 사용
+- supabase `version` 컬럼이 `'v3.3.5'` 단일 → `'v3.3.6-core335'` 형태로 wrapper+core 버전 병행 표기
+
+### v3.3.6 — supabase user_profiles PK 확장
+- PK 가 `iidx_id` 단일 → `(iidx_id, series)` composite — 같은 IIDX ID 라도 시즌이 다르면 새 row (옛 시즌 데이터 보존)
+- RPC `upsert_user_profile` 의 `ON CONFLICT` 도 `(iidx_id, series)` 로 변경 + `last_updated_at = now()` 갱신 추가
+- RPC `get_user_profile_full` 는 같은 iidx_id 의 다중 시즌 row 중 `last_updated_at` 최신 1건 반환 (호환성 유지)
+- 동기: 다음 시즌 (34+) 출시 시 클라이언트의 `SERIES` 상수만 바꿔서 배포하면 자동으로 새 row 분기 — 옛 시즌 데이터 덮어쓰지 않음
+
+### v3.3.6 — 라이벌 오소리 (`rivalOhsorry.js`)
+- eagate IIDX 라이벌 페이지 (`difficulty_rival.html?rival=<토큰>`) 에서 자동 실행 — URL 토큰 추출, 라이벌의 차트 데이터 fetch 후 ★ 추정 + supabase 업로드
+- IIDX ID (8자리) → 토큰 검색 (`rival_search.html` POST) → batch 처리: `__dp_batch_rival_by_iidx('1511-6402, 1234-5678, ...')` 형태로 여러 명 한꺼번에
+- 본체 (`ohsorry.js`) 와 같은 core / render / db 모듈 공유 — 차이는 wrapper 의 `mode:'rival'` 인자 + 라이벌 토큰
+
+### v3.3.5 / v335E (옛 단일 파일 시점)
+- OSR13.5+ 분기 도입 (★13.5 이상 정확도 핵심), 1021명 검증 MAE 0.363
+- v335E 채택 분기: OSR135 세 분기 (EC/HC/EXH) spread > 2.5 면 baseStar2 직행, 12.5~13.5 블렌드, gap_guard 등
+- 외부 lib 3종 (`oldOSR.js` v3.3.3 / `osr.js` v0.0.2 / `OSR13.5+.js`) 으로 분리
+- (이 시점 단일 파일은 `logic/2-calc-score-3.3.5.js` 에 아카이브)
 
 ---
 

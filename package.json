@@ -1,0 +1,24 @@
+{
+  "name": "ohsorry",
+  "version": "1.0.0",
+  "description": "ereter.net 의 ☆12 난이도 분석 데이터를 e-amusement 의 DP 플레이 데이터에 매칭해서 **★값 추정 + 추천곡 + 통계** 를 보여줍니다.",
+  "main": "1-fetch-ereter.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OhSorry-DP/ohSorry.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/OhSorry-DP/ohSorry/issues"
+  },
+  "homepage": "https://github.com/OhSorry-DP/ohSorry#readme",
+  "dependencies": {
+    "iconv-lite": "^0.7.2"
+  }
+}
