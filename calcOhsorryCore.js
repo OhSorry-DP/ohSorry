@@ -34,7 +34,7 @@
 //   wrapperVersion: wrapper 자기 버전 (예: 'v3.3.6') — supabase version 컬럼은
 //                   `${wrapperVersion}-core${CORE_VERSION_SHORT}` 조합 (예: 'v3.3.6-core335')
 window.OhsorryCore = {
-  VERSION: '0.0.335',
+  VERSION: '0.0.336',
   compute: async (opts) => {
   opts = opts || {};
   const mode = opts.mode || 'own';
@@ -42,7 +42,7 @@ window.OhsorryCore = {
   let dbData = opts.dbData || null;
   const rivalToken = opts.rivalToken || null;
   const wrapperVersion = opts.wrapperVersion || 'unknown';
-  const CORE_VERSION_SHORT = '0.0.335'.replace(/^0\.0\./, '');  // '335'
+  const CORE_VERSION_SHORT = '0.0.336'.replace(/^0\.0\./, '');  // '335'
   const dbVersionString = `${wrapperVersion}-core${CORE_VERSION_SHORT}`;
   dbData = dbData || null;
   // -------- 0. ereter 데이터 로드 (Gist 에서 자동 fetch) --------
@@ -291,7 +291,7 @@ window.OhsorryCore = {
     // 라틴 확장
     .replace(/ƒ/g, 'f')
     .replace(/[Øø]/g, 'o')
-    .replace(/[Ææ]/g, 'ae')
+    .replace(/[Ææ]/g, 'a')
     .replace(/ə/g, 'e')
     .replace(/[Œœ]/g, 'oe')
     .replace(/ß/g, 'ss')
@@ -1370,7 +1370,7 @@ window.OhsorryCore = {
   runFromDb: async (row, opts) => {
     opts = opts || {};
     const wrapperVersion = opts.wrapperVersion || 'light';
-    const CORE_VERSION_SHORT = '0.0.335'.replace(/^0\.0\./, '');
+    const CORE_VERSION_SHORT = '0.0.336'.replace(/^0\.0\./, '');
     const dbVersionString = `${wrapperVersion}-core${CORE_VERSION_SHORT}`;
 
     if (!row || !row.iidx_id) {

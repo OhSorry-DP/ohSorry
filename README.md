@@ -302,6 +302,12 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### v3.3.6 / core v0.0.336 — 곡명 정규화 Æ → a (ÆTHER 매칭)
+- `calcOhsorryCore.js` 의 norm 함수에서 `Æ`/`æ` 매핑을 `ae` → `a` 로 변경
+- 클라이언트가 `&AElig;` HTML entity decode 실패해서 `ÆTHER` 를 `ATHER` 로 보내는 케이스 호환 — zasa 의 `ÆTHER` (lv11 ANOTHER / lv12.1 LEGGENDARIA) 정상 매칭
+- 다른 단어에 `ATHER` 부분문자열 들어있어도 충돌 X (norm 전체 key 완전 일치만 매칭)
+- 동기 변경: `ohSorryRating` 의 4 lib (oldOSR / osr / OSR13.5+ / ohsorry-shelf) 및 `INFOhSorry/src/shared/match.ts` 도 동일 매핑 적용
+
 ### v3.3.6 / core v0.0.335 — 모듈 분리
 - 단일 `2-calc-score.js` (~2230줄) 를 5개 모듈로 분리: `calcOhsorryCore.js` (계산) / `ohsorryRender.js` (UI) / `dbConn.js` (DB) / `ohsorry.js` (본체 wrapper) / `rivalOhsorry.js` (라이벌 wrapper)
 - 기존 `2-calc-score.js` 는 호환 redirect (`ohsorry.js` fetch + eval) 로 축소 — 콘솔/북마크렛 URL 그대로 사용 가능
