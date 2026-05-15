@@ -838,10 +838,12 @@ window.__dp_render = async (dbData) => {
   }
   // v3.3.5: OSR13.5+ 계산 — OSR >= 13.5 + OSR135 >= 13.5 면 오버라이드, 아니면 oldOSR
   let starEstimate135 = null;
+  let osr135Meta = null;  // { ec, hc, exh } — spread gate 용 (세 분기 일관성 판정)
   if (osr135Lib && ereterData && Array.isArray(ereterData) && ereterData.length > 0) {
     try {
       const r135 = osr135Lib.inferUser(allCharts, { charts: ereterData });
       starEstimate135 = r135.starEstimate;
+      osr135Meta = { ec: r135.ec.final, hc: r135.hc.final, exh: r135.exh.final };
       console.log(`[step2] OSR13.5+ (v${osr135Lib.version}): ★${starEstimate135 != null ? starEstimate135.toFixed(2) : 'N/A'} (adopted=${r135.adopted}, EC=${r135.ec.final.toFixed(2)}, HC=${r135.hc.final.toFixed(2)}, EXH=${r135.exh.final.toFixed(2)})`);
     } catch (e) {
       console.error('[step2] OSR13.5+.inferUser 실패:', e.message);
@@ -858,16 +860,25 @@ window.__dp_render = async (dbData) => {
     starEstimateOld = newOldStar;
   }
 
-  // 채택 로직 (표기용) — 1021명 검증 기반 영역별 최강 lib:
-  //   OSR135 ≥ 13.0                  → 무조건 OSR13.5+ (13+ 영역 압도)
-  //   OSR135 12.5~13.0               → OSR135 ↔ group값 선형 보간 (경계 점프 방지)
-  //   OSR135 < 12.5 (또는 없음)       → group 별 base 값:
-  //     group A·B → OSR
-  //     group C   → OSR값 ≥ 11.0 → OSR (11~13 은 OSR 가 최강) / < 11.0 → oldOSR / 10.5~11.0 보간
-  //   group lib 도 없으면 OSR135 로 fallback
+  // 채택 로직 (v335E — 1021명 검증 통과) — D3 분기 + spread gate:
+  //   [신뢰도 게이트] OSR135 세 분기(EC/HC/EXH) 중 0(데이터 없음) 제외, max-min spread > 2.5 면
+  //                  OSR135 내부 불일치 → 신뢰 X → baseStar2 직행
+  //   spread ≤ 2.5 일 때만 OSR135 사용:
+  //     ≥13.5            → OSR135 직행 (14+ 정확도 핵심)
+  //     12.5 ≤ x < 13.5  → 블렌드 구간:
+  //         osr > osr135 → OSR135 직행 (블렌드가 위로 끌어올림 방지)
+  //         diffBlend = baseStar2 ↔ osr135 (osr135 위치로 12.5~13.5 선형)
+  //         gapW = clamp((osr135 - osr) / 3) — gap 작으면 diffBlend, 크면 (osr 망가짐) osr135 직행
+  //         최종 = diffBlend × (1-gapW) + osr135 × gapW
+  //     < 12.5           → baseStar2
+  //   group 별 base 값 (baseStar2):
+  //     group A·B → OSR  (없으면 oldOSR fallback)
+  //     group C   → OSR값 ≥ 11.0 → OSR / < 11.0 → oldOSR / 10.5~11.0 보간
   // 내부 계산용 starEstimateNew (OSR) 는 그대로 유지 — 추천 풀 baseStar (ohsorryRecBase) 에서 사용
-  const OSR135_TH = 13.0;       // OSR135 담당 하한 (11~13 은 OSR 가 더 정확 — 1021명 검증)
-  const BLEND_W = 0.5;          // (OSR135_TH - BLEND_W) ~ OSR135_TH 선형 보간 폭
+  const OSR135_TH = 13.5;       // OSR135 직행 하한
+  const BLEND_W = 1.0;          // 12.5~13.5 블렌드 폭
+  const GAP_GUARD = 3.0;        // OSR135-OSR gap (osr 망가짐 판정)
+  const SPREAD_MAX = 2.5;       // OSR135 세 분기 spread 신뢰 상한
   const isAB135 = osrGroup === 'A' || osrGroup === 'B';
   // group 별 base 값 (baseStar2) + 로그 라벨 (groupLib)
   let baseStar2, groupLib;
@@ -889,23 +900,43 @@ window.__dp_render = async (dbData) => {
       baseStar2 = starEstimateNew; groupLib = 'OSR(C,fb)';
     }
   }
-  if (starEstimate135 != null && starEstimate135 >= OSR135_TH) {
+  // OSR135 신뢰도 게이트 — 세 분기 spread > 2.5 면 OSR135 안 씀
+  let osr135Trusted = true;
+  if (osr135Meta) {
+    const stages = [osr135Meta.ec, osr135Meta.hc, osr135Meta.exh].filter((v) => typeof v === 'number' && v > 0.01);
+    if (stages.length >= 2 && (Math.max(...stages) - Math.min(...stages)) > SPREAD_MAX) osr135Trusted = false;
+  }
+  // 채택 분기 (v335E 와 동일)
+  if (starEstimate135 == null) {
+    starEstimate = baseStar2;
+    if (baseStar2 != null) console.log(`[step2] ★ = ${groupLib} ${starEstimate.toFixed(2)} (group ${osrGroup}, OSR135 결과 없음)`);
+    else console.error('[step2] 모든 lib 실패 — ★ 추정 불가. lib fetch + localStorage 캐시 모두 실패 가능성');
+  } else if (!osr135Trusted) {
+    starEstimate = baseStar2 != null ? baseStar2 : starEstimate135;
+    const lib = baseStar2 != null ? groupLib : 'OSR13.5+(fb)';
+    console.log(`[step2] ★ = ${lib} ${starEstimate.toFixed(2)} (OSR135 spread > ${SPREAD_MAX} → 불신, 세 분기 ${osr135Meta.ec.toFixed(2)}/${osr135Meta.hc.toFixed(2)}/${osr135Meta.exh.toFixed(2)})`);
+  } else if (starEstimate135 >= OSR135_TH) {
     starEstimate = starEstimate135;
     console.log(`[step2] ★ = OSR13.5+ ${starEstimate.toFixed(2)} (≥ ${OSR135_TH})`);
-  } else if (starEstimate135 != null && starEstimate135 >= OSR135_TH - BLEND_W && baseStar2 != null) {
-    const t = (starEstimate135 - (OSR135_TH - BLEND_W)) / BLEND_W; // 0~1 (1 이면 OSR135 쪽)
-    starEstimate = baseStar2 * (1 - t) + starEstimate135 * t;
-    console.log(`[step2] ★ = blend ${starEstimate.toFixed(2)} (OSR135 ${starEstimate135.toFixed(2)} ↔ ${groupLib} ${baseStar2.toFixed(2)}, t=${t.toFixed(2)}, group ${osrGroup})`);
-  } else if (baseStar2 != null) {
-    starEstimate = baseStar2;
-    const reason = starEstimate135 == null ? 'OSR135 결과 없음'
-      : `OSR135(${starEstimate135.toFixed(2)}) < ${OSR135_TH - BLEND_W}`;
-    console.log(`[step2] ★ = ${groupLib} ${starEstimate.toFixed(2)} (group ${osrGroup}, ${reason})`);
-  } else if (starEstimate135 != null) {
+  } else if (starEstimate135 < OSR135_TH - BLEND_W || baseStar2 == null) {
+    starEstimate = baseStar2 != null ? baseStar2 : starEstimate135;
+    const lib = baseStar2 != null ? groupLib : 'OSR13.5+(fb)';
+    const reason = baseStar2 != null ? `OSR135 ${starEstimate135.toFixed(2)} < ${OSR135_TH - BLEND_W}` : 'group lib 없음';
+    console.log(`[step2] ★ = ${lib} ${starEstimate.toFixed(2)} (${reason})`);
+  } else if (starEstimateNew != null && starEstimateNew > starEstimate135) {
     starEstimate = starEstimate135;
-    console.warn('[step2] group lib 결과 없음 → OSR135 단독 fallback');
+    console.log(`[step2] ★ = OSR13.5+ ${starEstimate.toFixed(2)} (osr ${starEstimateNew.toFixed(2)} > osr135 → 직행)`);
   } else {
-    console.error('[step2] 모든 lib 실패 — ★ 추정 불가. lib fetch + localStorage 캐시 모두 실패 가능성');
+    const t = (starEstimate135 - (OSR135_TH - BLEND_W)) / BLEND_W;
+    const diffBlend = baseStar2 * (1 - t) + starEstimate135 * t;
+    if (starEstimateNew == null) {
+      starEstimate = diffBlend;
+      console.log(`[step2] ★ = diffBlend ${starEstimate.toFixed(2)} (OSR135 ${starEstimate135.toFixed(2)} ↔ ${groupLib} ${baseStar2.toFixed(2)}, t=${t.toFixed(2)})`);
+    } else {
+      const gapW = Math.max(0, Math.min((starEstimate135 - starEstimateNew) / GAP_GUARD, 1));
+      starEstimate = diffBlend * (1 - gapW) + starEstimate135 * gapW;
+      console.log(`[step2] ★ = blend ${starEstimate.toFixed(2)} (OSR135 ${starEstimate135.toFixed(2)} ↔ ${groupLib} ${baseStar2.toFixed(2)}, t=${t.toFixed(2)}, gapW=${gapW.toFixed(2)}, group ${osrGroup})`);
+    }
   }
   }
 
