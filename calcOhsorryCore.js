@@ -34,7 +34,7 @@
 //   wrapperVersion: wrapper 자기 버전 (예: 'v3.3.6') — supabase version 컬럼은
 //                   `${wrapperVersion}-core${CORE_VERSION_SHORT}` 조합 (예: 'v3.3.6-core335')
 window.OhsorryCore = {
-  VERSION: '0.0.341',
+  VERSION: '0.0.343',
   compute: async (opts) => {
   opts = opts || {};
   const mode = opts.mode || 'own';
@@ -42,7 +42,7 @@ window.OhsorryCore = {
   let dbData = opts.dbData || null;
   const rivalToken = opts.rivalToken || null;
   const wrapperVersion = opts.wrapperVersion || 'unknown';
-  const CORE_VERSION_SHORT = '0.0.341'.replace(/^0\.0\./, '');  // '341'
+  const CORE_VERSION_SHORT = '0.0.343'.replace(/^0\.0\./, '');  // '343'
   const dbVersionString = `${wrapperVersion}-core${CORE_VERSION_SHORT}`;
   dbData = dbData || null;
   // -------- 0. ereter 데이터 로드 (Gist 에서 자동 fetch) --------
@@ -216,6 +216,8 @@ window.OhsorryCore = {
   const CALC_OSR_URL = GIST_RAW + '/osr.js';
   // v3.3.5: OSR13.5+ (bin50 + 50% 임계 + 상향 bin 부분 보너스) — 13.5 이상 시 ensemble 오버라이드
   const CALC_OSR135_URL = GIST_RAW + '/OSR13.5%2B.js';
+  // v3.3.7: adopt.js — v335E 채택 분기 (세 lib raw 값 → 최종 ★) 통합 lib
+  const CALC_ADOPT_URL = GIST_RAW + '/adopt.js';
   // ohsorry-shelf.js — renderChartRow (추천곡 곡명 클릭 토스트용). 실패해도 무시.
   const CALC_SHELF_URL = GIST_RAW + '/ohsorry-shelf.js';
 
@@ -296,6 +298,17 @@ window.OhsorryCore = {
     console.log(`[step2] OSR13.5+.js v${osr135Lib.version} 로드 (${src135})`);
   } catch (e) {
     console.error('[step2] OSR13.5+.js 로드 실패:', e.message);
+  }
+  // v3.3.7: adopt.js — v335E 채택 분기 통합 lib (세 lib raw → 최종 ★)
+  let adoptLib = null;
+  try {
+    const { data: adoptSrc, source: srcAdopt } = await loadWithCache(CALC_ADOPT_URL, 'ohSorry:libAdopt', false);
+    (new Function(adoptSrc))();
+    adoptLib = window.adopt;
+    if (!adoptLib) throw new Error('adopt global 등록 실패');
+    console.log(`[step2] adopt.js v${adoptLib.version} 로드 (${srcAdopt})`);
+  } catch (e) {
+    console.error('[step2] adopt.js 로드 실패:', e.message, '— 본체 inline 분기 fallback');
   }
   // ohsorry-shelf.js — 추천곡 곡명 클릭 토스트 (renderChartRow) 용. 실패해도 무시 (토스트만 비활성).
   try {
@@ -913,6 +926,23 @@ window.OhsorryCore = {
     }
   }
 
+  // v3.3.7: adopt.js (lib) 사용 가능하면 v335E 채택 분기 lib 호출. 실패 시 본체 inline fallback.
+  //   adopt 안에서 group C 2-scope max + baseStar2 + spread gate + under-blend 다 처리.
+  if (adoptLib) {
+    const r = adoptLib.adoptStar({
+      starOld: starEstimateOld, starNew: starEstimateNew, star135: starEstimate135,
+      starEreterOnly: starEstimateEreterOnly, starLv12Only: starEstimateLv12Only,
+      osr135Stages: osr135Meta, group: osrGroup,
+    });
+    starEstimate = r.star;
+    starEstimateOld = r.oldStarUsed;  // group C 2-scope 적용 후 값 (UI 표시 일관성)
+    console.log(`[step2] ★ = ${r.adoptedLib} ${typeof r.star === 'number' ? r.star.toFixed(2) : 'N/A'} ` +
+      `(adopt v${adoptLib.version}, group ${osrGroup}, OSR135=${typeof starEstimate135 === 'number' ? starEstimate135.toFixed(2) : 'N/A'} ` +
+      `OSR=${typeof starEstimateNew === 'number' ? starEstimateNew.toFixed(2) : 'N/A'} ` +
+      `old=${typeof r.oldStarUsed === 'number' ? r.oldStarUsed.toFixed(2) : 'N/A'}` +
+      (r.osr135Trusted ? '' : ' ⚠ OSR135 spread > 2.5') + ')');
+  } else {
+  // ===== adopt.js fetch 실패 시 inline fallback (이전 분기 로직 그대로) =====
   // group C 인 경우 oldOSR 의 4종 max 에서 all-11.6+ scope 제외 — ereterOnly / lv12Only 중 max 로 재계산
   //   이유: group C (12.0+ 클리어 ≥ 30) 고수는 ratingMap 의 lv11 추정곡 보강이 오히려 잡음
   //   group C 면 useOnlyLv12=true 보장 (12.0+ 클리어 30+ → lv12 플레이 30+) → primary === lv12Only 라 추가 채택 불필요
@@ -929,7 +959,7 @@ window.OhsorryCore = {
   //   spread ≤ 2.5 일 때만 OSR135 사용:
   //     ≥13.5            → OSR135 직행 (14+ 정확도 핵심)
   //     12.5 ≤ x < 13.5  → 블렌드 구간:
-  //         osr > osr135 → OSR135 직행 (블렌드가 위로 끌어올림 방지)
+  //         osr > osr135 → 기본 OSR135 직행. 단, OSR135 ≥ 13.0 + gap ≥ 0.35 면 낮은 base 와 제한 블렌드
   //         diffBlend = baseStar2 ↔ osr135 (osr135 위치로 12.5~13.5 선형)
   //         gapW = clamp((osr135 - osr) / 3) — gap 작으면 diffBlend, 크면 (osr 망가짐) osr135 직행
   //         최종 = diffBlend × (1-gapW) + osr135 × gapW
@@ -942,6 +972,8 @@ window.OhsorryCore = {
   const BLEND_W = 1.0;          // 12.5~13.5 블렌드 폭
   const GAP_GUARD = 3.0;        // OSR135-OSR gap (osr 망가짐 판정)
   const SPREAD_MAX = 2.5;       // OSR135 세 분기 spread 신뢰 상한
+  const OSR135_UNDER_TH = 13.0;  // OSR>OSR135 과소평가 보정 하한 (12점대 과상승 방지)
+  const OSR135_UNDER_GAP = 0.35; // OSR 과 OSR135 차이가 충분히 큰 경우만 보정
   const isAB135 = osrGroup === 'A' || osrGroup === 'B';
   // group 별 base 값 (baseStar2) + 로그 라벨 (groupLib)
   let baseStar2, groupLib;
@@ -987,8 +1019,21 @@ window.OhsorryCore = {
     const reason = baseStar2 != null ? `OSR135 ${starEstimate135.toFixed(2)} < ${OSR135_TH - BLEND_W}` : 'group lib 없음';
     console.log(`[step2] ★ = ${lib} ${starEstimate.toFixed(2)} (${reason})`);
   } else if (starEstimateNew != null && starEstimateNew > starEstimate135) {
-    starEstimate = starEstimate135;
-    console.log(`[step2] ★ = OSR13.5+ ${starEstimate.toFixed(2)} (osr ${starEstimateNew.toFixed(2)} > osr135 → 직행)`);
+    const lowBase = Math.min(
+      starEstimateNew,
+      starEstimateOld != null ? starEstimateOld : starEstimateNew,
+    );
+    if (
+      starEstimate135 >= OSR135_UNDER_TH &&
+      starEstimateNew - starEstimate135 >= OSR135_UNDER_GAP &&
+      lowBase > starEstimate135
+    ) {
+      starEstimate = starEstimate135 * 0.35 + lowBase * 0.65;
+      console.log(`[step2] ★ = OSR13.5+ under-blend ${starEstimate.toFixed(2)} (osr ${starEstimateNew.toFixed(2)} > osr135 ${starEstimate135.toFixed(2)}, lowBase ${lowBase.toFixed(2)})`);
+    } else {
+      starEstimate = starEstimate135;
+      console.log(`[step2] ★ = OSR13.5+ ${starEstimate.toFixed(2)} (osr ${starEstimateNew.toFixed(2)} > osr135 → 직행)`);
+    }
   } else {
     const t = (starEstimate135 - (OSR135_TH - BLEND_W)) / BLEND_W;
     const diffBlend = baseStar2 * (1 - t) + starEstimate135 * t;
@@ -1001,6 +1046,7 @@ window.OhsorryCore = {
       console.log(`[step2] ★ = blend ${starEstimate.toFixed(2)} (OSR135 ${starEstimate135.toFixed(2)} ↔ ${groupLib} ${baseStar2.toFixed(2)}, t=${t.toFixed(2)}, gapW=${gapW.toFixed(2)}, group ${osrGroup})`);
     }
   }
+  }  // ← adopt.js fetch 실패 시 inline fallback 블록 끝
   }
 
   // -------- 5.6. status 페이지에서 프로필 정보 fetch --------
@@ -1462,7 +1508,7 @@ window.OhsorryCore = {
   runFromDb: async (row, opts) => {
     opts = opts || {};
     const wrapperVersion = opts.wrapperVersion || 'light';
-    const CORE_VERSION_SHORT = '0.0.341'.replace(/^0\.0\./, '');
+    const CORE_VERSION_SHORT = '0.0.343'.replace(/^0\.0\./, '');
     const dbVersionString = `${wrapperVersion}-core${CORE_VERSION_SHORT}`;
 
     if (!row || !row.iidx_id) {

@@ -302,6 +302,16 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### v3.3.6 / core v0.0.343 / render v0.0.337 — v335E 채택 분기를 adopt.js lib 로 분리
+- 신규 [`adopt.js`](https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw/adopt.js) (v0.0.1) — group A/B/C 분기 + group C 2-scope max + OSR135 spread gate + under-blend + 12.5~13.5 blend 까지 전부 lib 함수로 분리.
+- `calcOhsorryCore.js` 가 부팅 시 adopt.js fetch + eval → `window.adopt` 등록 → 채택 분기에서 `adopt.adoptStar({starOld, starNew, star135, ...})` 호출.
+- adopt 로드 실패 시 inline 분기 fallback (이전 코드 유지) — 오프라인 / fetch 실패 안전망.
+- 같은 lib 가 INF오소리 (`src/shared/adopt.ts` bundle + override) 와 `recompute-stars-dryrun.js` (Node require) 에서도 호출 → ohSorry / INF오소리 / server-side recompute 3곳 ★ 분기 로직 통일.
+
+### v3.3.6 / core v0.0.342 / render v0.0.337 — OSR135 과소평가 보정 범위 제한
+- `OSR > OSR135` 인 13점대 초반~중반 과소평가 케이스에서만 낮은 base 와 제한 블렌드.
+- 보정 하한을 `OSR135 >= 13.0` 으로 제한해서 12점대 유저가 같이 과상승하는 케이스 방지.
+
 ### v3.3.6 / core v0.0.341 / render v0.0.337 — 추천 범위 기본값 자동 선택
 - 최초 렌더 시 추천 기준 실력 점수가 `6` 미만이면 추천 범위 기본값을 `DP11+`, `6` 이상이면 `DP12` 로 선택.
 - 사용자가 추천 범위를 직접 바꾼 뒤에는 `ereter | OhSorry` 기준 변경 시에도 해당 선택을 유지.
