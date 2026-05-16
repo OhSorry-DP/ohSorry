@@ -302,6 +302,13 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### v3.3.6 / core v0.0.337 — 추천곡 미도달:도달 5:5 비율 + 분류 보장
+- `buildPools`: hard / easy / cleanup 3분류 → `{ underLamp, reached }` 카테고리 구조. `underLamp = lampNum < threshold` / `reached = lampNum >= threshold && !accuracyOK`
+- cleared 곡도 dv (난이도) 기준으로 hard / easy / cleanup 분류 (이전엔 cleared → 무조건 cleanup)
+- `buildRecs`: 카테고리당 sample 15 (= 미도달 15 + 도달 15 = 30개 풀). 추출 분포 hard 2 (under 1 + reach 1) / easy 4 (2+2) / cleanup 4 (2+2)
+- fallback 3단계: 슬롯 primary → 같은 분류의 반대 카테고리 → 전체 30개 풀 (분류 무관)
+- 동기 변경: `archive/calcOhsorryCore-0.0.336.js` 신규 (0.0.336 시점 backup)
+
 ### v3.3.6 / core v0.0.336 — 곡명 정규화 Æ → a (ÆTHER 매칭)
 - `calcOhsorryCore.js` 의 norm 함수에서 `Æ`/`æ` 매핑을 `ae` → `a` 로 변경
 - 클라이언트가 `&AElig;` HTML entity decode 실패해서 `ÆTHER` 를 `ATHER` 로 보내는 케이스 호환 — zasa 의 `ÆTHER` (lv11 ANOTHER / lv12.1 LEGGENDARIA) 정상 매칭

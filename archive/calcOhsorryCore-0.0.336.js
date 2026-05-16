@@ -34,7 +34,7 @@
 //   wrapperVersion: wrapper 자기 버전 (예: 'v3.3.6') — supabase version 컬럼은
 //                   `${wrapperVersion}-core${CORE_VERSION_SHORT}` 조합 (예: 'v3.3.6-core335')
 window.OhsorryCore = {
-  VERSION: '0.0.337',
+  VERSION: '0.0.336',
   compute: async (opts) => {
   opts = opts || {};
   const mode = opts.mode || 'own';
@@ -42,7 +42,7 @@ window.OhsorryCore = {
   let dbData = opts.dbData || null;
   const rivalToken = opts.rivalToken || null;
   const wrapperVersion = opts.wrapperVersion || 'unknown';
-  const CORE_VERSION_SHORT = '0.0.337'.replace(/^0\.0\./, '');  // '337'
+  const CORE_VERSION_SHORT = '0.0.336'.replace(/^0\.0\./, '');  // '335'
   const dbVersionString = `${wrapperVersion}-core${CORE_VERSION_SHORT}`;
   dbData = dbData || null;
   // -------- 0. ereter 데이터 로드 (Gist 에서 자동 fetch) --------
@@ -98,13 +98,6 @@ window.OhsorryCore = {
 
   // 항상 Gist 의 최신 extractedAt 빠르게 확인 (HEAD 같은 거 안 됨, GET 짧게)
   // 다행히 ereter-data.json 가 그렇게 크지 않으니 fetch 하면서 compare
-  // batch (라이벌 다수) 처리 시 두 번째부터 ereter fetch 도 skip — 메모리 캐시
-  if (window.__ohsorryEreterCache) {
-    ereterData = window.__ohsorryEreterCache.charts;
-    ereterExtractedAt = window.__ohsorryEreterCache.extractedAt;
-    ereterPlayers = window.__ohsorryEreterCache.players;
-    console.log(`[step2] ereter 메모리 캐시 hit (${ereterData.length}개)`);
-  } else {
   console.log('[step2] ereter 데이터 fetch 중...');
   try {
     const url = ERETER_DATA_URL + '?t=' + Date.now();  // CDN 캐시 우회
@@ -156,50 +149,33 @@ window.OhsorryCore = {
     alert(`ereter 데이터 fetch 실패: ${e.message}\n네트워크 또는 CSP 문제일 수 있습니다.`);
     return;
   }
-  // 메모리 캐시 저장 — 다음 compute 호출 시 fetch skip
-  window.__ohsorryEreterCache = { charts: ereterData, extractedAt: ereterExtractedAt, players: ereterPlayers };
-  }
   console.log(`[step2] ereter 차트 ${ereterData.length}개 로드`);
-
-  // 모듈 lifetime memory cache — batch (라이벌 다수) 처리 시 두 번째 호출부터 외부 lib fetch skip.
-  // 페이지 reload 시 다시 받음 (localStorage 캐시는 24h TTL 별도로 동작).
-  window.__ohsorryLibCache = window.__ohsorryLibCache || {};
 
   // -------- 0.5. zasa 보충 데이터 fetch (선택, 실패해도 무시) --------
   // ereter 에 없는 ☆12 차트를 검증용으로 보충. 추천 / ★ 추정엔 사용 X.
   let zasaData = [];
-  if (window.__ohsorryLibCache.zasa) {
-    zasaData = window.__ohsorryLibCache.zasa;
-    console.log(`[step2] zasa 보충 차트 ${zasaData.length}개 (memory cache hit)`);
-  } else {
-    try {
-      const res = await fetch(ZASA_DATA_URL + '?t=' + Date.now(), { cache: 'no-store' });
-      if (res.ok) {
-        const raw = await res.json();
-        if (raw && Array.isArray(raw.charts)) {
-          zasaData = raw.charts;
-          window.__ohsorryLibCache.zasa = zasaData;
-          console.log(`[step2] zasa 보충 차트 ${zasaData.length}개 로드`);
-        }
+  try {
+    const res = await fetch(ZASA_DATA_URL + '?t=' + Date.now(), { cache: 'no-store' });
+    if (res.ok) {
+      const raw = await res.json();
+      if (raw && Array.isArray(raw.charts)) {
+        zasaData = raw.charts;
+        console.log(`[step2] zasa 보충 차트 ${zasaData.length}개 로드`);
       }
-    } catch (e) {
-      console.warn('[step2] zasa fetch 실패 (무시 가능):', e.message);
     }
+  } catch (e) {
+    console.warn('[step2] zasa fetch 실패 (무시 가능):', e.message);
   }
 
   // -------- 0.55. textage 채보 메타 fetch (선택, 실패해도 무시) --------
   // 채보별 총 노트 수 → charts 의 noteCount 보강 + missCount 계산 (noteCount - pgreat - great).
   let textageSongs = null;
-  if (window.__ohsorryLibCache.textage) {
-    textageSongs = window.__ohsorryLibCache.textage;
-    console.log(`[step2] textage 채보 메타 ${Object.keys(textageSongs).length}곡 (memory cache hit)`);
-  } else try {
+  try {
     const res = await fetch(TEXTAGE_DATA_URL + '?t=' + Date.now(), { cache: 'no-store' });
     if (res.ok) {
       const raw = await res.json();
       if (raw && raw.songs && typeof raw.songs === 'object') {
         textageSongs = raw.songs;
-        window.__ohsorryLibCache.textage = textageSongs;
         console.log(`[step2] textage 채보 메타 ${Object.keys(textageSongs).length}곡 로드`);
       }
     }
@@ -219,15 +195,8 @@ window.OhsorryCore = {
   // ohsorry-shelf.js — renderChartRow (추천곡 곡명 클릭 토스트용). 실패해도 무시.
   const CALC_SHELF_URL = GIST_RAW + '/ohsorry-shelf.js';
 
-  // 외부 lib 메모리 캐시 (페이지 lifetime 유지) — batch (라이벌 다수) 처리 시 두 번째부터 fetch skip
-  if (!window.__ohsorryLibCache) window.__ohsorryLibCache = {};
-
-  // localStorage 캐시 헬퍼 — memory > network fetch > localStorage 순으로 fallback
+  // localStorage 캐시 헬퍼 — fetch 실패 시 이전 성공 결과 복원
   const loadWithCache = async (url, cacheKey, isJson) => {
-    // memory cache 우선 — batch (라이벌 다수) 처리 시 두 번째 호출부터 fetch skip
-    if (window.__ohsorryLibCache[cacheKey]) {
-      return window.__ohsorryLibCache[cacheKey];
-    }
     try {
       const res = await fetch(url + '?t=' + Date.now(), { cache: 'no-store' });
       if (!res.ok) throw new Error('HTTP ' + res.status);
@@ -236,17 +205,13 @@ window.OhsorryCore = {
         localStorage.setItem(cacheKey, isJson ? JSON.stringify(data) : data);
         localStorage.setItem(cacheKey + ':ts', new Date().toISOString());
       } catch {}
-      const result = { data, source: 'fetch' };
-      window.__ohsorryLibCache[cacheKey] = result;
-      return result;
+      return { data, source: 'fetch' };
     } catch (e) {
       const cached = localStorage.getItem(cacheKey);
       if (cached != null) {
         const ts = localStorage.getItem(cacheKey + ':ts') || '시간 불명';
         console.warn(`[step2] ${cacheKey} fetch 실패 (${e.message}) → localStorage 캐시 사용 (${ts})`);
-        const result = { data: isJson ? JSON.parse(cached) : cached, source: 'cache' };
-        window.__ohsorryLibCache[cacheKey] = result;
-        return result;
+        return { data: isJson ? JSON.parse(cached) : cached, source: 'cache' };
       }
       throw new Error(`${cacheKey}: fetch 실패 + 캐시 없음 — ${e.message}`);
     }
@@ -408,20 +373,16 @@ window.OhsorryCore = {
   // 기존 로그 / UI 용 — 첫 (LEVEL 12) label
   const levelText = LEVELS_TO_FETCH[0].label;
 
-  // 도메인 체크 (잘못된 사이트에서 실행하면 의미 없으니 안내).
-  // DB 모드 (dbData 있음) 에서는 eagate fetch 를 안 하므로 도메인 체크 스킵 → 그대로 진행.
-  // dbData 없음 + 다른 도메인 → "p.eagate.573.jp 로 이동할까요?" 토스트 + return (render 가 있으면 사용).
+  // 도메인 체크 (잘못된 사이트에서 실행하면 의미 없으니 안내)
+  // DB 모드 (dbData 주어짐) 에서는 eagate fetch 를 안 하므로 도메인 체크 스킵
   if (!dbData && !location.hostname.endsWith('p.eagate.573.jp')) {
-    const msg = isRival
-      ? '라이벌 오소리는 p.eagate.573.jp 의 라이벌 페이지에서 실행해야 합니다. 이동할까요?'
-      : 'p.eagate.573.jp 에서 실행해야 결과를 볼 수 있어요. 이동할까요?';
-    const targetUrl = 'https://p.eagate.573.jp/';
-    if (window.OhsorryRender && window.OhsorryRender.confirmRedirect) {
-      window.OhsorryRender.confirmRedirect(msg, targetUrl);
-    } else {
-      // render 모듈이 안 떠있는 fallback — 기본 alert
-      if (window.confirm(msg)) location.href = targetUrl;
-    }
+    alert(
+      isRival
+        ? '라이벌 오소리 — p.eagate.573.jp 도메인에서 실행해야 합니다.\n' +
+          '먼저 라이벌 페이지 (difficulty_rival.html?rival=<토큰>) 를 열어서 로그인 후, 그 페이지의 콘솔에서 실행하세요.'
+        : 'p.eagate.573.jp 도메인에서 실행해야 합니다.\n' +
+          '먼저 https://p.eagate.573.jp 의 아무 페이지나 열어서 로그인 후, 그 페이지의 콘솔에서 실행하세요.'
+    );
     return;
   }
 
@@ -1157,33 +1118,22 @@ window.OhsorryCore = {
   //   EC (살짝 아래로 시프트 — EASY 클리어 부담이 적어 자기 ★ 살짝 아래도 도전 권장):
   //     easy = [base-0.1, base+0.1], hard = [base+offset-0.4, base+offset-0.1], cleanup = [0, base-0.1)
   //   (cleanup 의 상한은 if-else 순서 덕분에 자연스럽게 easy 의 하한까지로 좁혀짐)
-  // 추천 풀 — 카테고리 (미도달 / 도달DJ미도달) × 분류 (hard / easy / cleanup)
   const buildPools = (threshold, getDiffField, baseStar) => {
-    const empty = { hard: [], easy: [], cleanup: [] };
-    const underLamp = { hard: [], easy: [], cleanup: [] };       // lampNum < threshold
-    const reached   = { hard: [], easy: [], cleanup: [] };       // lampNum >= threshold && !accuracyOK
-    if (baseStar == null) return { underLamp: empty, reached: empty };
+    const hard = [], easy = [], cleanup = [];
+    if (baseStar == null) return { hard, easy, cleanup };
     const offset = challengeOffset(baseStar);
     const isEC = getDiffField === 'ec';
     const hardMax = baseStar + offset - (isEC ? 0.1 : 0);
     const hardMin = baseStar + offset - (isEC ? 0.4 : 0.3);
     const easyMax = baseStar + (isEC ? 0.1 : 0.2);
     const easyMin = baseStar - (isEC ? 0.1 : 0);
-    // stage 별 정확도 임계치 — EC: A 이상이면 OK / HC: AA 이상 / EXH: AAA 만
-    const isHC  = getDiffField === 'hc';
-    const isEXH = getDiffField === 'exh';
-    const accuracyOK = (djLv) => {
-      if (isEXH) return djLv === 'AAA';
-      if (isHC)  return djLv === 'AAA' || djLv === 'AA';
-      return djLv === 'AAA' || djLv === 'AA' || djLv === 'A';  // EC default
-    };
     for (const c of allCharts) {
-      // 램프 + 정확도 둘 다 OK → 추천 안 함
-      const cleared = c.lampNum >= threshold;
-      if (cleared && accuracyOK(c.djLevel)) continue;
+      if (c.lampNum >= threshold) continue;
       let e = ereterMap.get(norm(c.title) + '|' + c.diff);
-      let gameLevel = null;
+      let gameLevel = null; // ratingMap fallback 의 게임 LEVEL (11 / 12)
       if (!e || e.level == null) {
+        // 추천 풀은 모든 사용자에게 lv11+lv12 전체 (ereter + ratingMap fallback)
+        // 이레터★ 유무 / useOnlyLv12 무관 — 추천 다양성 확보
         const r = ratingMap.get(norm(c.title) + '|' + c.diff);
         if (!r || typeof r.zasaLevel !== 'number') continue;
         e = {
@@ -1197,6 +1147,8 @@ window.OhsorryCore = {
         };
         gameLevel = r.gameLevel ?? null;
       }
+      // 추천 풀은 lv11+lv12 전곡 — zasa★ < 11.6 인 lv11 lower-tier 도 포함 (저실력 사용자에게 lv11 추천 보장).
+      // 상한 12.7 만 유지 (rating 미래 확장 대비 안전망).
       if (e.level > 12.7) continue;
       const dv = e[getDiffField];
       if (typeof dv !== 'number') continue;
@@ -1206,29 +1158,29 @@ window.OhsorryCore = {
         ec_n: e.ec_n, hc_n: e.hc_n, exh_n: e.exh_n,
         diffValue: dv, currentLamp: c.lamp,
         margin: baseStar - dv,
-        gameLevel,
+        gameLevel, // 11 이면 lv11 추정 차트 (ohSorryRating fallback) → UI 에서 색상 구분
       };
-      // dv 기반 분류 — cleared 여부 무관 (cleared 곡도 dv 가 hard 범위면 hard 로)
-      let cls;
-      if (dv >= hardMin && dv <= hardMax && dv > easyMax) cls = 'hard';
-      else if (dv >= easyMin && dv <= easyMax) cls = 'easy';
-      else if (dv < baseStar) {
-        if (isEC && typeof e.hc === 'number' && e.hc < baseStar - 3) continue;  // 너무 쉬운 곡 제외
-        cls = 'cleanup';
-      } else continue;
-      (cleared ? reached : underLamp)[cls].push(item);
+      // 하드 우선 (overlap 시 약 도전과 중복 방지)
+      if (dv >= hardMin && dv <= hardMax && dv > easyMax) {
+        hard.push(item);
+      } else if (dv >= easyMin && dv <= easyMax) {
+        easy.push(item);
+      } else if (dv < baseStar) {
+        // EC 정리곡: 하드클 난이도가 baseStar - 3 미만이면 너무 쉬워서 제외 (시간 낭비 방지)
+        if (isEC && typeof e.hc === 'number' && e.hc < baseStar - 3) continue;
+        cleanup.push(item);
+      }
     }
-    return { underLamp, reached };
+    return { hard, easy, cleanup };
   };
 
   const buildRecs = (threshold, getDiffField, baseStar) => {
-    const { underLamp, reached } = buildPools(threshold, getDiffField, baseStar);
+    const { hard, easy, cleanup } = buildPools(threshold, getDiffField, baseStar);
     const countField = getDiffField + '_n';
     const keyOf = r => (r.title || '') + '|' + r.chart;
 
-    // 카테고리 내 모든 분류 합쳐서 sample 15 (count desc top 10 + random 5)
-    const sample15 = (cat) => {
-      const pool = [...cat.hard, ...cat.easy, ...cat.cleanup];
+    // 각 풀 → 카운트 desc top 10 + 그 외 풀에서 순 랜덤 5 = 후보 (최대 15곡)
+    const sample15 = (pool) => {
       const sorted = [...pool].sort((a, b) => (b[countField] || 0) - (a[countField] || 0));
       const top10 = sorted.slice(0, 10);
       const usedKeys = new Set(top10.map(keyOf));
@@ -1236,58 +1188,30 @@ window.OhsorryCore = {
       const rand5 = shuffle(rest).slice(0, 5);
       return [...top10, ...rand5];
     };
-    const underSample = sample15(underLamp);
-    const reachedSample = sample15(reached);
+    const hardCands = sample15(hard);
+    const easyCands = sample15(easy);
+    const cleanupCands = sample15(cleanup);
 
-    // 분류 tag 부여 (sample 안에서 다시 hard/easy/cleanup 으로 그룹)
-    const tagged = (sample, cat) => {
-      const out = { hard: [], easy: [], cleanup: [] };
-      const allTagged = new Map();
-      ['hard', 'easy', 'cleanup'].forEach(cls => cat[cls].forEach(r => allTagged.set(keyOf(r), cls)));
-      for (const r of sample) {
-        const cls = allTagged.get(keyOf(r));
-        if (cls) out[cls].push(r);
-      }
-      return out;
-    };
-    const under = tagged(underSample, underLamp);
-    const reach = tagged(reachedSample, reached);
+    // 후보 셔플 → N곡 표시 (하드 2 / 약 도전 5 / 정리 3)
+    const hardPicked = shuffle(hardCands).slice(0, 2);
+    const easyPicked = shuffle(easyCands).slice(0, 5);
+    const cleanupPicked = shuffle(cleanupCands).slice(0, 3);
 
-    // 최종 추출 — hard 2 (under 1 + reach 1), easy 4 (2+2), cleanup 4 (2+2)
-    // 한 슬롯 부족 시 반대 카테고리의 같은 분류에서 보충 / 그래도 부족하면 전체 풀에서
-    const used = new Set();
-    const picks = [];
-    const SLOTS = [
-      { primary: under.hard,    fallback: reach.hard,    n: 1 },
-      { primary: reach.hard,    fallback: under.hard,    n: 1 },
-      { primary: under.easy,    fallback: reach.easy,    n: 2 },
-      { primary: reach.easy,    fallback: under.easy,    n: 2 },
-      { primary: under.cleanup, fallback: reach.cleanup, n: 2 },
-      { primary: reach.cleanup, fallback: under.cleanup, n: 2 },
-    ];
-    for (const s of SLOTS) {
-      // primary 에서 우선
-      const avail1 = shuffle(s.primary).filter(r => !used.has(keyOf(r)));
-      const taken1 = avail1.slice(0, s.n);
-      taken1.forEach(r => used.add(keyOf(r)));
-      picks.push(...taken1);
-      // 부족분은 같은 분류의 반대 카테고리에서 보충
-      const short = s.n - taken1.length;
-      if (short > 0) {
-        const avail2 = shuffle(s.fallback).filter(r => !used.has(keyOf(r)));
-        const taken2 = avail2.slice(0, short);
-        taken2.forEach(r => used.add(keyOf(r)));
-        picks.push(...taken2);
-      }
-    }
-    // 분류 안 fallback 모두 실패해도 합계가 부족하면 마지막으로 전체 풀 (분류 무관) 에서 보충.
-    let need = 10 - picks.length;
+    const used = new Set([...hardPicked, ...easyPicked, ...cleanupPicked].map(keyOf));
+
+    // 한 풀 부족 시 다른 풀 후보에서 보충 (총 10 유지)
+    let need = 10 - hardPicked.length - easyPicked.length - cleanupPicked.length;
+    let extras = [];
     if (need > 0) {
-      const allCands = [...underSample, ...reachedSample];
+      const allCands = [...hardCands, ...easyCands, ...cleanupCands];
       const rest = allCands.filter(r => !used.has(keyOf(r)));
-      picks.push(...shuffle(rest).slice(0, need));
+      extras = shuffle(rest).slice(0, need);
+      extras.forEach(r => used.add(keyOf(r)));
     }
-    return picks.sort((a, b) => a.diffValue - b.diffValue);
+
+    // 표시 순서: 카테고리 무관, 전체 10곡 ★ asc 통합 정렬
+    return [...hardPicked, ...easyPicked, ...cleanupPicked, ...extras]
+      .sort((a, b) => a.diffValue - b.diffValue);
   };
 
   // EXH 전용 추천 — EC/HC 와 별개 로직.
