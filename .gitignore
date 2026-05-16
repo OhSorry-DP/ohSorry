@@ -19,3 +19,6 @@ dist/
 node_modules/
 .DS_Store
 *.log
+
+# 옛 버전 파일 모음 (calcOhsorryCore-0.0.XXX.js 등) — 로컬 백업 용도, 추적 X
+archive/

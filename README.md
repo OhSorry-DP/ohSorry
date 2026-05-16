@@ -263,6 +263,11 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 기존 단일 `2-calc-score.js` (~2230줄) 가 책임별 5개 모듈로 분리됨. 사용자가 콘솔에 붙여넣는 URL 은 그대로 — wrapper 가 나머지 모듈을 자동 fetch.
 
+**로컬 디렉토리 배치** (v0.0.343 부터):
+- 진입점 / wrapper 는 root: `2-calc-score.js` (legacy redirect), `ohsorry.js` (본체 wrapper)
+- 내부 4 모듈은 [`modules/`](modules/) 폴더 안: `calcOhsorryCore.js`, `ohsorryRender.js`, `dbConn.js`, `rivalOhsorry.js`
+- gist 에는 파일이 flat 하게 저장되므로 (path 없음) URL 은 모두 동일 유지. gist push 시 `--filename` 으로 파일명만 지정 (예: `gh gist edit ... --filename calcOhsorryCore.js modules/calcOhsorryCore.js`)
+
 | 파일 | 버전 | 줄수 | 역할 |
 |---|---|---|---|
 | `ohsorry.js` | v3.3.6 | ~54 | **본체 wrapper** — eagate 도메인 자동 실행. core/render/db 셋 다 fetch+eval 한 뒤 `Core.compute({mode:'own'})` 호출. `window.__dp_render(dbData)` 노출 (DB 모드). |
@@ -301,6 +306,11 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 ---
 
 ## 변경 이력
+
+### v3.3.6 / core v0.0.343 (repo cleanup) — 내부 4 모듈을 modules/ 로 이동 + archive/ 추적 해제
+- 4개 내부 모듈 (`calcOhsorryCore.js` / `ohsorryRender.js` / `dbConn.js` / `rivalOhsorry.js`) 을 [`modules/`](modules/) 폴더로 이동. 진입점 (`2-calc-score.js`, `ohsorry.js`) 은 root 유지.
+- gist 푸시는 파일명 기준이라 URL 변동 없음. gist push 명령만 path 가 `modules/<name>` 으로 바뀜.
+- [`archive/`](.gitignore) 의 옛 버전 파일 6개 (`-0.0.335.js` 등) 를 `git rm --cached` 로 untrack + `.gitignore` 에 `archive/` 추가. 로컬은 백업으로 유지.
 
 ### v3.3.6 / core v0.0.343 / render v0.0.337 — v335E 채택 분기를 adopt.js lib 로 분리
 - 신규 [`adopt.js`](https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw/adopt.js) (v0.0.1) — group A/B/C 분기 + group C 2-scope max + OSR135 spread gate + under-blend + 12.5~13.5 blend 까지 전부 lib 함수로 분리.
