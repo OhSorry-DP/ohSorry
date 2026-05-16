@@ -1,4 +1,4 @@
-// ohsorryRender.js — 오소리 결과 렌더 모듈 (v0.0.335)
+// ohsorryRender.js — 오소리 결과 렌더 모듈 (v0.0.337)
 //
 // calcOhsorryCore.compute() 가 반환한 result 객체를 받아 화면 패널 + 추천곡 + supabase upload.
 // 본체 / 라이벌 wrapper 가 fetch + eval 해서 사용.
@@ -30,7 +30,7 @@
 // ============================================================
 
 window.OhsorryRender = {
-  VERSION: '0.0.335',
+  VERSION: '0.0.337',
 
   // 진행률 UI — core 의 onProgress 콜백에서 호출
   showProgress: function (msg, pct) {
@@ -57,6 +57,33 @@ window.OhsorryRender = {
 
   hideProgress: function () {
     document.getElementById('__dp_progress')?.remove();
+  },
+
+  // 도메인이 다른 곳일 때 "이동할까요?" 토스트 — [이동] / [닫기] 두 버튼.
+  // [이동] 클릭 시 targetUrl 로 location.href 이동. [닫기] 또는 외부 클릭 시 자동 닫힘.
+  confirmRedirect: function (message, targetUrl) {
+    document.getElementById('__dp_redirect_toast')?.remove();
+    const box = document.createElement('div');
+    box.id = '__dp_redirect_toast';
+    box.style.cssText =
+      'position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:9999999;' +
+      'background:#1a1a1a;color:#e9ecef;border:1px solid #495057;border-radius:8px;' +
+      'padding:14px 18px;box-shadow:0 6px 24px rgba(0,0,0,.4);' +
+      'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Apple SD Gothic Neo","Pretendard",sans-serif;' +
+      'font-size:14px;max-width:calc(100vw - 32px);';
+    box.innerHTML = `
+      <div style="margin-bottom:10px;color:#ced4da">${message || '이동할까요?'}</div>
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        <button class="__dp_redirect_no" style="background:transparent;border:1px solid #495057;color:#adb5bd;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:13px;font-family:inherit">닫기</button>
+        <button class="__dp_redirect_yes" style="background:#ff6b9d;border:none;color:#1a1a1a;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:700;font-family:inherit">이동</button>
+      </div>
+    `;
+    document.body.appendChild(box);
+    box.querySelector('.__dp_redirect_no').onclick = () => box.remove();
+    box.querySelector('.__dp_redirect_yes').onclick = () => {
+      if (targetUrl) location.href = targetUrl;
+      box.remove();
+    };
   },
 
   // 결과 패널 + 추천곡 + supabase upload
@@ -448,13 +475,19 @@ window.OhsorryRender = {
           }).join('');
         };
         window.__dp_renderRecItems = renderRecItems;
-        window.__dp_rerollAndRender = (stage, color) => {
-          const newRecs = window.__dp_rerollRecs(stage);
+        let recLevelMode = result.recLevelModeDefault === 'lv12' ? 'lv12' : 'all';
+        const rerenderRecStage = (stage, color) => {
+          const newRecs = window.__dp_rerollRecs(stage, recBaseStar, recLevelMode);
           const container = document.getElementById(`__dp_recs_${stage}`);
           if (container) container.innerHTML = window.__dp_renderRecItems(newRecs, color);
           const counter = document.getElementById(`__dp_recs_count_${stage}`);
           if (counter) counter.textContent = newRecs.length;
         };
+        const rerenderAllRecs = () => {
+          const STAGE_COLORS = { ec: '#52a447', hc: '#dc3545', exh: '#d4a017' };
+          for (const stage of ['ec', 'hc', 'exh']) rerenderRecStage(stage, STAGE_COLORS[stage]);
+        };
+        window.__dp_rerollAndRender = rerenderRecStage;
 
         const renderRec = (label, recs, color, stage) => {
           const openAttr = stage === 'ec' ? ' open' : '';
@@ -502,25 +535,44 @@ window.OhsorryRender = {
             </div>
           `;
         })();
+        const recLevelToggle = `
+          <div class="rec-mode-toggle" style="margin-top:4px">
+            <span class="rec-mode-label">추천 범위 :</span>
+            <div class="rec-mode-options">
+              <span class="rec-level-mode-opt${recLevelMode === 'lv12' ? ' active' : ''}" data-mode="lv12"
+                style="cursor:pointer;color:${recLevelMode === 'lv12' ? '#212529' : '#aaa'};font-weight:${recLevelMode === 'lv12' ? '700' : '400'};transition:color .15s"
+                onclick="window.__dp_setRecLevelMode && window.__dp_setRecLevelMode('lv12')"
+                title="게임 LEVEL 12 차트만 추천">DP12</span>
+              <span class="rec-mode-sep">|</span>
+              <span class="rec-level-mode-opt${recLevelMode === 'all' ? ' active' : ''}" data-mode="all"
+                style="cursor:pointer;color:${recLevelMode === 'all' ? '#212529' : '#aaa'};font-weight:${recLevelMode === 'all' ? '700' : '400'};transition:color .15s"
+                onclick="window.__dp_setRecLevelMode && window.__dp_setRecLevelMode('all')"
+                title="게임 LEVEL 11 + 12 차트 추천">DP11+</span>
+            </div>
+          </div>
+        `;
 
-        const STAGE_COLORS = { ec: '#52a447', hc: '#dc3545', exh: '#d4a017' };
         window.__dp_setRecBase = (mode) => {
           if (mode === 'ereter' && eraterTrueStar == null) return;
           recBaseMode = mode;
           recBaseStar = mode === 'ereter' ? eraterTrueStar : ohsorryRecBase;
-          for (const stage of ['ec', 'hc', 'exh']) {
-            const newRecs = window.__dp_rerollRecs(stage);
-            const container = document.getElementById(`__dp_recs_${stage}`);
-            if (container) container.innerHTML = window.__dp_renderRecItems(newRecs, STAGE_COLORS[stage]);
-            const counter = document.getElementById(`__dp_recs_count_${stage}`);
-            if (counter) counter.textContent = newRecs.length;
-          }
+          rerenderAllRecs();
           document.querySelectorAll('.rec-mode-opt').forEach(b => {
             b.classList.toggle('active', b.dataset.mode === mode);
           });
         };
+        window.__dp_setRecLevelMode = (mode) => {
+          recLevelMode = mode === 'lv12' ? 'lv12' : 'all';
+          rerenderAllRecs();
+          document.querySelectorAll('.rec-level-mode-opt').forEach(b => {
+            const active = b.getAttribute('data-mode') === recLevelMode;
+            b.classList.toggle('active', active);
+            b.style.color = active ? '#212529' : '#aaa';
+            b.style.fontWeight = active ? '700' : '400';
+          });
+        };
 
-        return recModeToggle + [
+        return recModeToggle + recLevelToggle + [
           renderRec('EASY',    topEC,  '#52a447', 'ec'),
           renderRec('HARD',    topHC,  '#dc3545', 'hc'),
           renderRec('EX-HARD', topEXH, '#d4a017', 'exh'),

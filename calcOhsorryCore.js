@@ -34,7 +34,7 @@
 //   wrapperVersion: wrapper 자기 버전 (예: 'v3.3.6') — supabase version 컬럼은
 //                   `${wrapperVersion}-core${CORE_VERSION_SHORT}` 조합 (예: 'v3.3.6-core335')
 window.OhsorryCore = {
-  VERSION: '0.0.337',
+  VERSION: '0.0.341',
   compute: async (opts) => {
   opts = opts || {};
   const mode = opts.mode || 'own';
@@ -42,7 +42,7 @@ window.OhsorryCore = {
   let dbData = opts.dbData || null;
   const rivalToken = opts.rivalToken || null;
   const wrapperVersion = opts.wrapperVersion || 'unknown';
-  const CORE_VERSION_SHORT = '0.0.337'.replace(/^0\.0\./, '');  // '337'
+  const CORE_VERSION_SHORT = '0.0.341'.replace(/^0\.0\./, '');  // '341'
   const dbVersionString = `${wrapperVersion}-core${CORE_VERSION_SHORT}`;
   dbData = dbData || null;
   // -------- 0. ereter 데이터 로드 (Gist 에서 자동 fetch) --------
@@ -1158,7 +1158,7 @@ window.OhsorryCore = {
   //     easy = [base-0.1, base+0.1], hard = [base+offset-0.4, base+offset-0.1], cleanup = [0, base-0.1)
   //   (cleanup 의 상한은 if-else 순서 덕분에 자연스럽게 easy 의 하한까지로 좁혀짐)
   // 추천 풀 — 카테고리 (미도달 / 도달DJ미도달) × 분류 (hard / easy / cleanup)
-  const buildPools = (threshold, getDiffField, baseStar) => {
+  const buildPools = (threshold, getDiffField, baseStar, recLevelMode) => {
     const empty = { hard: [], easy: [], cleanup: [] };
     const underLamp = { hard: [], easy: [], cleanup: [] };       // lampNum < threshold
     const reached   = { hard: [], easy: [], cleanup: [] };       // lampNum >= threshold && !accuracyOK
@@ -1177,10 +1177,20 @@ window.OhsorryCore = {
       if (isHC)  return djLv === 'AAA' || djLv === 'AA';
       return djLv === 'AAA' || djLv === 'AA' || djLv === 'A';  // EC default
     };
+    const reachedStageLamp = (lampN) => {
+      if (isEXH) return lampN >= 6;       // EX/FC/PFC + AAA 미도달
+      if (isHC)  return lampN === 5;      // HC + AA 미도달
+      return lampN === 3 || lampN === 4;  // EC/NC + A 미도달
+    };
     for (const c of allCharts) {
-      // 램프 + 정확도 둘 다 OK → 추천 안 함
-      const cleared = c.lampNum >= threshold;
-      if (cleared && accuracyOK(c.djLevel)) continue;
+      if (recLevelMode === 'lv12' && c.gameLevel !== 12) continue;
+      const under = c.lampNum < threshold;
+      const reachedForDj = reachedStageLamp(c.lampNum);
+      // 해당 stage 를 못 딴 곡 + 해당 stage 에서 DJ Level 미도달인 곡만 추천 후보.
+      // 예: EASY 추천에서 HC/EX/FC 는 제외, EXH 추천은 EX/FC/PFC 도 AAA 미도달이면 포함.
+      if (!under && !reachedForDj) continue;
+      if (reachedForDj && accuracyOK(c.djLevel)) continue;
+      if (reachedForDj && c.exScore === 0) continue;
       let e = ereterMap.get(norm(c.title) + '|' + c.diff);
       let gameLevel = null;
       if (!e || e.level == null) {
@@ -1208,7 +1218,7 @@ window.OhsorryCore = {
         margin: baseStar - dv,
         gameLevel,
       };
-      // dv 기반 분류 — cleared 여부 무관 (cleared 곡도 dv 가 hard 범위면 hard 로)
+      // dv 기반 분류 — stage 도달 여부 무관 (도달 곡도 dv 가 hard 범위면 hard 로)
       let cls;
       if (dv >= hardMin && dv <= hardMax && dv > easyMax) cls = 'hard';
       else if (dv >= easyMin && dv <= easyMax) cls = 'easy';
@@ -1216,13 +1226,13 @@ window.OhsorryCore = {
         if (isEC && typeof e.hc === 'number' && e.hc < baseStar - 3) continue;  // 너무 쉬운 곡 제외
         cls = 'cleanup';
       } else continue;
-      (cleared ? reached : underLamp)[cls].push(item);
+      (reachedForDj ? reached : underLamp)[cls].push(item);
     }
     return { underLamp, reached };
   };
 
-  const buildRecs = (threshold, getDiffField, baseStar) => {
-    const { underLamp, reached } = buildPools(threshold, getDiffField, baseStar);
+  const buildRecs = (threshold, getDiffField, baseStar, recLevelMode) => {
+    const { underLamp, reached } = buildPools(threshold, getDiffField, baseStar, recLevelMode);
     const countField = getDiffField + '_n';
     const keyOf = r => (r.title || '') + '|' + r.chart;
 
@@ -1291,16 +1301,18 @@ window.OhsorryCore = {
   };
 
   // EXH 전용 추천 — EC/HC 와 별개 로직.
-  //   EXH 미클리어 (lamp < 6) 곡 중 자기 실력 (baseStar) 이하인 곡만,
+  //   EXH 미클리어 (lamp < 6) + EXH/FC/PFC 이지만 AAA 미도달인 곡 중 자기 실력 (baseStar) 근처 곡만,
   //   EXH ★ 낮은 순으로 30곡 → rate(%) 높은 순으로 정렬 → 10곡 표시.
   //   (미스 카운트는 Good 수치를 몰라 못 구함 → rate = exScore / (noteCount*2) 로 클리어 근접도 판단.)
   //   rate 없는 곡 (noteCount 미보강 / 미플레이) 은 뒤로 밀어서 정렬.
   //   baseStar 가 없으면 (실력값 추정 불가) 빈 배열 반환.
-  const buildExhRecs = (baseStar) => {
+  const buildExhRecs = (baseStar, recLevelMode) => {
     if (baseStar == null) return [];
     const candidates = [];
     for (const c of allCharts) {
-      if (c.lampNum >= 6) continue;
+      if (recLevelMode === 'lv12' && c.gameLevel !== 12) continue;
+      if (c.lampNum >= 6 && c.djLevel === 'AAA') continue;
+      if (c.lampNum >= 6 && c.exScore === 0) continue;
       const e = ereterMap.get(norm(c.title) + '|' + c.diff);
       if (!e || e.level == null) continue;
       if (e.level < 11.6 || e.level > 12.7) continue;
@@ -1337,11 +1349,12 @@ window.OhsorryCore = {
   // EC 는 실력값 없을 때 0.3 으로 fallback (저렙 진입자도 추천 받을 수 있게)
   // HC / EXH 는 실력값 없으면 빈 배열
   const EC_FALLBACK_BASE = 0.3;
+  const REC_LEVEL_MODE_DEFAULT = recBaseStar != null && recBaseStar >= 6 ? 'lv12' : 'all';
   const ecBase = recBaseStar != null ? recBaseStar : EC_FALLBACK_BASE;
-  recsEC.push(...buildRecs(3, 'ec', ecBase));
+  recsEC.push(...buildRecs(3, 'ec', ecBase, REC_LEVEL_MODE_DEFAULT));
   if (recBaseStar != null) {
-    recsHC.push(...buildRecs(5, 'hc', recBaseStar));
-    recsEXH.push(...buildExhRecs(recBaseStar));
+    recsHC.push(...buildRecs(5, 'hc', recBaseStar, REC_LEVEL_MODE_DEFAULT));
+    recsEXH.push(...buildExhRecs(recBaseStar, REC_LEVEL_MODE_DEFAULT));
   }
   console.log(`[step2] 추천곡: EC ${recsEC.length}, HC ${recsHC.length}, EXH ${recsEXH.length}`);
 
@@ -1351,10 +1364,12 @@ window.OhsorryCore = {
 
   // 다시 뽑기 버튼에서 사용할 수 있도록 노출
   // (panel 생성 후 클릭으로 재호출 → DOM 부분 업데이트)
-  window.__dp_rerollRecs = (stage) => {
-    if (stage === 'exh') return recBaseStar != null ? buildExhRecs(recBaseStar) : [];
-    if (stage === 'hc')  return recBaseStar != null ? buildRecs(5, 'hc', recBaseStar) : [];
-    if (stage === 'ec')  return buildRecs(3, 'ec', recBaseStar != null ? recBaseStar : EC_FALLBACK_BASE);
+  window.__dp_rerollRecs = (stage, baseStarOverride, recLevelMode) => {
+    const base = typeof baseStarOverride === 'number' ? baseStarOverride : recBaseStar;
+    const lvMode = recLevelMode === 'lv12' ? 'lv12' : REC_LEVEL_MODE_DEFAULT;
+    if (stage === 'exh') return base != null ? buildExhRecs(base, lvMode) : [];
+    if (stage === 'hc')  return base != null ? buildRecs(5, 'hc', base, lvMode) : [];
+    if (stage === 'ec')  return buildRecs(3, 'ec', base != null ? base : EC_FALLBACK_BASE, lvMode);
     return [];
   };
 
@@ -1422,6 +1437,7 @@ window.OhsorryCore = {
     recsEC, recsHC, recsEXH,
     total,
     recBaseMode, recBaseStar,
+    recLevelModeDefault: REC_LEVEL_MODE_DEFAULT,
     norm, SERIES, shelfLib,
     dbPayload,
   };
@@ -1446,7 +1462,7 @@ window.OhsorryCore = {
   runFromDb: async (row, opts) => {
     opts = opts || {};
     const wrapperVersion = opts.wrapperVersion || 'light';
-    const CORE_VERSION_SHORT = '0.0.336'.replace(/^0\.0\./, '');
+    const CORE_VERSION_SHORT = '0.0.341'.replace(/^0\.0\./, '');
     const dbVersionString = `${wrapperVersion}-core${CORE_VERSION_SHORT}`;
 
     if (!row || !row.iidx_id) {

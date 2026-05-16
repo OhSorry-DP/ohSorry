@@ -302,6 +302,26 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### v3.3.6 / core v0.0.341 / render v0.0.337 — 추천 범위 기본값 자동 선택
+- 최초 렌더 시 추천 기준 실력 점수가 `6` 미만이면 추천 범위 기본값을 `DP11+`, `6` 이상이면 `DP12` 로 선택.
+- 사용자가 추천 범위를 직접 바꾼 뒤에는 `ereter | OhSorry` 기준 변경 시에도 해당 선택을 유지.
+
+### v3.3.6 / core v0.0.340 / render v0.0.336 — 추천곡 범위 토글 추가
+- 추천곡 기준(`ereter | OhSorry`) 바로 아래에 추천 범위 토글(`DP12 | DP11+`) 추가.
+- `DP12` 선택 시 게임 LEVEL 12 차트만 추천 후보로 사용하고, `DP11+` 선택 시 기존처럼 게임 LEVEL 11+12 차트를 추천 후보로 사용.
+- 추천곡 기준 변경 / 다시 뽑기 시에도 현재 선택된 추천 범위를 유지.
+
+### v3.3.6 / core v0.0.339 — 추천곡 DJ Level 미도달 0점 제외
+- 이미 해당 stage 램프를 취득한 DJ Level 미도달 후보라도 EX 점수가 `0`이면 추천곡에서 제외.
+- EASY/HC 공통 추천과 EX-HARD 전용 추천 모두에 적용.
+- `calcOhsorryCore.js` 버전 `0.0.339` 로 갱신.
+
+### v3.3.6 / core v0.0.338 — 추천곡 DJ Level 미도달 후보 램프 범위 보정
+- EASY 추천: `EC/NC` 이지만 DJ Level `A` 미도달인 곡만 도달DJ미도달 후보로 포함하고, `HC/EX/FC/PFC` 는 제외.
+- HARD 추천: `HC` 이지만 DJ Level `AA` 미도달인 곡만 도달DJ미도달 후보로 포함하고, `EX/FC/PFC` 는 제외.
+- EX-HARD 추천: `EX/FC/PFC` 여도 DJ Level `AAA` 미도달이면 후보에 포함.
+- `calcOhsorryCore.js` 버전 `0.0.338` 로 갱신.
+
 ### v3.3.6 / core v0.0.337 — 추천곡 미도달:도달 5:5 비율 + 분류 보장
 - `buildPools`: hard / easy / cleanup 3분류 → `{ underLamp, reached }` 카테고리 구조. `underLamp = lampNum < threshold` / `reached = lampNum >= threshold && !accuracyOK`
 - cleared 곡도 dv (난이도) 기준으로 hard / easy / cleanup 분류 (이전엔 cleared → 무조건 cleanup)

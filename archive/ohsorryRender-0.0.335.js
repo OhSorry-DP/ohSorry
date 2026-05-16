@@ -59,6 +59,33 @@ window.OhsorryRender = {
     document.getElementById('__dp_progress')?.remove();
   },
 
+  // 도메인이 다른 곳일 때 "이동할까요?" 토스트 — [이동] / [닫기] 두 버튼.
+  // [이동] 클릭 시 targetUrl 로 location.href 이동. [닫기] 또는 외부 클릭 시 자동 닫힘.
+  confirmRedirect: function (message, targetUrl) {
+    document.getElementById('__dp_redirect_toast')?.remove();
+    const box = document.createElement('div');
+    box.id = '__dp_redirect_toast';
+    box.style.cssText =
+      'position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:9999999;' +
+      'background:#1a1a1a;color:#e9ecef;border:1px solid #495057;border-radius:8px;' +
+      'padding:14px 18px;box-shadow:0 6px 24px rgba(0,0,0,.4);' +
+      'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Apple SD Gothic Neo","Pretendard",sans-serif;' +
+      'font-size:14px;max-width:calc(100vw - 32px);';
+    box.innerHTML = `
+      <div style="margin-bottom:10px;color:#ced4da">${message || '이동할까요?'}</div>
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        <button class="__dp_redirect_no" style="background:transparent;border:1px solid #495057;color:#adb5bd;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:13px;font-family:inherit">닫기</button>
+        <button class="__dp_redirect_yes" style="background:#ff6b9d;border:none;color:#1a1a1a;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:700;font-family:inherit">이동</button>
+      </div>
+    `;
+    document.body.appendChild(box);
+    box.querySelector('.__dp_redirect_no').onclick = () => box.remove();
+    box.querySelector('.__dp_redirect_yes').onclick = () => {
+      if (targetUrl) location.href = targetUrl;
+      box.remove();
+    };
+  },
+
   // 결과 패널 + 추천곡 + supabase upload
   show: async function (result, opts) {
     if (!result) {

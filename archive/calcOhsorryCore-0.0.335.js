@@ -34,7 +34,7 @@
 //   wrapperVersion: wrapper 자기 버전 (예: 'v3.3.6') — supabase version 컬럼은
 //                   `${wrapperVersion}-core${CORE_VERSION_SHORT}` 조합 (예: 'v3.3.6-core335')
 window.OhsorryCore = {
-  VERSION: '0.0.335',
+  VERSION: '0.0.336',
   compute: async (opts) => {
   opts = opts || {};
   const mode = opts.mode || 'own';
@@ -42,7 +42,7 @@ window.OhsorryCore = {
   let dbData = opts.dbData || null;
   const rivalToken = opts.rivalToken || null;
   const wrapperVersion = opts.wrapperVersion || 'unknown';
-  const CORE_VERSION_SHORT = '0.0.335'.replace(/^0\.0\./, '');  // '335'
+  const CORE_VERSION_SHORT = '0.0.336'.replace(/^0\.0\./, '');  // '335'
   const dbVersionString = `${wrapperVersion}-core${CORE_VERSION_SHORT}`;
   dbData = dbData || null;
   // -------- 0. ereter 데이터 로드 (Gist 에서 자동 fetch) --------
@@ -98,6 +98,13 @@ window.OhsorryCore = {
 
   // 항상 Gist 의 최신 extractedAt 빠르게 확인 (HEAD 같은 거 안 됨, GET 짧게)
   // 다행히 ereter-data.json 가 그렇게 크지 않으니 fetch 하면서 compare
+  // batch (라이벌 다수) 처리 시 두 번째부터 ereter fetch 도 skip — 메모리 캐시
+  if (window.__ohsorryEreterCache) {
+    ereterData = window.__ohsorryEreterCache.charts;
+    ereterExtractedAt = window.__ohsorryEreterCache.extractedAt;
+    ereterPlayers = window.__ohsorryEreterCache.players;
+    console.log(`[step2] ereter 메모리 캐시 hit (${ereterData.length}개)`);
+  } else {
   console.log('[step2] ereter 데이터 fetch 중...');
   try {
     const url = ERETER_DATA_URL + '?t=' + Date.now();  // CDN 캐시 우회
@@ -149,33 +156,50 @@ window.OhsorryCore = {
     alert(`ereter 데이터 fetch 실패: ${e.message}\n네트워크 또는 CSP 문제일 수 있습니다.`);
     return;
   }
+  // 메모리 캐시 저장 — 다음 compute 호출 시 fetch skip
+  window.__ohsorryEreterCache = { charts: ereterData, extractedAt: ereterExtractedAt, players: ereterPlayers };
+  }
   console.log(`[step2] ereter 차트 ${ereterData.length}개 로드`);
+
+  // 모듈 lifetime memory cache — batch (라이벌 다수) 처리 시 두 번째 호출부터 외부 lib fetch skip.
+  // 페이지 reload 시 다시 받음 (localStorage 캐시는 24h TTL 별도로 동작).
+  window.__ohsorryLibCache = window.__ohsorryLibCache || {};
 
   // -------- 0.5. zasa 보충 데이터 fetch (선택, 실패해도 무시) --------
   // ereter 에 없는 ☆12 차트를 검증용으로 보충. 추천 / ★ 추정엔 사용 X.
   let zasaData = [];
-  try {
-    const res = await fetch(ZASA_DATA_URL + '?t=' + Date.now(), { cache: 'no-store' });
-    if (res.ok) {
-      const raw = await res.json();
-      if (raw && Array.isArray(raw.charts)) {
-        zasaData = raw.charts;
-        console.log(`[step2] zasa 보충 차트 ${zasaData.length}개 로드`);
+  if (window.__ohsorryLibCache.zasa) {
+    zasaData = window.__ohsorryLibCache.zasa;
+    console.log(`[step2] zasa 보충 차트 ${zasaData.length}개 (memory cache hit)`);
+  } else {
+    try {
+      const res = await fetch(ZASA_DATA_URL + '?t=' + Date.now(), { cache: 'no-store' });
+      if (res.ok) {
+        const raw = await res.json();
+        if (raw && Array.isArray(raw.charts)) {
+          zasaData = raw.charts;
+          window.__ohsorryLibCache.zasa = zasaData;
+          console.log(`[step2] zasa 보충 차트 ${zasaData.length}개 로드`);
+        }
       }
+    } catch (e) {
+      console.warn('[step2] zasa fetch 실패 (무시 가능):', e.message);
     }
-  } catch (e) {
-    console.warn('[step2] zasa fetch 실패 (무시 가능):', e.message);
   }
 
   // -------- 0.55. textage 채보 메타 fetch (선택, 실패해도 무시) --------
   // 채보별 총 노트 수 → charts 의 noteCount 보강 + missCount 계산 (noteCount - pgreat - great).
   let textageSongs = null;
-  try {
+  if (window.__ohsorryLibCache.textage) {
+    textageSongs = window.__ohsorryLibCache.textage;
+    console.log(`[step2] textage 채보 메타 ${Object.keys(textageSongs).length}곡 (memory cache hit)`);
+  } else try {
     const res = await fetch(TEXTAGE_DATA_URL + '?t=' + Date.now(), { cache: 'no-store' });
     if (res.ok) {
       const raw = await res.json();
       if (raw && raw.songs && typeof raw.songs === 'object') {
         textageSongs = raw.songs;
+        window.__ohsorryLibCache.textage = textageSongs;
         console.log(`[step2] textage 채보 메타 ${Object.keys(textageSongs).length}곡 로드`);
       }
     }
@@ -188,15 +212,22 @@ window.OhsorryCore = {
   //   fetch 실패 시 localStorage 캐시 사용. 캐시도 없으면 ohSorry 동작 불가 (에러 표시).
   const GIST_RAW = 'https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw';
   const OHSORRY_RATING_URL = GIST_RAW + '/ohSorryRating.json';
-  const CALC_OLD_OSR_URL = GIST_RAW + '/calc-Old-OSR.js';
-  const CALC_OSR_URL = GIST_RAW + '/calc-OSRating.js';
+  const CALC_OLD_OSR_URL = GIST_RAW + '/oldOSR.js';
+  const CALC_OSR_URL = GIST_RAW + '/osr.js';
   // v3.3.5: OSR13.5+ (bin50 + 50% 임계 + 상향 bin 부분 보너스) — 13.5 이상 시 ensemble 오버라이드
   const CALC_OSR135_URL = GIST_RAW + '/OSR13.5%2B.js';
   // ohsorry-shelf.js — renderChartRow (추천곡 곡명 클릭 토스트용). 실패해도 무시.
   const CALC_SHELF_URL = GIST_RAW + '/ohsorry-shelf.js';
 
-  // localStorage 캐시 헬퍼 — fetch 실패 시 이전 성공 결과 복원
+  // 외부 lib 메모리 캐시 (페이지 lifetime 유지) — batch (라이벌 다수) 처리 시 두 번째부터 fetch skip
+  if (!window.__ohsorryLibCache) window.__ohsorryLibCache = {};
+
+  // localStorage 캐시 헬퍼 — memory > network fetch > localStorage 순으로 fallback
   const loadWithCache = async (url, cacheKey, isJson) => {
+    // memory cache 우선 — batch (라이벌 다수) 처리 시 두 번째 호출부터 fetch skip
+    if (window.__ohsorryLibCache[cacheKey]) {
+      return window.__ohsorryLibCache[cacheKey];
+    }
     try {
       const res = await fetch(url + '?t=' + Date.now(), { cache: 'no-store' });
       if (!res.ok) throw new Error('HTTP ' + res.status);
@@ -205,13 +236,17 @@ window.OhsorryCore = {
         localStorage.setItem(cacheKey, isJson ? JSON.stringify(data) : data);
         localStorage.setItem(cacheKey + ':ts', new Date().toISOString());
       } catch {}
-      return { data, source: 'fetch' };
+      const result = { data, source: 'fetch' };
+      window.__ohsorryLibCache[cacheKey] = result;
+      return result;
     } catch (e) {
       const cached = localStorage.getItem(cacheKey);
       if (cached != null) {
         const ts = localStorage.getItem(cacheKey + ':ts') || '시간 불명';
         console.warn(`[step2] ${cacheKey} fetch 실패 (${e.message}) → localStorage 캐시 사용 (${ts})`);
-        return { data: isJson ? JSON.parse(cached) : cached, source: 'cache' };
+        const result = { data: isJson ? JSON.parse(cached) : cached, source: 'cache' };
+        window.__ohsorryLibCache[cacheKey] = result;
+        return result;
       }
       throw new Error(`${cacheKey}: fetch 실패 + 캐시 없음 — ${e.message}`);
     }
@@ -230,7 +265,7 @@ window.OhsorryCore = {
     console.error('[step2] ohSorryRating 로드 실패:', e.message);
   }
 
-  // calc-Old-OSR.js (v3.3.3 모델) + calc-OSRating.js (v0.0.2 모델) + OSR13.5+.js lib fetch + eval
+  // oldOSR.js (v3.3.3 모델) + osr.js (v0.0.2 모델) + OSR13.5+.js lib fetch + eval
   //   eval 은 UMD wrapper 라 window.oldOSR / window.ohSorryRating / window.OSR135 글로벌 등록
   let oldOSR = null, ohSorryRatingLib = null, osr135Lib = null, shelfLib = null;
   try {
@@ -239,18 +274,18 @@ window.OhsorryCore = {
     (new Function(oldOSRSrc))();
     oldOSR = window.oldOSR;
     if (!oldOSR) throw new Error('oldOSR global 등록 실패');
-    console.log(`[step2] calc-Old-OSR.js v${oldOSR.version} 로드 (${oldSrc})`);
+    console.log(`[step2] oldOSR.js v${oldOSR.version} 로드 (${oldSrc})`);
   } catch (e) {
-    console.error('[step2] calc-Old-OSR.js 로드 실패:', e.message);
+    console.error('[step2] oldOSR.js 로드 실패:', e.message);
   }
   try {
     const { data: osrSrc, source: newSrc } = await loadWithCache(CALC_OSR_URL, 'ohSorry:libOSR', false);
     (new Function(osrSrc))();
     ohSorryRatingLib = window.ohSorryRating;
     if (!ohSorryRatingLib) throw new Error('ohSorryRating global 등록 실패');
-    console.log(`[step2] calc-OSRating.js 로드 (${newSrc})`);
+    console.log(`[step2] osr.js 로드 (${newSrc})`);
   } catch (e) {
-    console.error('[step2] calc-OSRating.js 로드 실패:', e.message);
+    console.error('[step2] osr.js 로드 실패:', e.message);
   }
   // v3.3.5: OSR13.5+ lib (13.5 이상 ★ 정확도 ↑)
   try {
@@ -291,7 +326,7 @@ window.OhsorryCore = {
     // 라틴 확장
     .replace(/ƒ/g, 'f')
     .replace(/[Øø]/g, 'o')
-    .replace(/[Ææ]/g, 'ae')
+    .replace(/[Ææ]/g, 'a')
     .replace(/ə/g, 'e')
     .replace(/[Œœ]/g, 'oe')
     .replace(/ß/g, 'ss')
@@ -373,16 +408,20 @@ window.OhsorryCore = {
   // 기존 로그 / UI 용 — 첫 (LEVEL 12) label
   const levelText = LEVELS_TO_FETCH[0].label;
 
-  // 도메인 체크 (잘못된 사이트에서 실행하면 의미 없으니 안내)
-  // DB 모드 (dbData 주어짐) 에서는 eagate fetch 를 안 하므로 도메인 체크 스킵
+  // 도메인 체크 (잘못된 사이트에서 실행하면 의미 없으니 안내).
+  // DB 모드 (dbData 있음) 에서는 eagate fetch 를 안 하므로 도메인 체크 스킵 → 그대로 진행.
+  // dbData 없음 + 다른 도메인 → "p.eagate.573.jp 로 이동할까요?" 토스트 + return (render 가 있으면 사용).
   if (!dbData && !location.hostname.endsWith('p.eagate.573.jp')) {
-    alert(
-      isRival
-        ? '라이벌 오소리 — p.eagate.573.jp 도메인에서 실행해야 합니다.\n' +
-          '먼저 라이벌 페이지 (difficulty_rival.html?rival=<토큰>) 를 열어서 로그인 후, 그 페이지의 콘솔에서 실행하세요.'
-        : 'p.eagate.573.jp 도메인에서 실행해야 합니다.\n' +
-          '먼저 https://p.eagate.573.jp 의 아무 페이지나 열어서 로그인 후, 그 페이지의 콘솔에서 실행하세요.'
-    );
+    const msg = isRival
+      ? '라이벌 오소리는 p.eagate.573.jp 의 라이벌 페이지에서 실행해야 합니다. 이동할까요?'
+      : 'p.eagate.573.jp 에서 실행해야 결과를 볼 수 있어요. 이동할까요?';
+    const targetUrl = 'https://p.eagate.573.jp/';
+    if (window.OhsorryRender && window.OhsorryRender.confirmRedirect) {
+      window.OhsorryRender.confirmRedirect(msg, targetUrl);
+    } else {
+      // render 모듈이 안 떠있는 fallback — 기본 alert
+      if (window.confirm(msg)) location.href = targetUrl;
+    }
     return;
   }
 
@@ -684,7 +723,7 @@ window.OhsorryCore = {
   // 사용자가 시도한 곡(NO PLAY 제외)에 대해 EC/HC/EXH 각 단계마다 한 점씩
   // ASSIST 는 ereter 에서 FAILED 로 처리됨 (모든 단계 fail)
   //
-  // v3.3.4: fitData 생성 + runStarModel 호출은 외부 lib (calc-Old-OSR.js / calc-OSRating.js) 안에서 수행.
+  // v3.3.4: fitData 생성 + runStarModel 호출은 외부 lib (oldOSR.js / osr.js) 안에서 수행.
   // 본체에서는 matched / unmatched / perLamp / details / score 통계만 계산 — 점수 합계 + UI 표시 용도.
 
   // 모드 결정 — LEVEL 12 플레이 곡 ≥ 30 이면 lv12 only 통계, else lv11+lv12 통합 통계
@@ -805,7 +844,7 @@ window.OhsorryCore = {
   //
   // cutoff: n_cleared >= 50 (실전 평가에서 미달 시 v3.1.1 fallback)
   //
-  // v3.3.4: ★ 추정 모델 (runStarModel) 은 외부 lib (calc-Old-OSR.js, calc-OSRating.js) 으로 분리됨.
+  // v3.3.4: ★ 추정 모델 (runStarModel) 은 외부 lib (oldOSR.js, osr.js) 으로 분리됨.
   //   본체에는 stub 만 — 아래 dead code 는 일괄 제거. 외부 lib fetch + ensemble 흐름은 step2 끝에서 처리.
 
   // ----- v3.3.5: 외부 lib 3종 (oldOSR + OSR + OSR135) 분기 채택 -----
@@ -1127,8 +1166,19 @@ window.OhsorryCore = {
     const hardMin = baseStar + offset - (isEC ? 0.4 : 0.3);
     const easyMax = baseStar + (isEC ? 0.1 : 0.2);
     const easyMin = baseStar - (isEC ? 0.1 : 0);
+    // stage 별 정확도 임계치 — EC: A 이상이면 OK / HC: AA 이상 / EXH: AAA 만
+    const isHC  = getDiffField === 'hc';
+    const isEXH = getDiffField === 'exh';
+    const accuracyOK = (djLv) => {
+      if (isEXH) return djLv === 'AAA';
+      if (isHC)  return djLv === 'AAA' || djLv === 'AA';
+      return djLv === 'AAA' || djLv === 'AA' || djLv === 'A';  // EC default
+    };
     for (const c of allCharts) {
-      if (c.lampNum >= threshold) continue;
+      // 클리어 + stage 별 DJ Level 임계 이상이면 정리 대상 아님 — skip.
+      // 클리어했지만 임계 미만이면 정확도 부족 → cleanup 후보로 포함.
+      const cleared = c.lampNum >= threshold;
+      if (cleared && accuracyOK(c.djLevel)) continue;
       let e = ereterMap.get(norm(c.title) + '|' + c.diff);
       let gameLevel = null; // ratingMap fallback 의 게임 LEVEL (11 / 12)
       if (!e || e.level == null) {
@@ -1160,8 +1210,13 @@ window.OhsorryCore = {
         margin: baseStar - dv,
         gameLevel, // 11 이면 lv11 추정 차트 (ohSorryRating fallback) → UI 에서 색상 구분
       };
-      // 하드 우선 (overlap 시 약 도전과 중복 방지)
-      if (dv >= hardMin && dv <= hardMax && dv > easyMax) {
+      // cleared (정확도 부족, DJ < A) 곡은 도전 풀이 아닌 cleanup 만 — dv 무관.
+      // 미클리어는 기존 dv 기반 hard / easy / cleanup 분류.
+      if (cleared) {
+        if (isEC && typeof e.hc === 'number' && e.hc < baseStar - 3) continue;
+        cleanup.push(item);
+      } else if (dv >= hardMin && dv <= hardMax && dv > easyMax) {
+        // 하드 우선 (overlap 시 약 도전과 중복 방지)
         hard.push(item);
       } else if (dv >= easyMin && dv <= easyMax) {
         easy.push(item);
@@ -1192,10 +1247,10 @@ window.OhsorryCore = {
     const easyCands = sample15(easy);
     const cleanupCands = sample15(cleanup);
 
-    // 후보 셔플 → N곡 표시 (하드 2 / 약 도전 5 / 정리 3)
+    // 후보 셔플 → N곡 표시 — EC/HC/EXH 모두 하드 2 / 도전 4 / 정리 4
     const hardPicked = shuffle(hardCands).slice(0, 2);
-    const easyPicked = shuffle(easyCands).slice(0, 5);
-    const cleanupPicked = shuffle(cleanupCands).slice(0, 3);
+    const easyPicked = shuffle(easyCands).slice(0, 4);
+    const cleanupPicked = shuffle(cleanupCands).slice(0, 4);
 
     const used = new Set([...hardPicked, ...easyPicked, ...cleanupPicked].map(keyOf));
 
@@ -1359,7 +1414,70 @@ window.OhsorryCore = {
   }
 
   return result;
-  // run: async (opts) => { ... } 의 본문 끝
+  // compute: async (opts) => { ... } 의 본문 끝
+  },
+
+  // ===== runFromDb — supabase row 만으로 가벼운 렌더 (게스트 리드미용) =====
+  // 외부 lib (oldOSR / OSR / OSR135 / ereter / zasa / textage) 안 받음.
+  // dbData 의 값 그대로 사용 — star_estimate, ereter_star 등은 row 에 저장된 값.
+  // 추천곡 / 상세통계 / ★ 추정 비교 섹션은 빈 상태 (render 가 graceful 하게 일부만 그림).
+  // dbPayload 는 null — 게스트 리드미는 supabase 재업로드 X.
+  runFromDb: async (row, opts) => {
+    opts = opts || {};
+    const wrapperVersion = opts.wrapperVersion || 'light';
+    const CORE_VERSION_SHORT = '0.0.336'.replace(/^0\.0\./, '');
+    const dbVersionString = `${wrapperVersion}-core${CORE_VERSION_SHORT}`;
+
+    if (!row || !row.iidx_id) {
+      console.error('[OhsorryCore.runFromDb] row 가 비어있거나 iidx_id 없음');
+      return null;
+    }
+
+    const profile = {
+      djName: row.dj_name,
+      iidxId: row.iidx_id,
+      spRank: row.sp_rank,
+      dpRank: row.dp_rank,
+      spRadar: (row.notes_radar && row.notes_radar.sp) || null,
+      dpRadar: (row.notes_radar && row.notes_radar.dp) || null,
+      qproImg: null,  // supabase row 에 없음
+    };
+    const hasRadarData = (r) => r && typeof r === 'object' && Object.keys(r).length > 0;
+    const profileHasRadar = hasRadarData(profile.spRadar) || hasRadarData(profile.dpRadar);
+
+    // 곡명 정규화 — 간이 norm (full norm 은 외부 lib 의존)
+    const norm = (s) => String(s == null ? '' : s).toLowerCase()
+      .replace(/[\s　]+/g, '').normalize('NFKC');
+
+    const result = {
+      mode: 'own', isRival: false, dbData: row, wrapperVersion, dbVersionString,
+      profile, profileHasRadar, hasRadarData,
+      starEstimate: row.star_estimate != null ? Number(row.star_estimate) : null,
+      starRaw: row.raw_s != null ? Number(row.raw_s) : null,
+      eraterTrueStar: row.ereter_star != null ? Number(row.ereter_star) : null,
+      starEstimateNew: null, starEstimateOld: null,
+      starEstimateEreterOnly: null, starEstimateLv12Only: null, starEstimateAll: null,
+      allCharts: Array.isArray(row.charts_json) ? row.charts_json : [],
+      ereterData: [], zasaSupplemental: [],
+      ereterMap: new Map(), zasaMap: new Map(), ratingMap: new Map(),
+      ereterExtractedAt: null,
+      ohsorryRecBase: null,
+      topEC: [], topHC: [], topEXH: [],
+      pageCount: 0, useOnlyLv12: false, matched: 0, unmatched: 0, details: [], perLevel: {}, perLamp: {},
+      recsEC: [], recsHC: [], recsEXH: [],
+      total: Array.isArray(row.charts_json) ? row.charts_json.length : 0,
+      recBaseMode: 'ohsorry', recBaseStar: null,
+      norm, SERIES: row.series || '33',
+      shelfLib: window.OhSorryShelf || null,
+      dbPayload: null,  // 재업로드 X
+    };
+
+    if (window.OhsorryRender && window.OhsorryRender.show) {
+      await window.OhsorryRender.show(result);
+    } else {
+      console.error('[OhsorryCore.runFromDb] window.OhsorryRender 없음 — render 모듈 먼저 load 필요');
+    }
+    return result;
   },
 };
 // 자동 실행 / 노출 함수 (__dp_render, __dp_render_rival 등) 는 wrapper 가 담당.
