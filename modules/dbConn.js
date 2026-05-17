@@ -5,7 +5,7 @@
 //
 // 인터페이스:
 //   window.OhsorryDb = {
-//     VERSION: '0.0.336',
+//     VERSION: '0.0.337',
 //     upsertUserProfile(payload):   user_profiles upsert (supabase RPC)
 //     upsertUserChartScores(rows):  user_chart_scores bulk upsert (supabase RPC)
 //     fetchUserProfile(iidxId):     user_profiles 한 row 조회 (PK 가 (iidx_id, series) composite,
