@@ -307,6 +307,12 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### core v0.0.345 — user_profiles.charts_json 제거 + chart_score row 에 lamp 추가
+- `calcOhsorryCore.js` 의 `dbPayload.charts_json` → `null`. user_chart_scores 가 single source of truth.
+- `chartScoreRows` 빌드에 `lamp` 필드 추가 — 게스트 페이지 서열표가 `get_user_charts` RPC fallback 으로 격자 렌더 가능.
+- 효과: user_profiles 의 거대 jsonb (~270KB/user) 디스크 부담 제거. 곡별 랭킹 / 서열표 / ★ 추정 모두 정상 동작 (chart_scores fallback 자동).
+- 같은 흐름: INFOhSorry v0.0.44, ohSorryRating 의 ereter backfill 스크립트, 게스트 페이지 shelf.
+
 ### db v0.0.337 — 원격 service-status.json kill-switch
 - `dbConn.js` 에 `fetchServiceStatus()` 추가 — gist 의 `service-status.json` fetch + 5분 메모리 캐시 + **fail-closed** (fetch 실패 시 disabled).
 - `upsertUserProfile` / `upsertUserChartScores` 시작에서 `uploadEnabled` 확인 후 disabled 시 skip.

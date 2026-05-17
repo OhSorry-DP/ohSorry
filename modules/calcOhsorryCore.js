@@ -34,7 +34,7 @@
 //   wrapperVersion: wrapper 자기 버전 (예: 'v3.3.6') — supabase version 컬럼은
 //                   `${wrapperVersion}-core${CORE_VERSION_SHORT}` 조합 (예: 'v3.3.6-core335')
 window.OhsorryCore = {
-  VERSION: '0.0.343',
+  VERSION: '0.0.344',
   compute: async (opts) => {
   opts = opts || {};
   const mode = opts.mode || 'own';
@@ -42,7 +42,7 @@ window.OhsorryCore = {
   let dbData = opts.dbData || null;
   const rivalToken = opts.rivalToken || null;
   const wrapperVersion = opts.wrapperVersion || 'unknown';
-  const CORE_VERSION_SHORT = '0.0.343'.replace(/^0\.0\./, '');  // '343'
+  const CORE_VERSION_SHORT = '0.0.344'.replace(/^0\.0\./, '');  // '344'
   const dbVersionString = `${wrapperVersion}-core${CORE_VERSION_SHORT}`;
   dbData = dbData || null;
   // -------- 0. ereter 데이터 로드 (Gist 에서 자동 fetch) --------
@@ -1423,8 +1423,10 @@ window.OhsorryCore = {
 
   // user_profiles upsert payload build — DB 모드는 skip (render 가 dbData 체크)
   let dbPayload = null;
+  let chartScoreRows = null;
   if (!dbData && profile && profile.iidxId) {
     const iidxIdNorm = profile.iidxId.replace(/-/g, '');
+    const nowIso = new Date().toISOString();
     let nPlayedLv12 = 0, fcCount = 0, exhCount = 0, hcCount = 0, nClearedLv12 = 0;
     for (const c of allCharts) {
       if (useOnlyLv12 && c.gameLevel !== 12) continue;
@@ -1462,11 +1464,32 @@ window.OhsorryCore = {
       exh_count: exhCount,
       level_filter: 'lv12',
       series: SERIES,
-      charts_json: allCharts,
+      // v3.3.6 core 0.0.345 — charts_json=null. user_chart_scores 가 single source of truth.
+      //   게스트 페이지 서열표는 get_user_charts RPC 로 fallback. INFOhSorry / ereter backfill 도 동일.
+      //   디스크 부담 큰 jsonb (~270KB/user) 제거 + 중복 데이터 정리.
+      charts_json: null,
       notes_radar: profileHasRadar
         ? { sp: hasRadarData(profile.spRadar) ? profile.spRadar : null, dp: hasRadarData(profile.dpRadar) ? profile.dpRadar : null }
         : null,
     };
+    chartScoreRows = allCharts.filter((c) => c.exScore > 0).map((c) => {
+      const key = norm(c.title) + '|' + c.diff;
+      const r = ratingMap.get(key);
+      const e = ereterMap.get(key);
+      return {
+        played_version: SERIES,
+        level: r && typeof r.zasaLevel === 'number' ? r.zasaLevel : (e && typeof e.level === 'number' ? e.level : null),
+        title: c.title,
+        iidx_id: iidxIdNorm,
+        dj_name: profile.djName || null,
+        diff: c.diff,
+        game_level: c.gameLevel != null ? c.gameLevel : null,
+        dj_level: c.djLevel != null ? c.djLevel : null,
+        ex_score: c.exScore != null ? c.exScore : null,
+        lamp: c.lamp || null,
+        date: nowIso,
+      };
+    });
   }
 
   // result 객체 — render 가 받아서 panel + supabase upload 진행
@@ -1485,7 +1508,7 @@ window.OhsorryCore = {
     recBaseMode, recBaseStar,
     recLevelModeDefault: REC_LEVEL_MODE_DEFAULT,
     norm, SERIES, shelfLib,
-    dbPayload,
+    dbPayload, chartScoreRows,
   };
 
   // ohsorryRender 모듈은 wrapper 가 미리 fetch 해서 window.OhsorryRender 로 노출했다고 가정.
@@ -1508,7 +1531,7 @@ window.OhsorryCore = {
   runFromDb: async (row, opts) => {
     opts = opts || {};
     const wrapperVersion = opts.wrapperVersion || 'light';
-    const CORE_VERSION_SHORT = '0.0.343'.replace(/^0\.0\./, '');
+    const CORE_VERSION_SHORT = '0.0.344'.replace(/^0\.0\./, '');
     const dbVersionString = `${wrapperVersion}-core${CORE_VERSION_SHORT}`;
 
     if (!row || !row.iidx_id) {
@@ -1550,10 +1573,11 @@ window.OhsorryCore = {
       recsEC: [], recsHC: [], recsEXH: [],
       total: Array.isArray(row.charts_json) ? row.charts_json.length : 0,
       recBaseMode: 'ohsorry', recBaseStar: null,
-      norm, SERIES: row.series || '33',
-      shelfLib: window.OhSorryShelf || null,
-      dbPayload: null,  // 재업로드 X
-    };
+        norm, SERIES: row.series || '33',
+        shelfLib: window.OhSorryShelf || null,
+        dbPayload: null,  // 재업로드 X
+        chartScoreRows: null,
+      };
 
     if (window.OhsorryRender && window.OhsorryRender.show) {
       await window.OhsorryRender.show(result);
