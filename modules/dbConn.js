@@ -1,12 +1,13 @@
-// dbConn.js — 오소리 DB 통신 모듈 (v0.0.335)
+// dbConn.js — 오소리 DB 통신 모듈 (v0.0.337)
 //
 // supabase user_profiles 테이블 RPC 호출만 담당. 계산 / UI 와 분리.
 // 본체 / 라이벌 wrapper 가 fetch + eval 해서 사용 (window.OhsorryDb 로 노출).
 //
 // 인터페이스:
 //   window.OhsorryDb = {
-//     VERSION: '0.0.335',
+//     VERSION: '0.0.336',
 //     upsertUserProfile(payload):   user_profiles upsert (supabase RPC)
+//     upsertUserChartScores(rows):  user_chart_scores bulk upsert (supabase RPC)
 //     fetchUserProfile(iidxId):     user_profiles 한 row 조회 (PK 가 (iidx_id, series) composite,
 //                                   같은 iidx_id 의 여러 시즌 row 중 last_updated_at 최신 1건 반환)
 //   }
@@ -23,6 +24,44 @@ window.OhsorryDb = (function () {
     Authorization: 'Bearer ' + SUPABASE_KEY,
   };
 
+  // 원격 service status — gist 의 service-status.json 으로 uploadEnabled toggle.
+  // fail-closed: fetch 실패 시 disabled 로 취급 (모든 upload 차단).
+  // 캐시: 5분 메모리.
+  const SERVICE_STATUS_URL =
+    'https://gist.githubusercontent.com/OhSorry-DP/30c3ba6f87df9847291c42ea216a8d2a/raw/service-status.json';
+  const SERVICE_STATUS_CACHE_MS = 5 * 60 * 1000;
+  let statusCache = null;
+  let statusCachedAt = 0;
+  async function fetchServiceStatus() {
+    const now = Date.now();
+    if (statusCache && now - statusCachedAt < SERVICE_STATUS_CACHE_MS) {
+      return statusCache;
+    }
+    try {
+      const res = await fetch(SERVICE_STATUS_URL + '?t=' + now, { cache: 'no-store' });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const data = await res.json();
+      statusCache = data;
+      statusCachedAt = now;
+      return data;
+    } catch (e) {
+      console.warn('[OhsorryDb] service status fetch 실패, fail-closed:', e.message);
+      return {
+        uploadEnabled: false,
+        shelfEnabled: false,
+        message: '서비스 상태 확인 실패 — 잠시 후 다시 시도해주세요.',
+      };
+    }
+  }
+  // upload 차단 체크 — return null 이면 통과, error object 면 차단.
+  async function checkUploadEnabled() {
+    const status = await fetchServiceStatus();
+    if (!status.uploadEnabled) {
+      return { ok: false, error: status.message || 'upload disabled by remote service status' };
+    }
+    return null;
+  }
+
   // user_profiles upsert — RPC upsert_user_profile(p jsonb)
   //   payload: { iidx_id, dj_name, star_estimate, ereter_star, raw_s, version,
   //              sp_rank, dp_rank, n_cleared, n_played_lv12, fc_count, hc_count, exh_count,
@@ -32,11 +71,38 @@ window.OhsorryDb = (function () {
     if (!payload || !payload.iidx_id) {
       return { ok: false, error: 'iidx_id 가 없습니다' };
     }
+    const statusErr = await checkUploadEnabled();
+    if (statusErr) return statusErr;
     try {
       const res = await fetch(SUPABASE_URL + '/rest/v1/rpc/upsert_user_profile', {
         method: 'POST',
         headers: HEADERS,
         body: JSON.stringify({ p: payload }),
+      });
+      if (!res.ok) {
+        const errText = await res.text().catch(() => '');
+        return { ok: false, error: `HTTP ${res.status} ${errText}` };
+      }
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+  }
+
+  // user_chart_scores bulk upsert — RPC upsert_user_chart_scores(p_rows jsonb)
+  //   rows: [{ played_version, level, title, iidx_id, dj_name, diff, game_level, dj_level, ex_score, date }, ...]
+  //   리턴: { ok: boolean, error?: string }
+  async function upsertUserChartScores(rows) {
+    if (!Array.isArray(rows) || rows.length === 0) {
+      return { ok: true };
+    }
+    const statusErr = await checkUploadEnabled();
+    if (statusErr) return statusErr;
+    try {
+      const res = await fetch(SUPABASE_URL + '/rest/v1/rpc/upsert_user_chart_scores', {
+        method: 'POST',
+        headers: HEADERS,
+        body: JSON.stringify({ p_rows: rows }),
       });
       if (!res.ok) {
         const errText = await res.text().catch(() => '');
@@ -66,8 +132,10 @@ window.OhsorryDb = (function () {
   }
 
   return {
-    VERSION: '0.0.335',
+    VERSION: '0.0.337',
     upsertUserProfile: upsertUserProfile,
+    upsertUserChartScores: upsertUserChartScores,
     fetchUserProfile: fetchUserProfile,
+    fetchServiceStatus: fetchServiceStatus,
   };
 })();

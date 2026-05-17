@@ -307,6 +307,17 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### db v0.0.337 — 원격 service-status.json kill-switch
+- `dbConn.js` 에 `fetchServiceStatus()` 추가 — gist 의 `service-status.json` fetch + 5분 메모리 캐시 + **fail-closed** (fetch 실패 시 disabled).
+- `upsertUserProfile` / `upsertUserChartScores` 시작에서 `uploadEnabled` 확인 후 disabled 시 skip.
+- 풀 때는 gist (secret `30c3ba6f87df9847291c42ea216a8d2a`) 의 `service-status.json` 만 `uploadEnabled: true` 로 toggle 하면 5분 캐시 만료 후 반영. 코드 / 배포 변경 없음.
+- 의도: supabase 자원 한계 / 점검 시 ohSorry / INFOhSorry / 게스트 페이지 의 DB 호출을 한 곳에서 일괄 차단.
+
+### v3.3.6 / core v0.0.344 / render v0.0.338 / db v0.0.336 — 곡별 랭킹 점수 업로드 추가
+- `user_chart_scores` RPC(`upsert_user_chart_scores`) 호출 추가. 오소리 실행 시 `ex_score > 0` 인 곡별 `played_version/title/diff/iidx_id/ex_score/dj_level/level` row 를 함께 업로드.
+- `played_version` 은 현재 `SERIES` 값(`33` 등)을 사용하고, `level` 은 `ohSorryRating.zasaLevel` 우선 / ereter level fallback 으로 저장.
+- INFOhSorry 도 `upsert_user_profile` 성공 후 `played_version='INF'` 로 같은 곡별 점수 row 를 업로드하도록 연결.
+
 ### v3.3.6 / core v0.0.343 (repo cleanup) — 내부 4 모듈을 modules/ 로 이동 + archive/ 추적 해제
 - 4개 내부 모듈 (`calcOhsorryCore.js` / `ohsorryRender.js` / `dbConn.js` / `rivalOhsorry.js`) 을 [`modules/`](modules/) 폴더로 이동. 진입점 (`2-calc-score.js`, `ohsorry.js`) 은 root 유지.
 - gist 푸시는 파일명 기준이라 URL 변동 없음. gist push 명령만 path 가 `modules/<name>` 으로 바뀜.
