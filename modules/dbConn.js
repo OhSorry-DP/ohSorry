@@ -1,4 +1,4 @@
-// dbConn.js — 오소리 DB 통신 모듈 (v0.0.401)
+// dbConn.js — 오소리 DB 통신 모듈 (v0.0.402)
 //
 // 새 디비 (users + user_radars + scores) 로 마이그레이션.
 //   - upsertUserProfile: upsert_user + upsert_user_radar (sp/dp)
@@ -6,6 +6,10 @@
 //   - fetchUserProfile 은 다음 단계 (TODO)
 //
 // 본체 / 라이벌 wrapper 가 fetch + eval 해서 사용 (window.OhsorryDb 로 노출).
+//
+// v0.0.402 — LAMP_MAP 에 풀네임 alias 추가:
+//   - calcOhsorryCore.js 의 LAMP_NAMES (NO PLAY / FAILED / EASY / CLEAR / HARD / EX HARD / FULL COMBO) 매칭
+//   - 이전엔 abbreviation (NP/F/EC/...) 만 매핑 → 풀네임 lamp 가 null 처리 → scores.lamp 다 NULL 이슈
 //
 // v0.0.401 — 동명이곡 매칭 재설계:
 //   - songs 캐시 구조: Map<normKey, [{ song_id, title, ac }]> (array)
@@ -92,8 +96,11 @@ window.OhsorryDb = (function () {
   };
   // 차트 difficulty → int
   const DIFF_MAP = { BEGINNER: 0, NORMAL: 1, HYPER: 2, ANOTHER: 3, LEGGENDARIA: 4 };
-  // 클리어 lamp → int
-  const LAMP_MAP = { NP: 0, F: 1, AC: 2, EC: 3, NC: 4, HC: 5, EX: 6, FC: 7, PFC: 7 };
+  // 클리어 lamp → int. abbreviation + 풀네임 (calcOhsorryCore 의 LAMP_NAMES) 둘 다 받음.
+  const LAMP_MAP = {
+    NP: 0, F: 1, AC: 2, EC: 3, NC: 4, HC: 5, EX: 6, FC: 7, PFC: 7,
+    'NO PLAY': 0, FAILED: 1, ASSIST: 2, EASY: 3, CLEAR: 4, HARD: 5, 'EX HARD': 6, 'FULL COMBO': 7,
+  };
 
   // 곡명 정규화 — window.OhsorryNorm.norm (별도 모듈, wrapper 가 먼저 fetch + eval).
   // TITLE_ALIASES / NORM_OVERRIDES 도 normTitle 모듈 안으로 이동됨.
@@ -326,7 +333,7 @@ window.OhsorryDb = (function () {
   }
 
   return {
-    VERSION: '0.0.401',
+    VERSION: '0.0.402',
     upsertUserProfile: upsertUserProfile,
     upsertUserChartScores: upsertUserChartScores,
     fetchUserProfile: fetchUserProfile,

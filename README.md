@@ -307,6 +307,27 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### dbConn v0.0.402 — LAMP_MAP 풀네임 alias 추가 (scores.lamp NULL 이슈 해결)
+- `calcOhsorryCore.js` 의 `LAMP_NAMES` 가 chart.lamp 에 풀네임 (`'NO PLAY'` / `'FAILED'` / `'EASY'` / `'CLEAR'` / `'HARD'` / `'EX HARD'` / `'FULL COMBO'`) 을 넣는데 `dbConn.js v0.0.401` 의 LAMP_MAP 은 abbreviation 만 매칭 → 매핑 실패 → `scores.lamp` 가 모든 row 에서 NULL.
+- LAMP_MAP 에 풀네임 alias 추가. abbreviation + 풀네임 둘 다 받음.
+- 본체 재실행 시 `upsert_scores` 가 PK 같으면 lamp 더 좋을 때 자동 갱신 → 이미 올라간 NULL row 들도 자연 backfill.
+
+### render v0.0.341 / wrapper v3.3.6 — 진행률 토스트 모바일 화면 이탈 방지
+- `#__dp_progress` 토스트 (`width:280px` + `padding:12px 14px` + `border:1px`) 가 `box-sizing` 미지정으로 실제 렌더 폭이 310px 였음 → 320px 폭 폰에서 `right:16px` 와 합쳐 좌측이 -6px 까지 밀려나가던 문제 해결.
+- `box-sizing:border-box` + `max-width:calc(100vw - 32px)` 로 좁은 viewport 에서 자동 축소.
+- 내부 텍스트 div 에 `word-break:break-word;overflow-wrap:anywhere` 추가 — 곡명 등 긴 토큰이 박스 밖으로 흘러나가지 않게.
+- `ohsorryRender.js` 의 `showProgress` 와 `ohsorry.js` 의 `showLoadingProgress` 양쪽 동일하게 적용.
+
+### render v0.0.340 — 모바일 결과 패널 전체화면 표시
+- `#__dp_score_panel` 기본 스타일을 모바일 전체화면으로 변경: `top/right/bottom/left: 0` + `width:100%` + `height:100dvh` (vh fallback), border / border-radius / box-shadow 제거.
+- 데스크톱 (`min-width: 768px`) 에서는 기존 우상단 380px 박스 (테두리 / 둥근 모서리 / 그림자 / 92vh) 를 `@media` 로 복원.
+- 모바일에서 8px 여백 + max-width 380px 캡 때문에 가로가 넓은 폰에서 우측 정렬된 좁은 박스로 보이던 문제 해결.
+
+### wrapper v3.3.6 — gist 모듈 fetch 동안 로딩 진행률 박스 표시
+- `ohsorry.js` 가 4개 모듈 (normTitle / dbConn / render / core) 을 gist 에서 fetch 하는 동안 우상단에 `#__dp_progress` 박스를 띄움 (OhsorryRender 의 진행률 UI 와 동일한 구조 / 위치 / 스타일).
+- 헤더 텍스트 "오소리 로딩 중..." + 모듈명 진행 텍스트 + 진행바 (5 / 30 / 55 / 80 / 100 %).
+- Core.compute 호출 직후 박스 제거 — 이어서 Core 가 OhsorryRender.showProgress 로 같은 ID 박스를 재생성하므로 시각적으로 자연스럽게 진행률 UI 로 이어짐.
+
 ### normTitle v0.0.4 — ereter 'Ø → O' 변형 alias 추가 (ereter-data 매칭 100%)
 - `TITLE_ALIASES` 에 `'Xlo' → 'Xlø'`, `'VOID' → 'VØID'` 추가 (ereter 가 textage 의 Ø 를 알파벳 O 로 표기).
 - ereter-data 642 unique titles 검증 결과 640/642 → 642/642 (100%) 달성.

@@ -30,7 +30,7 @@
 // ============================================================
 
 window.OhsorryRender = {
-  VERSION: '0.0.338',
+  VERSION: '0.0.341',
 
   // 진행률 UI — core 의 onProgress 콜백에서 호출
   showProgress: function (msg, pct) {
@@ -39,10 +39,10 @@ window.OhsorryRender = {
       progress = document.createElement('div');
       progress.id = '__dp_progress';
       progress.style.cssText =
-        'position:fixed;top:16px;right:16px;z-index:9999;background:#fff;border:1px solid #ddd;border-radius:8px;padding:12px 14px;width:280px;box-shadow:0 4px 12px rgba(0,0,0,.08);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#212529';
+        'position:fixed;top:16px;right:16px;z-index:9999;background:#fff;border:1px solid #ddd;border-radius:8px;padding:12px 14px;width:280px;max-width:calc(100vw - 32px);box-sizing:border-box;box-shadow:0 4px 12px rgba(0,0,0,.08);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#212529';
       progress.innerHTML = `
-        <div style="font-size:13px;font-weight:600;margin-bottom:6px">오소리 진행 중</div>
-        <div id="__dp_progress_text" style="font-size:12px;color:#666">시작합니다</div>
+        <div style="font-size:13px;font-weight:600;margin-bottom:6px;word-break:break-word;overflow-wrap:anywhere">오소리 진행 중</div>
+        <div id="__dp_progress_text" style="font-size:12px;color:#666;word-break:break-word;overflow-wrap:anywhere">시작합니다</div>
         <div style="margin-top:8px;background:#eee;border-radius:4px;height:6px;overflow:hidden">
           <div id="__dp_progress_bar" style="background:#1d9e75;height:100%;width:0%;transition:width .3s"></div>
         </div>
@@ -190,21 +190,26 @@ window.OhsorryRender = {
     panel.innerHTML = `
       <style>
         #__dp_score_panel {
-          position: fixed; top: 8px; right: 8px; left: 8px; z-index: 999999;
-          max-width: 380px; max-height: 92vh; overflow: auto;
-          margin-left: auto;
+          position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 999999;
+          width: 100%; height: 100vh; height: 100dvh; max-height: 100dvh;
+          overflow: auto;
           background: #fff; color: #222;
           font-family: -apple-system, "Segoe UI", "Hiragino Sans", "Yu Gothic", "Meiryo", sans-serif;
           font-size: 13px; line-height: 1.5;
-          border: 1px solid #ccc; border-radius: 8px;
-          box-shadow: 0 6px 24px rgba(0,0,0,.18);
+          border: none; border-radius: 0;
           padding: 12px 14px;
           box-sizing: border-box;
           white-space: nowrap;
         }
         #__dp_score_panel * { white-space: nowrap; }
         @media (min-width: 768px) {
-          #__dp_score_panel { left: auto; top: 16px; right: 16px; padding: 14px 16px; width: 380px; }
+          #__dp_score_panel {
+            top: 16px; right: 16px; left: auto; bottom: auto;
+            width: 380px; height: auto; max-height: 92vh;
+            padding: 14px 16px;
+            border: 1px solid #ccc; border-radius: 8px;
+            box-shadow: 0 6px 24px rgba(0,0,0,.18);
+          }
         }
         #__dp_score_panel h3 { margin: 0 0 6px; font-size: 15px; font-weight: 600; }
         #__dp_score_panel .meta { color: #666; font-size: 11px; margin-bottom: 10px; }
