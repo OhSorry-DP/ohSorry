@@ -25,6 +25,7 @@
   const CORE_URL   = GIST_BASE + '/calcOhsorryCore.js';
   const RENDER_URL = GIST_BASE + '/ohsorryRender.js';
   const DB_URL     = GIST_BASE + '/dbConn.js';
+  const NORM_URL   = GIST_BASE + '/normTitle.js';
 
   async function loadModule(url, globalName) {
     if (window[globalName]) return window[globalName];
@@ -91,7 +92,8 @@
       if (!input || !input.trim()) return;
       return window.__dp_batch_rival_by_iidx(input);
     }
-    // 모듈 셋 모두 load
+    // 모듈 모두 load — normTitle 먼저 (dbConn / Core 가 의존)
+    await loadModule(NORM_URL,   'OhsorryNorm');
     await loadModule(DB_URL,     'OhsorryDb');
     await loadModule(RENDER_URL, 'OhsorryRender');
     const Core = await loadModule(CORE_URL, 'OhsorryCore');

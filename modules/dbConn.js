@@ -1,15 +1,25 @@
-// dbConn.js — 오소리 DB 통신 모듈 (v0.0.337)
+// dbConn.js — 오소리 DB 통신 모듈 (v0.0.401)
 //
-// supabase user_profiles 테이블 RPC 호출만 담당. 계산 / UI 와 분리.
+// 새 디비 (users + user_radars + scores) 로 마이그레이션.
+//   - upsertUserProfile: upsert_user + upsert_user_radar (sp/dp)
+//   - upsertUserChartScores: songs 매핑 캐시 + upsert_scores (text→int + title→song_id 변환)
+//   - fetchUserProfile 은 다음 단계 (TODO)
+//
 // 본체 / 라이벌 wrapper 가 fetch + eval 해서 사용 (window.OhsorryDb 로 노출).
 //
-// 인터페이스:
+// v0.0.401 — 동명이곡 매칭 재설계:
+//   - songs 캐시 구조: Map<normKey, [{ song_id, title, ac }]> (array)
+//   - 라이브 OVERRIDES (normTitle 안의 NORM_OVERRIDES) 가 raw 다른 케이스 (ZEИITH vs Zenith 등) 4건 분리
+//   - raw 같은 동명이곡 (ADVANCE 295=INF vs 338=AC 등 10건) 은 ac 비트맵 + played_version 매칭
+//   - 같은 PK (song_id, iidx_id, diff, played_version) 중복 row 안전망 dedup (best ex_score)
+//   - TITLE_ALIASES 는 normTitle.js 로 이동
+//
+// 인터페이스 (시그니처 유지 — 호출 측 호환):
 //   window.OhsorryDb = {
-//     VERSION: '0.0.337',
-//     upsertUserProfile(payload):   user_profiles upsert (supabase RPC)
-//     upsertUserChartScores(rows):  user_chart_scores bulk upsert (supabase RPC)
-//     fetchUserProfile(iidxId):     user_profiles 한 row 조회 (PK 가 (iidx_id, series) composite,
-//                                   같은 iidx_id 의 여러 시즌 row 중 last_updated_at 최신 1건 반환)
+//     VERSION: '0.0.401',
+//     upsertUserProfile(payload):   users + user_radars upsert (새 RPC 2종)
+//     upsertUserChartScores(rows):  scores 매핑 + upsert
+//     fetchUserProfile(iidxId):     (구) get_user_profile_full RPC — 향후 새 디비로 교체
 //   }
 // ============================================================
 
@@ -62,10 +72,129 @@ window.OhsorryDb = (function () {
     return null;
   }
 
-  // user_profiles upsert — RPC upsert_user_profile(p jsonb)
-  //   payload: { iidx_id, dj_name, star_estimate, ereter_star, raw_s, version,
-  //              sp_rank, dp_rank, n_cleared, n_played_lv12, fc_count, hc_count, exh_count,
-  //              level_filter, series, charts_json, notes_radar, ... }
+  // ─── 새 디비 매핑 helper ─────────────────────────────────────
+  // eagate 단위 (한자) → int (-8~12). '---' 또는 미지정 → null.
+  const RANK_MAP = {
+    '皆伝': 12, '中伝': 11,
+    '十段': 10, '九段': 9, '八段': 8, '七段': 7, '六段': 6, '五段': 5,
+    '四段': 4, '三段': 3, '二段': 2, '初段': 1,
+    '一級': 0, '二級': -1, '三級': -2, '四級': -3,
+    '五級': -4, '六級': -5, '七級': -6, '八級': -7, '九級': -8,
+  };
+  function rankToInt(s) {
+    if (!s || s === '---') return null;
+    return Object.prototype.hasOwnProperty.call(RANK_MAP, s) ? RANK_MAP[s] : null;
+  }
+  // notes_radar 의 eagate 키 → user_radars 컬럼 매핑
+  const RADAR_KEY_MAP = {
+    NOTES: 'notes', PEAK: 'peak', CHARGE: 'charge',
+    CHORD: 'chord', SCRATCH: 'scratch', 'SOF-LAN': 'soft',
+  };
+  // 차트 difficulty → int
+  const DIFF_MAP = { BEGINNER: 0, NORMAL: 1, HYPER: 2, ANOTHER: 3, LEGGENDARIA: 4 };
+  // 클리어 lamp → int
+  const LAMP_MAP = { NP: 0, F: 1, AC: 2, EC: 3, NC: 4, HC: 5, EX: 6, FC: 7, PFC: 7 };
+
+  // 곡명 정규화 — window.OhsorryNorm.norm (별도 모듈, wrapper 가 먼저 fetch + eval).
+  // TITLE_ALIASES / NORM_OVERRIDES 도 normTitle 모듈 안으로 이동됨.
+  const normTitle = window.OhsorryNorm.norm;
+
+  // songs 마스터 캐시 — Map<normKey, [{ song_id, title, ac }]>
+  //   첫 호출 시 페이징 fetch + 메모리 보관 (supabase REST max-rows 1000 → 1000 씩 페이지).
+  //   동명이곡:
+  //     - raw 다른 케이스 (Zenith vs ZEИITH 등) → normTitle 의 NORM_OVERRIDES 로 다른 normKey
+  //     - raw 같은 케이스 (ADVANCE 295=INF vs 338=AC 등) → 같은 normKey 의 array, ac 비트맵으로 구분
+  let songsCache = null;
+  async function getSongsCache() {
+    if (songsCache) return songsCache;
+    const byNorm = new Map();
+    const pageSize = 1000;
+    let offset = 0;
+    let totalFetched = 0;
+    while (true) {
+      const url = SUPABASE_URL +
+        `/rest/v1/songs?select=song_id,title,ac&order=song_id.asc&limit=${pageSize}&offset=${offset}`;
+      const res = await fetch(url, { headers: HEADERS });
+      if (!res.ok) throw new Error(`songs fetch 실패 HTTP ${res.status}`);
+      const rows = await res.json();
+      for (const r of rows) {
+        if (!r.title) continue;
+        const k = normTitle(r.title);
+        if (!k) continue;
+        const entry = { song_id: r.song_id, title: r.title, ac: r.ac };
+        if (!byNorm.has(k)) byNorm.set(k, []);
+        byNorm.get(k).push(entry);
+        // Ø/ø 곡은 eagate 표기가 일관되지 않음 — 'O' 알파벳 alias 도 등록
+        // (예: 'ACTØ' → eagate 'ACT0' (norm 의 Ø→0 적용 후 매치)
+        //      'S4TØ' → eagate 'S4TO' (alias 'O' 등록으로 매치))
+        if (/[Øø]/.test(r.title)) {
+          const altTitle = r.title.replace(/[Øø]/g, 'O');
+          const kAlt = normTitle(altTitle);
+          if (kAlt && kAlt !== k) {
+            if (!byNorm.has(kAlt)) byNorm.set(kAlt, []);
+            byNorm.get(kAlt).push(entry);
+          }
+        }
+      }
+      totalFetched += rows.length;
+      if (rows.length < pageSize) break;
+      offset += pageSize;
+    }
+    songsCache = byNorm;
+    console.log(`[OhsorryDb] songs 매핑 캐시: ${byNorm.size} unique norm / ${totalFetched} 곡 fetch`);
+    return byNorm;
+  }
+
+  // normKey 후보 array + played_version → song_id 단일 선택
+  //   played_version 0 = INF (ac & 2), > 0 = AC (ac & 1)
+  //   - 후보 1개면 그대로
+  //   - 다수면 ac 비트맵으로 필터 (raw 같은 동명이곡 분리)
+  //   - 그래도 다수면 첫 번째 (안전망)
+  function pickSongId(candidates, playedVersion) {
+    if (!candidates || candidates.length === 0) return null;
+    if (candidates.length === 1) return candidates[0].song_id;
+    const wantInf = playedVersion === 0;
+    const mask = wantInf ? 2 : 1;
+    const filtered = candidates.filter((c) => (c.ac & mask) !== 0);
+    if (filtered.length === 1) return filtered[0].song_id;
+    if (filtered.length === 0) return candidates[0].song_id;
+    return filtered[0].song_id;
+  }
+
+  async function callRpc(name, body) {
+    const res = await fetch(SUPABASE_URL + '/rest/v1/rpc/' + name, {
+      method: 'POST',
+      headers: HEADERS,
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      throw new Error(`HTTP ${res.status} ${errText}`);
+    }
+  }
+
+  async function callUpsertRadar(iidxId, playStyle, sourceRadar) {
+    const vals = {};
+    for (const [src, dst] of Object.entries(RADAR_KEY_MAP)) {
+      const v = sourceRadar[src];
+      vals[dst] = typeof v === 'number' ? v : null;
+    }
+    await callRpc('upsert_user_radar', {
+      p_iidx_id: iidxId,
+      p_play_style: playStyle,
+      p_notes: vals.notes,
+      p_peak: vals.peak,
+      p_charge: vals.charge,
+      p_chord: vals.chord,
+      p_scratch: vals.scratch,
+      p_soft: vals.soft,
+    });
+  }
+
+  // 유저 프로필 + radar upsert — 새 디비 (users + user_radars)
+  //   payload (기존 dbPayload 호환): { iidx_id, dj_name, star_estimate, ereter_star,
+  //                                    sp_rank, dp_rank, notes_radar: { sp, dp }, ... }
+  //   기타 필드 (raw_s, version, n_cleared, fc_count 등) 는 무시 (새 디비 미사용).
   //   리턴: { ok: boolean, error?: string }
   async function upsertUserProfile(payload) {
     if (!payload || !payload.iidx_id) {
@@ -74,14 +203,24 @@ window.OhsorryDb = (function () {
     const statusErr = await checkUploadEnabled();
     if (statusErr) return statusErr;
     try {
-      const res = await fetch(SUPABASE_URL + '/rest/v1/rpc/upsert_user_profile', {
-        method: 'POST',
-        headers: HEADERS,
-        body: JSON.stringify({ p: payload }),
+      // 1. users 테이블 (FK 부모) 먼저
+      await callRpc('upsert_user', {
+        p_iidx_id: payload.iidx_id,
+        p_dj_name: payload.dj_name || null,
+        p_star: payload.star_estimate != null ? Number(payload.star_estimate) : null,
+        p_ereter_star: payload.ereter_star != null ? Number(payload.ereter_star) : null,
+        p_sp_rank: rankToInt(payload.sp_rank),
+        p_dp_rank: rankToInt(payload.dp_rank),
       });
-      if (!res.ok) {
-        const errText = await res.text().catch(() => '');
-        return { ok: false, error: `HTTP ${res.status} ${errText}` };
+      // 2. user_radars (SP / DP 각각, 있을 때만)
+      const radar = payload.notes_radar;
+      if (radar && typeof radar === 'object') {
+        if (radar.sp && typeof radar.sp === 'object') {
+          await callUpsertRadar(payload.iidx_id, 0, radar.sp);
+        }
+        if (radar.dp && typeof radar.dp === 'object') {
+          await callUpsertRadar(payload.iidx_id, 1, radar.dp);
+        }
       }
       return { ok: true };
     } catch (e) {
@@ -89,9 +228,16 @@ window.OhsorryDb = (function () {
     }
   }
 
-  // user_chart_scores bulk upsert — RPC upsert_user_chart_scores(p_rows jsonb)
-  //   rows: [{ played_version, level, title, iidx_id, dj_name, diff, game_level, dj_level, ex_score, date }, ...]
-  //   리턴: { ok: boolean, error?: string }
+  // scores bulk upsert — 새 디비 (scores 테이블)
+  //   rows (기존 chartScoreRows 호환): [{ played_version, title, iidx_id, diff, ex_score, lamp, date, ... }, ...]
+  //   변환:
+  //     - title  → song_id (songs 캐시 + norm + ac flag 매칭, 실패 시 skip)
+  //     - diff   → int (DIFF_MAP)
+  //     - lamp   → int (LAMP_MAP)
+  //     - played_version (예: '33') → int (33)
+  //   다른 필드 (dj_name, game_level, dj_level, level) 는 무시 (새 디비 미사용).
+  //   PK (song_id, iidx_id, diff, played_version) 중복 안전망: dedup 으로 best ex_score 유지.
+  //   리턴: { ok: boolean, error?: string, unmatched?: number, inserted?: number }
   async function upsertUserChartScores(rows) {
     if (!Array.isArray(rows) || rows.length === 0) {
       return { ok: true };
@@ -99,16 +245,64 @@ window.OhsorryDb = (function () {
     const statusErr = await checkUploadEnabled();
     if (statusErr) return statusErr;
     try {
-      const res = await fetch(SUPABASE_URL + '/rest/v1/rpc/upsert_user_chart_scores', {
-        method: 'POST',
-        headers: HEADERS,
-        body: JSON.stringify({ p_rows: rows }),
-      });
-      if (!res.ok) {
-        const errText = await res.text().catch(() => '');
-        return { ok: false, error: `HTTP ${res.status} ${errText}` };
+      const songMap = await getSongsCache();
+      // dedup map — key: `${song_id}|${iidx_id}|${diff}|${played_version}` → row.
+      // 동명이곡 (다른 song_id) 은 키가 다르므로 둘 다 유지됨.
+      // 같은 PK 중복 (입력 데이터 자체 중복) 만 best ex_score 로 합침.
+      const dedup = new Map();
+      let unmatched = 0;
+      let invalidDiff = 0;
+      let invalidVersion = 0;
+      const unmatchedSamples = [];
+      for (const r of rows) {
+        if (!r.title || !r.iidx_id) continue;
+        const diffInt = DIFF_MAP[r.diff];
+        if (diffInt == null) { invalidDiff++; continue; }
+        const playedVersion = parseInt(r.played_version, 10);
+        if (isNaN(playedVersion)) { invalidVersion++; continue; }
+        const candidates = songMap.get(normTitle(r.title));
+        const songId = pickSongId(candidates, playedVersion);
+        if (songId == null) {
+          unmatched++;
+          if (unmatchedSamples.length < 10) unmatchedSamples.push(r.title);
+          continue;
+        }
+        const lampInt = r.lamp != null && LAMP_MAP[r.lamp] != null ? LAMP_MAP[r.lamp] : null;
+        const exScore = r.ex_score != null ? Number(r.ex_score) : null;
+        const newRow = {
+          song_id: songId,
+          iidx_id: r.iidx_id,
+          diff: diffInt,
+          lamp: lampInt,
+          ex_score: exScore,
+          played_version: playedVersion,
+          date: r.date,
+        };
+        const pk = `${songId}|${r.iidx_id}|${diffInt}|${playedVersion}`;
+        const prev = dedup.get(pk);
+        if (!prev) {
+          dedup.set(pk, newRow);
+        } else {
+          // 더 좋은 ex_score, 동점이면 더 좋은 lamp 유지
+          const prevEx = prev.ex_score || 0;
+          const newEx = exScore || 0;
+          if (newEx > prevEx || (newEx === prevEx && (lampInt || 0) > (prev.lamp || 0))) {
+            dedup.set(pk, newRow);
+          }
+        }
       }
-      return { ok: true };
+      const scoreRows = [...dedup.values()];
+      if (unmatched > 0) {
+        console.warn(`[OhsorryDb] song 매칭 실패 ${unmatched}건 (skip). 샘플:`, unmatchedSamples);
+      }
+      if (invalidDiff > 0) console.warn(`[OhsorryDb] diff 변환 실패 ${invalidDiff}건 (skip)`);
+      if (invalidVersion > 0) console.warn(`[OhsorryDb] played_version 변환 실패 ${invalidVersion}건 (skip)`);
+      if (scoreRows.length === 0) {
+        return { ok: true, unmatched, inserted: 0 };
+      }
+      await callRpc('upsert_scores', { p_rows: scoreRows });
+      console.log(`[OhsorryDb] scores upsert: ${scoreRows.length}건 (전체 ${rows.length}건 중, dedup 후)`);
+      return { ok: true, unmatched, inserted: scoreRows.length };
     } catch (e) {
       return { ok: false, error: e.message };
     }
@@ -132,7 +326,7 @@ window.OhsorryDb = (function () {
   }
 
   return {
-    VERSION: '0.0.337',
+    VERSION: '0.0.401',
     upsertUserProfile: upsertUserProfile,
     upsertUserChartScores: upsertUserChartScores,
     fetchUserProfile: fetchUserProfile,

@@ -307,6 +307,26 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### normTitle v0.0.4 — ereter 'Ø → O' 변형 alias 추가 (ereter-data 매칭 100%)
+- `TITLE_ALIASES` 에 `'Xlo' → 'Xlø'`, `'VOID' → 'VØID'` 추가 (ereter 가 textage 의 Ø 를 알파벳 O 로 표기).
+- ereter-data 642 unique titles 검증 결과 640/642 → 642/642 (100%) 달성.
+- Ø 곡 6개 일괄 검사 결과 ereter 에 있는 건 위 2곡뿐 (나머지 4곡은 level 범위 밖).
+
+### normTitle v0.0.3 — zasa 표기 alias 추가 (zasa-data 매칭 100%)
+- `TITLE_ALIASES` 에 `'FiZZλ_PØT!0И' → 'FiZZλ_PØT!OИ'` 추가 (zasa 가 알파벳 'O' 대신 숫자 '0' 사용).
+- zasa-data 1575 unique titles 검증 결과 1574/1575 → 1575/1575 (100%) 달성.
+
+### render v0.0.339 — 상세통계 스택드바 색 조정
+- `lampPalette.exh`: `#dcaf45` → `#ffcc44` (CLEAR TYPE 바의 EX-HARD 색을 DJ LEVEL 바의 AAA 색과 동일).
+- `djPalette.AA`: `#dcaf45` → `#ffaa33` (기존 황금색이 너무 어두워서 노랑 가까운 주황으로 변경).
+
+### db v0.0.401 / normTitle v0.0.2 — 동명이곡 매칭 재설계 (PK 충돌 해결)
+- `normTitle.js`: `TITLE_ALIASES` (eagate→textage raw 치환, dbConn 에서 이동) + `NORM_OVERRIDES` (raw 다른 동명이곡 강제 키 분리) + `denorm(k)` (NORM_OVERRIDES reverse) 통합. v0.0.1 → v0.0.2.
+- `NORM_OVERRIDES` 4건: `'ZEИITH'→'zenith2'`, `'Shooting Star'→'shootingstar2'`, `'With You'→'withyou2'`, `'take me higher'→'takemehigher2'` (신곡/리메이크 쪽에 `2` suffix).
+- `dbConn.js`: songs 캐시를 `Map<normKey, [{ song_id, title, ac }]>` (array) 로 변경. raw 같은 동명이곡 (ADVANCE 295=INF vs 338=AC 등 10건) 은 `pickSongId()` 가 `played_version` + `ac` 비트맵으로 단일 선택.
+- 같은 PK `(song_id, iidx_id, diff, played_version)` 중복 row 안전망 dedup — best ex_score / lamp 유지 (PG 21000 "ON CONFLICT cannot affect row a second time" 회피).
+- 동명이곡 (다른 song_id) 은 둘 다 별개 row 로 업로드됨 (PK 다름).
+
 ### core v0.0.345 — user_profiles.charts_json 제거 + chart_score row 에 lamp 추가
 - `calcOhsorryCore.js` 의 `dbPayload.charts_json` → `null`. user_chart_scores 가 single source of truth.
 - `chartScoreRows` 빌드에 `lamp` 필드 추가 — 게스트 페이지 서열표가 `get_user_charts` RPC fallback 으로 격자 렌더 가능.

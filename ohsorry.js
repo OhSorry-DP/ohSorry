@@ -20,6 +20,7 @@
   const CORE_URL   = GIST_BASE + '/calcOhsorryCore.js';
   const RENDER_URL = GIST_BASE + '/ohsorryRender.js';
   const DB_URL     = GIST_BASE + '/dbConn.js';
+  const NORM_URL   = GIST_BASE + '/normTitle.js';
 
   async function loadModule(url, globalName) {
     if (window[globalName]) return window[globalName];
@@ -33,7 +34,9 @@
   }
 
   window.__dp_render = async (dbData) => {
-    // 모듈 셋 모두 load (이미 로드돼 있으면 즉시 반환)
+    // 모듈 모두 load (이미 로드돼 있으면 즉시 반환)
+    // normTitle 먼저 — dbConn / Core / RenderingShelf 등이 의존
+    await loadModule(NORM_URL,   'OhsorryNorm');
     await loadModule(DB_URL,     'OhsorryDb');
     await loadModule(RENDER_URL, 'OhsorryRender');
     const Core = await loadModule(CORE_URL, 'OhsorryCore');
@@ -52,3 +55,4 @@
     console.log('[오소리 v3.3.6] eagate 외 도메인 — window.__dp_render(dbData) 로 DB 데이터를 넘겨 호출하세요.');
   }
 })();
+

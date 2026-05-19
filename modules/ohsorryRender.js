@@ -1,4 +1,4 @@
-// ohsorryRender.js — 오소리 결과 렌더 모듈 (v0.0.337)
+// ohsorryRender.js — 오소리 결과 렌더 모듈 (v0.0.339)
 //
 // calcOhsorryCore.compute() 가 반환한 result 객체를 받아 화면 패널 + 추천곡 + supabase upload.
 // 본체 / 라이벌 wrapper 가 fetch + eval 해서 사용.
@@ -30,7 +30,7 @@
 // ============================================================
 
 window.OhsorryRender = {
-  VERSION: '0.0.337',
+  VERSION: '0.0.338',
 
   // 진행률 UI — core 의 onProgress 콜백에서 호출
   showProgress: function (msg, pct) {
@@ -611,7 +611,7 @@ window.OhsorryRender = {
           })();
           const lampPalette = [
             { key: 'fc',  color: '#00aab2', label: 'FC' },
-            { key: 'exh', color: '#dcaf45', label: 'EX-HARD' },
+            { key: 'exh', color: '#ffcc44', label: 'EX-HARD' },
             { key: 'hd',  color: '#dc3545', label: 'HARD' },
             { key: 'cl',  color: '#7dd3da', label: 'CLEAR' },
             { key: 'ez',  color: '#52a447', label: 'EASY' },
@@ -621,7 +621,7 @@ window.OhsorryRender = {
           ];
           const djPalette = [
             { key: 'AAA',   color: '#ffcc44', label: 'AAA' },
-            { key: 'AA',    color: '#dcaf45', label: 'AA' },
+            { key: 'AA',    color: '#ffaa33', label: 'AA' },
             { key: 'A',     color: '#dc3545', label: 'A' },
             { key: 'B',     color: '#1971c2', label: 'B' },
             { key: 'C',     color: '#9ed870', label: 'C' },
@@ -898,6 +898,15 @@ window.OhsorryRender = {
         else console.warn('[OhsorryRender] supabase upsert 실패:', r.error);
       } catch (e) {
         console.warn('[OhsorryRender] supabase upsert 예외:', e.message);
+      }
+      if (result.chartScoreRows && window.OhsorryDb.upsertUserChartScores) {
+        try {
+          const cr = await window.OhsorryDb.upsertUserChartScores(result.chartScoreRows);
+          if (cr.ok) console.log('[OhsorryRender] chart scores upsert 성공');
+          else console.warn('[OhsorryRender] chart scores upsert 실패:', cr.error);
+        } catch (e) {
+          console.warn('[OhsorryRender] chart scores upsert 예외:', e.message);
+        }
       }
     } else if (dbData) {
       console.log('[OhsorryRender] DB 모드 — supabase 재업로드 skip');
