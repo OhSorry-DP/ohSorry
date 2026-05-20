@@ -38,6 +38,34 @@
     return window[globalName];
   }
 
+  // 모듈 fetch 동안 표시할 로딩 UI — 오소리 본체 wrapper 와 동일한 #__dp_progress 박스 구조.
+  // OhsorryRender 가 로드된 뒤에는 같은 ID 요소를 갱신해서 사용하므로 시각적으로 자연스럽게 이어짐.
+  function showLoadingProgress(msg, pct) {
+    let el = document.getElementById('__dp_progress');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = '__dp_progress';
+      el.style.cssText =
+        'position:fixed;top:16px;right:16px;z-index:9999;background:#fff;border:1px solid #ddd;border-radius:8px;padding:12px 14px;width:280px;max-width:calc(100vw - 32px);box-sizing:border-box;box-shadow:0 4px 12px rgba(0,0,0,.08);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#212529';
+      el.innerHTML = `
+        <div style="font-size:13px;font-weight:600;margin-bottom:6px;word-break:break-word;overflow-wrap:anywhere">라이벌 오소리 로딩 중...</div>
+        <div id="__dp_progress_text" style="font-size:12px;color:#666;word-break:break-word;overflow-wrap:anywhere">시작합니다</div>
+        <div style="margin-top:8px;background:#eee;border-radius:4px;height:6px;overflow:hidden">
+          <div id="__dp_progress_bar" style="background:#1d9e75;height:100%;width:0%;transition:width .3s"></div>
+        </div>
+      `;
+      document.body.appendChild(el);
+    }
+    const t = document.getElementById('__dp_progress_text');
+    const b = document.getElementById('__dp_progress_bar');
+    if (t && typeof msg === 'string') t.textContent = msg;
+    if (b && typeof pct === 'number') b.style.width = Math.max(0, Math.min(100, pct)) + '%';
+  }
+
+  function hideLoadingProgress() {
+    document.getElementById('__dp_progress')?.remove();
+  }
+
   // IIDX ID (8자리 숫자) → 라이벌 토큰 조회 헬퍼.
   // rival_search.html 에 form POST 보내고 result 테이블의 첫 a href 에서 토큰 추출.
   window.__dp_fetch_rival_token = async (iidxId) => {
@@ -66,20 +94,30 @@
       return;
     }
     console.log(`[라이벌오소리] 일괄 처리 시작 — ${ids.length}명`);
-    for (let i = 0; i < ids.length; i++) {
-      const id = ids[i];
-      console.log(`[라이벌오소리] [${i + 1}/${ids.length}] IIDX ID ${id} 토큰 조회...`);
-      try {
-        const token = await window.__dp_fetch_rival_token(id);
-        if (!token) {
-          console.warn(`[라이벌오소리] IIDX ID ${id} — 검색 결과 없음 (skip)`);
-          continue;
+    try {
+      for (let i = 0; i < ids.length; i++) {
+        const id = ids[i];
+        console.log(`[라이벌오소리] [${i + 1}/${ids.length}] IIDX ID ${id} 토큰 조회...`);
+        try {
+          // 토큰 검색 구간에도 로딩 박스 표시 — prompt 확인 직후부터 모듈 로딩까지 끊김 없이 이어짐.
+          // (이게 없으면 모듈 로딩 박스가 토큰 검색 뒤에 잠깐만 떴다 사라져 거의 안 보임.)
+          const who = ids.length > 1 ? ` (${i + 1}/${ids.length})` : '';
+          showLoadingProgress(`라이벌 검색 중${who}`, 3);
+          const token = await window.__dp_fetch_rival_token(id);
+          if (!token) {
+            console.warn(`[라이벌오소리] IIDX ID ${id} — 검색 결과 없음 (skip)`);
+            continue;
+          }
+          console.log(`[라이벌오소리] IIDX ID ${id} → 토큰 ${token.slice(0, 16)}... 라이벌 오소리 실행`);
+          await window.__dp_render_rival(null, token);
+        } catch (e) {
+          console.error(`[라이벌오소리] IIDX ID ${id} 처리 실패:`, e);
         }
-        console.log(`[라이벌오소리] IIDX ID ${id} → 토큰 ${token.slice(0, 16)}... 라이벌 오소리 실행`);
-        await window.__dp_render_rival(null, token);
-      } catch (e) {
-        console.error(`[라이벌오소리] IIDX ID ${id} 처리 실패:`, e);
       }
+    } finally {
+      // 마지막 라이벌이 검색 실패(토큰 없음)로 끝나면 박스가 남으므로 정리.
+      // 성공 케이스에선 Core 가 이미 자기 진행률 박스를 제거한 뒤라 no-op.
+      hideLoadingProgress();
     }
     console.log(`[라이벌오소리] 일괄 처리 완료 — ${ids.length}명`);
   };
@@ -93,16 +131,27 @@
       return window.__dp_batch_rival_by_iidx(input);
     }
     // 모듈 모두 load — normTitle 먼저 (dbConn / Core 가 의존)
-    await loadModule(NORM_URL,   'OhsorryNorm');
-    await loadModule(DB_URL,     'OhsorryDb');
-    await loadModule(RENDER_URL, 'OhsorryRender');
-    const Core = await loadModule(CORE_URL, 'OhsorryCore');
-    return Core.compute({
-      mode: 'rival',
-      dbData: dbData || null,
-      rivalToken: rivalToken,
-      wrapperVersion: WRAPPER_VERSION,
-    });
+    showLoadingProgress('normTitle 로드 중', 5);
+    try {
+      await loadModule(NORM_URL,   'OhsorryNorm');
+      showLoadingProgress('dbConn 로드 중', 30);
+      await loadModule(DB_URL,     'OhsorryDb');
+      showLoadingProgress('render 로드 중', 55);
+      await loadModule(RENDER_URL, 'OhsorryRender');
+      showLoadingProgress('core 로드 중', 80);
+      const Core = await loadModule(CORE_URL, 'OhsorryCore');
+      showLoadingProgress('계산 시작', 100);
+      return Core.compute({
+        mode: 'rival',
+        dbData: dbData || null,
+        rivalToken: rivalToken,
+        wrapperVersion: WRAPPER_VERSION,
+      });
+    } finally {
+      // Core.compute 호출 직후 로딩 박스 제거 — 이어서 Core 가 OhsorryRender.showProgress 로
+      // 같은 ID(#__dp_progress) 박스를 새로 만들어 진행률을 표시함.
+      hideLoadingProgress();
+    }
   };
 
   // eagate 도메인이면 자동 실행. 라이벌 페이지면 자동 토큰 추출, 아니면 IIDX prompt → batch.

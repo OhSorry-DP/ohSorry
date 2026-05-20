@@ -34,7 +34,7 @@
 //   wrapperVersion: wrapper 자기 버전 (예: 'v3.3.6') — supabase version 컬럼은
 //                   `${wrapperVersion}-core${CORE_VERSION_SHORT}` 조합 (예: 'v3.3.6-core335')
 window.OhsorryCore = {
-  VERSION: '0.0.344',
+  VERSION: '0.0.346',
   compute: async (opts) => {
   opts = opts || {};
   const mode = opts.mode || 'own';
@@ -1204,7 +1204,7 @@ window.OhsorryCore = {
   //     easy = [base-0.1, base+0.1], hard = [base+offset-0.4, base+offset-0.1], cleanup = [0, base-0.1)
   //   (cleanup 의 상한은 if-else 순서 덕분에 자연스럽게 easy 의 하한까지로 좁혀짐)
   // 추천 풀 — 카테고리 (미도달 / 도달DJ미도달) × 분류 (hard / easy / cleanup)
-  const buildPools = (threshold, getDiffField, baseStar, recLevelMode) => {
+  const buildPools = (threshold, getDiffField, baseStar, recLevelMode, djMode) => {
     const empty = { hard: [], easy: [], cleanup: [] };
     const underLamp = { hard: [], easy: [], cleanup: [] };       // lampNum < threshold
     const reached   = { hard: [], easy: [], cleanup: [] };       // lampNum >= threshold && !accuracyOK
@@ -1232,6 +1232,8 @@ window.OhsorryCore = {
       if (recLevelMode === 'lv12' && c.gameLevel !== 12) continue;
       const under = c.lampNum < threshold;
       const reachedForDj = reachedStageLamp(c.lampNum);
+      // DJ레벨 미달 풀 제외 모드 — 클리어램프 미달 곡만 후보로 (램프 도달·DJ레벨 미달 곡 제외).
+      if (djMode === 'off' && !under) continue;
       // 해당 stage 를 못 딴 곡 + 해당 stage 에서 DJ Level 미도달인 곡만 추천 후보.
       // 예: EASY 추천에서 HC/EX/FC 는 제외, EXH 추천은 EX/FC/PFC 도 AAA 미도달이면 포함.
       if (!under && !reachedForDj) continue;
@@ -1277,8 +1279,8 @@ window.OhsorryCore = {
     return { underLamp, reached };
   };
 
-  const buildRecs = (threshold, getDiffField, baseStar, recLevelMode) => {
-    const { underLamp, reached } = buildPools(threshold, getDiffField, baseStar, recLevelMode);
+  const buildRecs = (threshold, getDiffField, baseStar, recLevelMode, djMode) => {
+    const { underLamp, reached } = buildPools(threshold, getDiffField, baseStar, recLevelMode, djMode);
     const countField = getDiffField + '_n';
     const keyOf = r => (r.title || '') + '|' + r.chart;
 
@@ -1352,11 +1354,13 @@ window.OhsorryCore = {
   //   (미스 카운트는 Good 수치를 몰라 못 구함 → rate = exScore / (noteCount*2) 로 클리어 근접도 판단.)
   //   rate 없는 곡 (noteCount 미보강 / 미플레이) 은 뒤로 밀어서 정렬.
   //   baseStar 가 없으면 (실력값 추정 불가) 빈 배열 반환.
-  const buildExhRecs = (baseStar, recLevelMode) => {
+  const buildExhRecs = (baseStar, recLevelMode, djMode) => {
     if (baseStar == null) return [];
     const candidates = [];
     for (const c of allCharts) {
       if (recLevelMode === 'lv12' && c.gameLevel !== 12) continue;
+      // DJ레벨 미달 풀 제외 모드 — EXH 클리어 (lamp>=6) 곡은 후보에서 제외.
+      if (djMode === 'off' && c.lampNum >= 6) continue;
       if (c.lampNum >= 6 && c.djLevel === 'AAA') continue;
       if (c.lampNum >= 6 && c.exScore === 0) continue;
       const e = ereterMap.get(norm(c.title) + '|' + c.diff);
@@ -1396,11 +1400,13 @@ window.OhsorryCore = {
   // HC / EXH 는 실력값 없으면 빈 배열
   const EC_FALLBACK_BASE = 0.3;
   const REC_LEVEL_MODE_DEFAULT = recBaseStar != null && recBaseStar >= 6 ? 'lv12' : 'all';
+  // 추천곡 DJ레벨 미달 풀 기본값 — 'off' (클리어램프 미달 곡만), 토글로 'on' 가능
+  const REC_DJ_MODE_DEFAULT = 'off';
   const ecBase = recBaseStar != null ? recBaseStar : EC_FALLBACK_BASE;
-  recsEC.push(...buildRecs(3, 'ec', ecBase, REC_LEVEL_MODE_DEFAULT));
+  recsEC.push(...buildRecs(3, 'ec', ecBase, REC_LEVEL_MODE_DEFAULT, REC_DJ_MODE_DEFAULT));
   if (recBaseStar != null) {
-    recsHC.push(...buildRecs(5, 'hc', recBaseStar, REC_LEVEL_MODE_DEFAULT));
-    recsEXH.push(...buildExhRecs(recBaseStar, REC_LEVEL_MODE_DEFAULT));
+    recsHC.push(...buildRecs(5, 'hc', recBaseStar, REC_LEVEL_MODE_DEFAULT, REC_DJ_MODE_DEFAULT));
+    recsEXH.push(...buildExhRecs(recBaseStar, REC_LEVEL_MODE_DEFAULT, REC_DJ_MODE_DEFAULT));
   }
   console.log(`[step2] 추천곡: EC ${recsEC.length}, HC ${recsHC.length}, EXH ${recsEXH.length}`);
 
@@ -1410,12 +1416,13 @@ window.OhsorryCore = {
 
   // 다시 뽑기 버튼에서 사용할 수 있도록 노출
   // (panel 생성 후 클릭으로 재호출 → DOM 부분 업데이트)
-  window.__dp_rerollRecs = (stage, baseStarOverride, recLevelMode) => {
+  window.__dp_rerollRecs = (stage, baseStarOverride, recLevelMode, djMode) => {
     const base = typeof baseStarOverride === 'number' ? baseStarOverride : recBaseStar;
     const lvMode = recLevelMode === 'lv12' ? 'lv12' : REC_LEVEL_MODE_DEFAULT;
-    if (stage === 'exh') return base != null ? buildExhRecs(base, lvMode) : [];
-    if (stage === 'hc')  return base != null ? buildRecs(5, 'hc', base, lvMode) : [];
-    if (stage === 'ec')  return buildRecs(3, 'ec', base != null ? base : EC_FALLBACK_BASE, lvMode);
+    const dMode = djMode === 'on' ? 'on' : 'off';
+    if (stage === 'exh') return base != null ? buildExhRecs(base, lvMode, dMode) : [];
+    if (stage === 'hc')  return base != null ? buildRecs(5, 'hc', base, lvMode, dMode) : [];
+    if (stage === 'ec')  return buildRecs(3, 'ec', base != null ? base : EC_FALLBACK_BASE, lvMode, dMode);
     return [];
   };
 
@@ -1472,7 +1479,8 @@ window.OhsorryCore = {
         ? { sp: hasRadarData(profile.spRadar) ? profile.spRadar : null, dp: hasRadarData(profile.dpRadar) ? profile.dpRadar : null }
         : null,
     };
-    chartScoreRows = allCharts.filter((c) => c.exScore > 0).map((c) => {
+    // 점수가 있거나, 한 번이라도 플레이해 램프가 붙은(FAILED 포함) 차트만 — NO PLAY 만 제외
+    chartScoreRows = allCharts.filter((c) => c.exScore > 0 || c.lampNum > 0).map((c) => {
       const key = norm(c.title) + '|' + c.diff;
       const r = ratingMap.get(key);
       const e = ereterMap.get(key);
@@ -1507,6 +1515,7 @@ window.OhsorryCore = {
     total,
     recBaseMode, recBaseStar,
     recLevelModeDefault: REC_LEVEL_MODE_DEFAULT,
+    recDjModeDefault: REC_DJ_MODE_DEFAULT,
     norm, SERIES, shelfLib,
     dbPayload, chartScoreRows,
   };

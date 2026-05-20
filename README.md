@@ -307,6 +307,17 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### core v0.0.346 / render v0.0.342 — 추천곡 "복습곡" 포함 토글 추가
+- 추천곡에 복습곡 (클리어 램프는 도달했지만 DJ레벨이 부족한 곡) 을 포함할지 켜고 끄는 토글 추가. 기본값은 제외 (`REC_DJ_MODE_DEFAULT = 'off'`).
+- `calcOhsorryCore.js`: `buildPools` / `buildRecs` / `buildExhRecs` 에 `djMode` 인자 추가 — `'off'` 면 램프 도달 곡 (EXH 는 `lampNum >= 6`) 을 후보 풀에서 제외. `__dp_rerollRecs` 4번째 인자로 전달, `recDjModeDefault` 를 result 에 포함.
+- `ohsorryRender.js`: '추천 범위' 토글 행에 "복습곡 포함/제외" 체크박스 (`rec-review-toggle`) + `__dp_setRecDjMode` 핸들러 추가.
+- `calcOhsorryCore.js`: supabase `chartScoreRows` 필터를 `exScore > 0` → `exScore > 0 || lampNum > 0` 으로 변경 — 점수가 없어도 한 번이라도 플레이해 램프가 붙은 (FAILED 포함) 차트도 업로드 (NO PLAY 만 제외).
+
+### rivalOhsorry.js — 라이벌 오소리 로딩 스피너 추가
+- 라이벌 오소리 wrapper 에도 모듈 fetch / 토큰 검색 동안 `#__dp_progress` 로딩 박스 표시 (`ohsorry.js` 의 `showLoadingProgress` 와 동일 구조, 헤더 "라이벌 오소리 로딩 중...").
+- 토큰 검색 구간부터 로딩 박스를 띄워 prompt 확인 직후 ~ 모듈 로딩까지 끊김 없이 이어지게 (이게 없으면 모듈 로딩 박스가 토큰 검색 뒤 잠깐만 떴다 사라짐).
+- 진행률 토스트에 `box-sizing:border-box` + `max-width:calc(100vw - 32px)` + `word-break` 적용 (모바일 화면 이탈 방지).
+
 ### dbConn v0.0.402 — LAMP_MAP 풀네임 alias 추가 (scores.lamp NULL 이슈 해결)
 - `calcOhsorryCore.js` 의 `LAMP_NAMES` 가 chart.lamp 에 풀네임 (`'NO PLAY'` / `'FAILED'` / `'EASY'` / `'CLEAR'` / `'HARD'` / `'EX HARD'` / `'FULL COMBO'`) 을 넣는데 `dbConn.js v0.0.401` 의 LAMP_MAP 은 abbreviation 만 매칭 → 매핑 실패 → `scores.lamp` 가 모든 row 에서 NULL.
 - LAMP_MAP 에 풀네임 alias 추가. abbreviation + 풀네임 둘 다 받음.

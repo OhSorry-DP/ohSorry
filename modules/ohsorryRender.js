@@ -30,7 +30,7 @@
 // ============================================================
 
 window.OhsorryRender = {
-  VERSION: '0.0.341',
+  VERSION: '0.0.342',
 
   // 진행률 UI — core 의 onProgress 콜백에서 호출
   showProgress: function (msg, pct) {
@@ -293,6 +293,12 @@ window.OhsorryRender = {
         #__dp_score_panel .rec-mode-opt:hover { color: #555; }
         #__dp_score_panel .rec-mode-opt.active { color: #212529; font-weight: 700; cursor: default; }
         #__dp_score_panel .rec-mode-sep { color: #ccc; margin: 0 8px; }
+        #__dp_score_panel .rec-review-toggle { margin-right: auto; display: flex; align-items: center; gap: 4px; cursor: pointer; -webkit-user-select: none; user-select: none; }
+        #__dp_score_panel .rec-review-toggle .rrt-check { font-size: 13px; line-height: 1; color: #ccc; transition: color 0.15s; }
+        #__dp_score_panel .rec-review-toggle .rrt-label { font-size: 12px; color: #888; transition: color 0.15s; }
+        #__dp_score_panel .rec-review-toggle:hover .rrt-label { color: #555; }
+        #__dp_score_panel .rec-review-toggle.active .rrt-check { color: #212529; }
+        #__dp_score_panel .rec-review-toggle.active .rrt-label { color: #212529; font-weight: 600; }
         #__dp_score_panel .recs { margin-top: 12px; }
         #__dp_score_panel .rec-item { padding: 4px 0; font-size: 12px; display: flex; align-items: center; gap: 6px; border-bottom: 1px solid #eee; }
         #__dp_score_panel .rec-item:last-child { border-bottom: none; }
@@ -481,8 +487,9 @@ window.OhsorryRender = {
         };
         window.__dp_renderRecItems = renderRecItems;
         let recLevelMode = result.recLevelModeDefault === 'lv12' ? 'lv12' : 'all';
+        let recDjMode = result.recDjModeDefault === 'on' ? 'on' : 'off';
         const rerenderRecStage = (stage, color) => {
-          const newRecs = window.__dp_rerollRecs(stage, recBaseStar, recLevelMode);
+          const newRecs = window.__dp_rerollRecs(stage, recBaseStar, recLevelMode, recDjMode);
           const container = document.getElementById(`__dp_recs_${stage}`);
           if (container) container.innerHTML = window.__dp_renderRecItems(newRecs, color);
           const counter = document.getElementById(`__dp_recs_count_${stage}`);
@@ -540,8 +547,20 @@ window.OhsorryRender = {
             </div>
           `;
         })();
+        // 복습곡 (램프는 클리어했지만 DJ레벨 미달인 곡) 추천 포함 체크박스
+        // 체크 해제: ✓ 연한 회색 / 체크: ✔ 기본 글자색 (︎ = 텍스트 스타일 강제, 이모지 렌더링 방지)
+        // '추천 범위' 토글 행 안에 첫 자식으로 삽입 → margin-right:auto 로 같은 줄 왼쪽 끝에 배치
+        const recDjToggle = `
+          <span class="rec-review-toggle${recDjMode === 'on' ? ' active' : ''}"
+            onclick="window.__dp_setRecDjMode && window.__dp_setRecDjMode()"
+            title="램프는 클리어했지만 DJ레벨이 부족한 곡(복습곡)도 추천에 포함">
+            <span class="rrt-check">${recDjMode === 'on' ? '✔︎' : '✓︎'}</span>
+            <span class="rrt-label">복습곡 ${recDjMode === 'on' ? '포함' : '제외'}</span>
+          </span>
+        `;
         const recLevelToggle = `
           <div class="rec-mode-toggle" style="margin-top:4px">
+            ${recDjToggle}
             <span class="rec-mode-label">추천 범위 :</span>
             <div class="rec-mode-options">
               <span class="rec-level-mode-opt${recLevelMode === 'lv12' ? ' active' : ''}" data-mode="lv12"
@@ -575,6 +594,20 @@ window.OhsorryRender = {
             b.style.color = active ? '#212529' : '#aaa';
             b.style.fontWeight = active ? '700' : '400';
           });
+        };
+        window.__dp_setRecDjMode = (mode) => {
+          // 인자 없으면 토글, 'on'/'off' 명시하면 그 값으로
+          if (mode === 'on' || mode === 'off') recDjMode = mode;
+          else recDjMode = recDjMode === 'on' ? 'off' : 'on';
+          rerenderAllRecs();
+          const el = document.querySelector('.rec-review-toggle');
+          if (el) {
+            el.classList.toggle('active', recDjMode === 'on');
+            const chk = el.querySelector('.rrt-check');
+            if (chk) chk.textContent = recDjMode === 'on' ? '✔︎' : '✓︎';
+            const lbl = el.querySelector('.rrt-label');
+            if (lbl) lbl.textContent = '복습곡 ' + (recDjMode === 'on' ? '포함' : '제외');
+          }
         };
 
         return recModeToggle + recLevelToggle + [
