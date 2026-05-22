@@ -307,6 +307,13 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### render v0.0.343 — 상세통계 DP11 탭 (DP11+ → lv11 전용)
+- 상세통계 난이도 선택 토글 `DP11+` (lv11+12) → `DP11` (gameLevel 11 전용) 으로 변경. 요약 표(CLEAR TYPE / DJ LEVEL)와 난이도별 스택바 모두 lv11 곡만 집계.
+- `levels` ★ 버킷 하한 `11.6` → `10` — DP12(★11.6~12.7) + DP11(lv11 ★10.2~12.1) 합집합으로 막대를 한 번 그리고, 모드별 곡 수 0 구간은 숨김.
+- `computeStats`: `isLv` 비-lv12 모드를 `gameLevel === 11` 로 한정. ereter 데이터는 gameLevel 필드가 없고 전부 lv12 → 분모(`total`) 합산을 `mode === 'lv12'` 일 때만 수행 (lv11 모드 분모에 lv12 가 섞여 NP 가 과다해지던 버그 수정).
+- `buildBarRow`: 곡 수 0 행을 초기 렌더부터 `display:none` (DP12 화면에 lv11 전용 빈 행이 노출되지 않게).
+- `statsByMode` 키 / 토글 `data-mode` 를 `all` → `lv11` 로 정리.
+
 ### core v0.0.346 / render v0.0.342 — 추천곡 "복습곡" 포함 토글 추가
 - 추천곡에 복습곡 (클리어 램프는 도달했지만 DJ레벨이 부족한 곡) 을 포함할지 켜고 끄는 토글 추가. 기본값은 제외 (`REC_DJ_MODE_DEFAULT = 'off'`).
 - `calcOhsorryCore.js`: `buildPools` / `buildRecs` / `buildExhRecs` 에 `djMode` 인자 추가 — `'off'` 면 램프 도달 곡 (EXH 는 `lampNum >= 6`) 을 후보 풀에서 제외. `__dp_rerollRecs` 4번째 인자로 전달, `recDjModeDefault` 를 result 에 포함.

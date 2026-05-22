@@ -1,4 +1,4 @@
-// ohsorryRender.js — 오소리 결과 렌더 모듈 (v0.0.339)
+// ohsorryRender.js — 오소리 결과 렌더 모듈 (v0.0.343)
 //
 // calcOhsorryCore.compute() 가 반환한 result 객체를 받아 화면 패널 + 추천곡 + supabase upload.
 // 본체 / 라이벌 wrapper 가 fetch + eval 해서 사용.
@@ -30,7 +30,7 @@
 // ============================================================
 
 window.OhsorryRender = {
-  VERSION: '0.0.342',
+  VERSION: '0.0.343',
 
   // 진행률 UI — core 의 onProgress 콜백에서 호출
   showProgress: function (msg, pct) {
@@ -635,14 +635,16 @@ window.OhsorryRender = {
             { key: 'C',   color: '#888' },    { key: 'D',   color: '#888' },
             { key: 'E',   color: '#dc3545' }, { key: 'F',   color: '#dc3545' },
           ];
+          // ★ 구간 버킷 — DP12(★11.6~12.7) + DP11(lv11 ★10.2~12.1) 합집합.
+          // 막대는 이 합집합으로 한 번만 그리고, 모드별 곡 수 0 구간은 숨김(buildBarRow / __dp_setLvMode).
           const levels = (() => {
             const set = new Set();
             for (const e of ereterData) {
-              if (e.level == null || e.level < 11.6 || e.level > 12.7) continue;
+              if (e.level == null || e.level < 10 || e.level > 12.7) continue;
               set.add(e.level.toFixed(1));
             }
             for (const z of zasaSupplemental) {
-              if (z.level == null || z.level < 11.6 || z.level > 12.7) continue;
+              if (z.level == null || z.level < 10 || z.level > 12.7) continue;
               set.add(z.level.toFixed(1));
             }
             return [...set].map(parseFloat).sort((a, b) => a - b);
@@ -667,7 +669,7 @@ window.OhsorryRender = {
             { key: 'none',  color: '#e9ecef', label: 'NP' },
           ];
           const computeStats = (mode) => {
-            const isLv = (gl) => mode === 'lv12' ? gl === 12 : (gl === 11 || gl === 12);
+            const isLv = (gl) => mode === 'lv12' ? gl === 12 : gl === 11;
             const charts = allCharts.filter(c => isLv(c.gameLevel));
             const clearTypeCount = { 'FULL COMBO': 0, 'EX HARD': 0, 'HARD': 0, 'CLEAR': 0, 'EASY': 0, 'ASSIST': 0, 'FAILED': 0, 'NO PLAY': 0 };
             const djCount = {};
@@ -681,11 +683,14 @@ window.OhsorryRender = {
               lampStats[lv.toFixed(1)] = { total: 0, fc: 0, exh: 0, hd: 0, cl: 0, ez: 0, as: 0, fa: 0, np: 0, played: 0 };
               djStats[lv.toFixed(1)]   = { total: 0, AAA: 0, AA: 0, A: 0, B: 0, C: 0, lower: 0, none: 0 };
             }
-            for (const e of ereterData) {
-              if (e.level == null) continue;
-              const k = e.level.toFixed(1);
-              if (lampStats[k]) lampStats[k].total++;
-              if (djStats[k]) djStats[k].total++;
+            // ereter 데이터는 gameLevel 필드가 없고 전부 lv12 → lv12 모드에서만 분모(total)에 합산.
+            if (mode === 'lv12') {
+              for (const e of ereterData) {
+                if (e.level == null) continue;
+                const k = e.level.toFixed(1);
+                if (lampStats[k]) lampStats[k].total++;
+                if (djStats[k]) djStats[k].total++;
+              }
             }
             for (const z of zasaSupplemental) {
               if (z.level == null) continue;
@@ -726,7 +731,7 @@ window.OhsorryRender = {
             }
             return { clearTypeCount, djCount, lampStats, djStats };
           };
-          const statsByMode = { lv12: computeStats('lv12'), all: computeStats('all') };
+          const statsByMode = { lv12: computeStats('lv12'), lv11: computeStats('lv11') };
           window.__dp_statsByMode = statsByMode;
           const initStats = statsByMode['lv12'];
           const buildTable = () => {
@@ -755,7 +760,7 @@ window.OhsorryRender = {
             }).join('');
             return `
               <div data-bar-row="${lv.toFixed(1)}" data-bar-kind="${kind}"
-                style="display:flex;align-items:center;gap:6px;font-size:11px;line-height:1;margin-bottom:3px">
+                style="display:${total === 0 ? 'none' : 'flex'};align-items:center;gap:6px;font-size:11px;line-height:1;margin-bottom:3px">
                 <span style="flex-shrink:0;width:34px;color:#666;font-variant-numeric:tabular-nums">★${lv.toFixed(1)}</span>
                 <span data-total style="flex-shrink:0;width:24px;text-align:right;color:#888;font-variant-numeric:tabular-nums">${total}</span>
                 <div style="flex:1;height:12px;display:flex;border-radius:2px;overflow:hidden;background:#f5f5f5">${segHtml}</div>
@@ -842,9 +847,9 @@ window.OhsorryRender = {
                   style="cursor:pointer;color:#212529;font-weight:600"
                   onclick="window.__dp_setLvMode('lv12')">DP12</span>
                 <span style="color:#ccc">|</span>
-                <span class="dp-lv-toggle-btn" data-mode="all"
+                <span class="dp-lv-toggle-btn" data-mode="lv11"
                   style="cursor:pointer;color:#888;font-weight:400"
-                  onclick="window.__dp_setLvMode('all')">DP11+</span>
+                  onclick="window.__dp_setLvMode('lv11')">DP11</span>
               </div>
             </div>
             <div id="__dp_detail_filtered">${buildTable()}${buildBars()}</div>
