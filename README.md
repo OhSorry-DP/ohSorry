@@ -308,6 +308,12 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### ohsorryShelf v0.0.24 — 모바일 meta 줄 등급+컷대비 표기 (B 2229 B+167)
+- 모바일 곡 셀 2번째 줄을 `DJ등급 EX스코어 등급+컷대비` 형식으로 — 예: `B 2229 B+167` (B등급, EX 2229, B 등급 컷보다 167점 위).
+- `djLevelFromScore` / `djGradeMinEx` 추가 (`max = noteCount*2`, 등급 컷 2/9~8/9 — ohSorryWeb `rankingModal` 과 동일 로직). `djLevelFromScore` 를 lib export 에 노출 — 향후 rankingModal 도 재사용 가능한 단일 출처.
+- `noteCount` 있으면 EX 기준으로 등급 재계산 + 컷대비 차이 표시, 없으면 등급만 (`B 2229`).
+- `B+167` 부분은 EX스코어보다 작고(`9px`)·어둡게(`#888`). EX스코어 색은 슬롯 색 추종을 제거하고 기본색을 `brightness(0.8)` 로 (곡명보다 한 단계 어둡게) — `.shelf-song.slot-XXX .shelf-song-meta-ex` 셀렉터 제거.
+
 ### ohsorry.js / rivalOhsorry.js — eagate 곡 데이터 수집 범위 선택 모달
 - 본체·라이벌 wrapper 가 eagate fetch 모드 진입 시 곡 수집 범위를 묻는 모달(`askFetchOptions`) 추가.
   - **레벨별** — 선택한 LEVEL 폴더만 fetch (difficulty.html, 빠름). 기본 11·12 체크.

@@ -114,6 +114,25 @@
     if (l === 'E' || l === 'F') return '#ff6b6b';
     return '#aaa';
   }
+  // DJ Level — EX 점수 → 등급 / 등급 → 하한 EX 컷 (max = noteCount*2). ohSorryWeb rankingModal 과 동일 로직.
+  var DJ_CUT_NUM = { F: 0, E: 2, D: 3, C: 4, B: 5, A: 6, AA: 7, AAA: 8 };
+  function djLevelFromScore(exScore, noteCount) {
+    if (typeof exScore !== 'number' || typeof noteCount !== 'number' || noteCount <= 0) return null;
+    var r = exScore / (noteCount * 2);
+    if (r >= 8 / 9) return 'AAA';
+    if (r >= 7 / 9) return 'AA';
+    if (r >= 6 / 9) return 'A';
+    if (r >= 5 / 9) return 'B';
+    if (r >= 4 / 9) return 'C';
+    if (r >= 3 / 9) return 'D';
+    if (r >= 2 / 9) return 'E';
+    return 'F';
+  }
+  // 해당 등급의 하한 EX 컷 (그 등급에 막 진입하는 최소 점수).
+  function djGradeMinEx(grade, noteCount) {
+    if (DJ_CUT_NUM[grade] == null || !(noteCount > 0)) return null;
+    return Math.ceil(noteCount * 2 * DJ_CUT_NUM[grade] / 9);
+  }
   function escHtml(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, function (ch) {
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch];
@@ -141,10 +160,10 @@
       '.shelf-song { padding: 0; font-size: 12px; border-bottom: 1px solid #2d2d2d; display: flex; align-items: stretch; gap: 6px; min-height: 26px; position: relative; overflow: hidden; }',
       '.shelf-song-lampbox { flex-shrink: 0; display: block; width: 6px; align-self: stretch; }',
       '.shelf-song-text { flex: 1 1 auto; white-space: nowrap; align-self: center; color: #e9ecef; }',
-      '.shelf-song.slot-DPL .shelf-song-text, .shelf-song.slot-DPL .shelf-song-meta-ex { color: #ce8ef9; }',
+      '.shelf-song.slot-DPL .shelf-song-text { color: #ce8ef9; }',
       // ANOTHER (DPA) 는 lv11/12 서열표의 대다수라 기본색 유지 — HYPER/NORMAL/LEGGENDARIA 만 강조
-      '.shelf-song.slot-DPH .shelf-song-text, .shelf-song.slot-DPH .shelf-song-meta-ex { color: #efef51; }',
-      '.shelf-song.slot-DPN .shelf-song-text, .shelf-song.slot-DPN .shelf-song-meta-ex { color: #74c0fc; }',
+      '.shelf-song.slot-DPH .shelf-song-text { color: #efef51; }',
+      '.shelf-song.slot-DPN .shelf-song-text { color: #74c0fc; }',
       '.shelf-song.lamp-NP { opacity: 0.45; }',
       // DJ Level 우측 오버레이
       '.shelf-song-djlv { position: absolute; right: 0; top: 0; bottom: 0; display: flex; align-items: center; font-size: 10px; font-weight: 700; letter-spacing: -0.3px; z-index: 1; pointer-events: none; background: #1a1a1a; padding: 0 5px 0 3px; }',
@@ -217,10 +236,12 @@
       '  .shelf-song-text { align-self: stretch; white-space: nowrap; overflow: hidden; text-overflow: clip; line-height: 1.25; font-size: 13px; }',
       // PC 우측 오버레이 숨기고, 세 번째 줄 meta 로 EX스코어(좌)+DJ레벨(우) 동시 표시.
       '  .shelf-song-djlv { display: none; }',
-      '  .shelf-song-meta { display: flex; justify-content: space-between; align-items: baseline; gap: 4px; margin-top: auto; font-size: 11px; font-weight: 700; line-height: 1; }',
-      // EX스코어 — 곡명과 같은 슬롯 색(위 .shelf-song-meta-ex 셀렉터)을 쓰되 brightness 로 살짝 어둡게.
-      '  .shelf-song-meta-ex { color: #e9ecef; font-variant-numeric: tabular-nums; filter: brightness(0.8); }',
+      '  .shelf-song-meta { display: flex; justify-content: flex-start; align-items: baseline; gap: 4px; margin-top: auto; font-size: 11px; font-weight: 700; line-height: 1; white-space: nowrap; overflow: hidden; }',
       '  .shelf-song-meta-dj { flex-shrink: 0; }',
+      // EX스코어 — 기본색을 brightness 로 살짝 어둡게 (곡명보다 한 단계 어둡게).
+      '  .shelf-song-meta-ex { color: #e9ecef; font-variant-numeric: tabular-nums; filter: brightness(0.8); }',
+      // 등급+컷대비 (예: B+167) — EX스코어보다 더 작고 더 어둡게.
+      '  .shelf-song-meta-diff { font-size: 9px; color: #888; font-variant-numeric: tabular-nums; }',
       // meta(EX/DJ) 가 빈 셀 — meta 줄 숨기고 곡명을 2줄까지 (말줄임표 없이 끝 잘림). 셀 높이는 min-height 로 2줄 유지.
       '  .shelf-song-nometa .shelf-song-meta { display: none; }',
       '  .shelf-song-nometa .shelf-song-text { white-space: normal; max-height: 2.5em; overflow: hidden; }',
@@ -380,14 +401,25 @@
         var clickClass = ck >= 0 ? ' shelf-song-clickable' : '';
         // 모바일 — EX스코어·DJ레벨 둘 다 없으면(미플레이 등) meta 줄 대신 곡명을 2줄로.
         var noMetaClass = (!exText && !dj) ? ' shelf-song-nometa' : '';
+        // 모바일 meta 줄 — "DJ등급 EX스코어 등급+컷대비" (예: B 2229 B+167).
+        //   noteCount 있으면 EX 기준 등급 재계산(정확) + 등급 컷 대비 차이. 없으면 등급만.
+        var nc = (typeof sc.noteCount === 'number' && sc.noteCount > 0) ? sc.noteCount : 0;
+        var metaGrade = (exText && nc) ? djLevelFromScore(sc.exScore, nc) : dj;
+        var metaGradeStyle = metaGrade ? ' style="color:' + letterColor(metaGrade) + '"' : '';
+        var metaDiff = '';
+        if (exText && nc && metaGrade) {
+          var gmin = djGradeMinEx(metaGrade, nc);
+          if (gmin != null && sc.exScore - gmin >= 0) metaDiff = metaGrade + '+' + (sc.exScore - gmin);
+        }
         songsHtml += '<div class="shelf-song' + clickClass + noMetaClass + ' slot-' + escHtml(scSlot) + ' lamp-' + lampBox + '" data-ck="' + ck + '" title="' + tooltip + '">'
           + '<span class="shelf-song-lampbox" style="background:' + LAMP_BG[lampBox] + '"></span>'
           + '<span class="shelf-song-text">' + (isLegg ? '† ' : '') + escHtml(sc.title) + '</span>'
           + '<span class="shelf-song-djlv"' + djStyle + '>' + escHtml(rightText) + '</span>'
-          // 모바일 세 번째 줄 — EX스코어(좌) + DJ레벨(우). PC 에선 CSS 로 숨김.
+          // 모바일 meta 줄 — DJ등급 + EX스코어 + 등급컷대비. PC 에선 CSS 로 숨김.
           + '<span class="shelf-song-meta">'
-          + '<span class="shelf-song-meta-ex">' + escHtml(exText) + '</span>'
-          + '<span class="shelf-song-meta-dj"' + djStyle + '>' + escHtml(dj) + '</span>'
+          + (metaGrade ? '<span class="shelf-song-meta-dj"' + metaGradeStyle + '>' + escHtml(metaGrade) + '</span>' : '')
+          + (exText ? '<span class="shelf-song-meta-ex">' + escHtml(exText) + '</span>' : '')
+          + (metaDiff ? '<span class="shelf-song-meta-diff">' + escHtml(metaDiff) + '</span>' : '')
           + '</span>'
           + '</div>';
       }
@@ -521,8 +553,9 @@
   }
 
   return {
-    version: '0.0.23',
+    version: '0.0.24',
     injectStyle: injectStyle,
+    djLevelFromScore: djLevelFromScore,
     renderShelf: renderShelf,
     renderLegend: renderLegend,
     renderStackbar: renderStackbar,
