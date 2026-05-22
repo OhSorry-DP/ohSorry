@@ -265,7 +265,7 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 **로컬 디렉토리 배치** (v0.0.343 부터):
 - 진입점 / wrapper 는 root: `2-calc-score.js` (legacy redirect), `ohsorry.js` (본체 wrapper)
-- 내부 4 모듈은 [`modules/`](modules/) 폴더 안: `calcOhsorryCore.js`, `ohsorryRender.js`, `dbConn.js`, `rivalOhsorry.js`
+- 내부 모듈은 [`modules/`](modules/) 폴더 안: `calcOhsorryCore.js`, `ohsorryRender.js`, `dbConn.js`, `rivalOhsorry.js`, `normTitle.js`, `ohsorryShelf.js`
 - gist 에는 파일이 flat 하게 저장되므로 (path 없음) URL 은 모두 동일 유지. gist push 시 `--filename` 으로 파일명만 지정 (예: `gh gist edit ... --filename calcOhsorryCore.js modules/calcOhsorryCore.js`)
 
 | 파일 | 버전 | 줄수 | 역할 |
@@ -275,6 +275,7 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 | `calcOhsorryCore.js` | v0.0.335 | ~1366 | **계산 core** — ereter / zasa / textage / ohSorryRating + 외부 lib (oldOSR / OSR / OSR135) fetch + 캐시, difficulty.html 페이지 순회 fetch, parseDoc, ★ 추정 (v335E 채택 분기), 추천곡 계산, 프로필 fetch. 결과 객체 (`result`) 를 반환하고 `Render.show(result)` 호출. DOM 안 만짐 (UI 는 render). |
 | `ohsorryRender.js` | v0.0.335 | ~854 | **UI render** — 진행률 UI (`showProgress`/`hideProgress`), 결과 패널 (프로필 / ★ / 노트레이더 / 추천곡 sortable / 상세통계), `__dp_rerun` / `__dp_confirmRerun` / `__dp_toggleRadar` 등. core 의 `result` 객체 받아서 표시 + `OhsorryDb.upsertUserProfile` 호출. |
 | `dbConn.js` | v0.0.335 | ~73 | **supabase 통신** — `upsertUserProfile(payload)` / `fetchUserProfile(iidxId)` 두 RPC 호출만 담당. SUPABASE_URL / SUPABASE_KEY 캡슐화. |
+| `ohsorryShelf.js` | v0.0.23 | ~532 | **서열표 렌더 lib** — charts 배열 → 격자 HTML (`renderShelf` / `renderChartRow` / `renderStackbar` / `injectStyle`). `calcOhsorryCore` 가 추천곡 토스트용으로, ohSorryWeb 게스트 페이지가 서열표 탭용으로 gist fetch. ohSorryRating 에서 이관. |
 | `2-calc-score.js` | (legacy) | ~9 | **호환용 redirect** — 기존 사용자가 콘솔에 붙여넣던 URL 그대로 유지. 내부에서 `ohsorry.js` 를 fetch + eval 만 함. |
 
 **의존 흐름**:
@@ -306,6 +307,60 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 ---
 
 ## 변경 이력
+
+### ohsorry.js / rivalOhsorry.js — eagate 곡 데이터 수집 범위 선택 모달
+- 본체·라이벌 wrapper 가 eagate fetch 모드 진입 시 곡 수집 범위를 묻는 모달(`askFetchOptions`) 추가.
+  - **레벨별** — 선택한 LEVEL 폴더만 fetch (difficulty.html, 빠름). 기본 11·12 체크.
+  - **전곡** — 시리즈 폴더 전체 fetch (series.html, 약 1분).
+- `calcOhsorryCore.compute` 에 `fetchMode`(`'level'` | `'series'`) / `levels` 옵션 추가 — 선택 범위만 순회 fetch.
+- 라이벌 batch 는 루프 시작 전 1회만 모달을 띄워 모든 라이벌에 공통 적용. DB 모드(`dbData` 있음)는 `charts_json` 을 그대로 쓰므로 모달 생략.
+
+### normTitle.js v0.0.5 — UMD 전환 + norm 규칙 보강
+- `window.OhsorryNorm` 단독 → **UMD** 로 전환 — 브라우저(`window.OhsorryNorm`) / Node(`module.exports`) 양쪽 지원. ohSorry / ohSorryAdmin / ohSorryRating 3곳 동일 사본 (마스터: `ohSorry/modules/normTitle.js`, 수정 후 `ohSorryAdmin/scripts/syncNormTitle.js` 로 동기화).
+- norm 규칙 보강 — `CROSSROAD ～Left Story～` alias, `§` → `ss` 치환(BLO§OM).
+
+### ohsorryShelf.js — 서열표 lib 을 ohSorryRating 에서 이관 + 네이밍 통일
+- `ohsorry-shelf.js` → `ohsorryShelf.js` rename (`modules/` 의 camelCase 규칙 통일) + `ohSorryRating/modules/` → `ohSorry/modules/` 로 이관.
+- 서열표 렌더 lib 은 ohSorry 본체·ohSorryWeb 게스트 페이지가 gist fetch 하는 공용 모듈인데, 그동안 곡 난이도 추정 repo(ohSorryRating)에 얹혀 있었음 — gist 배포 주체인 ohSorry 본체로 정리.
+- 참조 갱신: `calcOhsorryCore.js` 의 `CALC_SHELF_URL`, ohSorryWeb `config.js`(`SHELF_LIB_URL`)·`prefetch.js`. gist 파일도 `ohsorry-shelf.js` → `ohsorryShelf.js` 로 rename.
+- 아래는 이관해 온 ohsorryShelf lib 자체의 버전별 변경 이력 (v0.0.17~v0.0.23, 이관 전 기록).
+
+#### ohsorryShelf v0.0.23 (모바일 곡 셀 2줄 고정)
+- 모바일 곡 셀을 항상 2줄 높이로 — `.shelf-song` 에 `min-height: 30px` 추가. 기록이 없어 표시할 게 없는 셀도 2줄 유지.
+- EX스코어·DJ레벨이 둘 다 없는 셀에 `.shelf-song-nometa` 클래스 부여 → 빈 meta 줄을 숨기고 곡명을 2줄까지 표시 (`white-space: normal` + `max-height: 2.5em`, 말줄임표 없이 끝 잘림).
+- meta 에 항목이 하나라도(EX스코어 또는 DJ레벨) 있으면 기존대로 곡명 1줄 + EX/DJ 1줄.
+
+#### ohsorryShelf v0.0.22 (모바일 EX스코어 색)
+- 모바일 곡 셀의 EX스코어(`.shelf-song-meta-ex`)에 곡명과 같은 슬롯 색(NORMAL `#74c0fc` / HYPER `#efef51` / LEGGENDARIA `#ce8ef9` / ANOTHER 기본 `#e9ecef`)을 적용하고 `filter: brightness(0.8)` 로 곡명보다 한 단계 어둡게.
+- 슬롯 색 셀렉터(`.shelf-song.slot-XXX .shelf-song-text`)에 `.shelf-song-meta-ex` 를 함께 묶어 곡명과 색을 공유 — PC 에선 `.shelf-song-meta` 가 `display:none` 이라 영향 없음.
+
+#### ohsorryShelf v0.0.21 (모바일 곡명 1줄 · 말줄임 제거)
+- 모바일(`≤768px`) 곡 셀의 곡명을 2줄 `-webkit-line-clamp`(말줄임표 …) → **1줄 `white-space: nowrap` + `text-overflow: clip`** 으로 변경. 곡명이 길면 말줄임표 없이 셀 끝에서 그대로 잘림.
+- 셀 = 곡명 1줄 + EX스코어/DJ레벨 1줄 = **총 2줄** (v0.0.20 은 곡명이 2줄까지 늘어 최대 3줄이었음).
+- 곡명이 단일 줄(`nowrap`)로 돌아가, ohSorryWeb `shelf.js` 의 hover/탭 마퀴가 모바일에서 다시 동작 (v0.0.20 의 line-clamp 에선 사실상 비활성).
+
+#### ohsorryShelf v0.0.20 (모바일 곡 셀 세로 스택 — 곡명 2줄 + EX/DJ 한 줄)
+- **모바일(`≤768px`) 곡 셀 레이아웃 개편** — 가로 1줄 → 세로 스택. 3열 격자는 유지하되 셀 내부가 세로로:
+  - 곡명 `13px` 로 키우고 **2줄까지 표시 후 `-webkit-line-clamp` 말줄임(…)**. 기존엔 1줄 `nowrap` 이라 글자가 너무 작았음.
+  - 세 번째 줄 `.shelf-song-meta` 신설 — **EX스코어(좌) + DJ레벨(우)** 를 양끝 정렬로 동시 표시. PC 우측 오버레이(`.shelf-song-djlv`)는 모바일에서 숨김.
+  - lampbox 를 `position: absolute` 좌측 6px 띠로 (세로 flex 에서 가로 전체로 퍼지는 것 방지).
+- **PC 동작 불변** — `.shelf-song-meta` 는 기본 `display: none`. PC 는 기존대로 우측 오버레이 1개 + `rightField` 토글 유지.
+- **[modules/ohsorryShelf.js](modules/ohsorryShelf.js)** `renderShelf` 셀 HTML 에 `exText`/`dj` 항상 계산 + `.shelf-song-meta` span 추가, `injectStyle` CSS 보강.
+- 게스트 페이지 (ohSorryWeb) 가 gist 에서 fetch 해서 사용 — gist (`c3da608...`) 재배포로 즉시 반영.
+
+#### ohsorryShelf v0.0.19 (곡 우측 오버레이 EX 스코어 토글)
+- **[modules/ohsorryShelf.js](modules/ohsorryShelf.js)** `renderShelf` 에 `rightField` 옵션 추가 (`'djlv'` | `'exscore'`). `'exscore'` 면 곡 셀 우측 오버레이에 DJ Level 대신 EX SCORE 표시 — 색은 두 경우 모두 해당 DJ Level 색 (`letterColor`).
+- 미플레이 (NP) / `exScore` 없는 곡은 EX 모드에서 빈칸.
+- 게스트 페이지 (ohSorryWeb) 툴바의 "우측: DJ레벨 ⇄ EX스코어" 토글 버튼이 이 옵션 사용.
+
+#### ohsorryShelf v0.0.18 (모바일 그리드 3열 고정 + 난이도 라벨 sticky)
+- **모바일 곡 목록 3열 고정** — `@media (max-width: 600px)` 의 2열 규칙 블록 제거. 600px 이하에서도 `@media (max-width: 768px)` 의 3열 유지.
+- **모바일 난이도 라벨 sticky** — `.shelf-level` 에 `position: sticky; top: 0` 추가. sticky containing block 이 부모 `.shelf-group` 이라 각 그룹 곡 목록 범위 안에서만 상단 고정되고, 다음 그룹이 올라오면 자연히 밀려남. 곡 목록이 비치지 않게 `background: #1a1a1a`, `.shelf-song-djlv`(z-index:1) 위로 올리는 `z-index: 3` 보강.
+- 게스트 페이지 (ohSorryWeb) 가 gist 에서 fetch 해서 사용 — gist (`c3da608...`) 재배포로 즉시 반영.
+
+#### ohsorryShelf v0.0.17 (stack bar 위치 + bottom margin 제거)
+- `.shelf-stackbar` `margin: 16px 0` → `margin: 16px 0 0 0` — bottom margin 제거 (서열표 최상단으로 위치 옮긴 후 legend 와의 간격 정리).
+- 게스트 페이지가 이 lib 사용. 다른 사용처는 ohSorry 본체 (`renderChartRow` 만 사용해 stack bar 영향 X).
 
 ### render v0.0.343 — 상세통계 DP11 탭 (DP11+ → lv11 전용)
 - 상세통계 난이도 선택 토글 `DP11+` (lv11+12) → `DP11` (gameLevel 11 전용) 으로 변경. 요약 표(CLEAR TYPE / DJ LEVEL)와 난이도별 스택바 모두 lv11 곡만 집계.

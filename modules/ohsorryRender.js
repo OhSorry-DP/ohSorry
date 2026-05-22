@@ -363,7 +363,7 @@ window.OhsorryRender = {
               const diffColor = Math.abs(diff) <= 0.1 ? '#52a447' : (Math.abs(diff) <= 0.3 ? '#dcaf45' : '#dc3545');
               return `
                 <div class="profile-star">
-                  <div class="profile-star-value">★${fmt(starEstimate)}</div>
+                  <div class="profile-star-value">★${fmt(starEstimate).toFixed(2)}</div>
                   <div class="profile-star-note">ereter: ★${eraterTrueStar.toFixed(2)} <span style="color:${diffColor};font-weight:600">(${diffStr})</span></div>
                   ${radarToggle}
                 </div>
@@ -371,7 +371,7 @@ window.OhsorryRender = {
             }
             return `
               <div class="profile-star">
-                <div class="profile-star-value">★${fmt(starEstimate)}</div>
+                <div class="profile-star-value">★${fmt(starEstimate).toFixed(2)}</div>
                 <div class="profile-star-note">ereter.net 근사치 ±0.1</div>
                 ${radarToggle}
               </div>
@@ -869,7 +869,7 @@ window.OhsorryRender = {
     `;
     document.body.appendChild(panel);
 
-    // 추천곡 곡명 클릭 → 차트 row 토스트 (ohsorry-shelf renderChartRow)
+    // 추천곡 곡명 클릭 → 차트 row 토스트 (ohsorryShelf renderChartRow)
     const showRowToast = (chartObj, x, y) => {
       if (!shelfLib || !shelfLib.renderChartRow) return;
       document.getElementById('__dp_row_toast')?.remove();

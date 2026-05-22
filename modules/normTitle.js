@@ -1,15 +1,17 @@
-// normTitle.js — 곡명 정규화 통합 모듈 (v0.0.4)
+// normTitle.js — 곡명 정규화 통합 모듈 (v0.0.5, UMD)
 //
-// BEMANI (IIDX) 곡명 매칭용 강한 norm. 본체 / 라이벌 wrapper 가 fetch + eval 해서 사용.
-// 다른 모듈들 (dbConn, calcOhsorryCore, ohSorryRating modules, INFOhSorry) 이
-// 각자 인라인하던 norm 함수를 이 모듈로 통일.
+// BEMANI (IIDX) 곡명 매칭용 강한 norm.
 //
-// 인터페이스:
-//   window.OhsorryNorm = {
-//     VERSION: '0.0.2',
-//     norm(s):   매칭 키용 정규화 문자열
-//     denorm(k): 정규화 키 → raw 복원 (NORM_OVERRIDES 케이스만, 그 외엔 k 그대로)
-//   }
+// UMD — 브라우저와 Node 양쪽에서 동작:
+//   - 브라우저: 오소리 본체 / 라이벌 wrapper 가 gist fetch + eval → window.OhsorryNorm
+//   - Node:     ohSorryAdmin / ohSorryRating 스크립트가 require → module.exports
+//
+// !! 이 파일은 3곳에 동일 사본 — ohSorry / ohSorryAdmin / ohSorryRating.
+//    마스터는 ohSorry/modules/normTitle.js. 수정 후 반드시
+//      node ohSorryAdmin/scripts/syncNormTitle.js
+//    로 나머지 2곳에 복사할 것 (별개 repo 라 물리적 단일 파일은 불가).
+//
+// 인터페이스 — norm(s): 정규화 문자열 / denorm(k): NORM_OVERRIDES 키만 raw 복원
 //
 // 정규화 단계 (순서 중요):
 //   0. TITLE_ALIASES — eagate raw → textage raw 치환 (한자 변형 등, norm 불가능 케이스)
@@ -28,7 +30,13 @@
 // songs.ac 비트맵 (1=AC, 2=INF, 3=둘다) + played_version 으로 필터링.
 // ============================================================
 
-window.OhsorryNorm = (function () {
+// ── UMD wrapper — 브라우저(window.OhsorryNorm) / Node(module.exports) 양쪽 지원 ──
+;(function (factory) {
+  'use strict';
+  var api = factory();
+  if (typeof module === 'object' && module.exports) module.exports = api;  // Node
+  if (typeof window !== 'undefined') window.OhsorryNorm = api;             // 브라우저
+})(function () {
   // eagate raw → textage raw 치환 (norm 으로는 절대 못 잡는 표기 차이)
   // 곡 추가 시 수동 보강.
   var TITLE_ALIASES = {
@@ -37,6 +45,7 @@ window.OhsorryNorm = (function () {
     'FiZZλ_PØT!0И': 'FiZZλ_PØT!OИ',          // zasa '0И' (raw) → textage 'OИ' ('0' 숫자 → 'O' 알파벳)
     'Xlo': 'Xlø',                            // ereter 'Xlo' → textage 'Xlø' (Ø → O 알파벳 변형)
     'VOID': 'VØID',                          // ereter 'VOID' → textage 'VØID' (Ø → O 알파벳 변형)
+    'CROSSROAD ～Left Story～': 'CROSSROAD',  // eagate 부제 표기 → songs 'CROSSROAD' (같은 곡)
   };
 
   // 동명이곡 (norm 후 같은 키, raw 만 다른) → 강제 norm 키 분리.
@@ -84,6 +93,7 @@ window.OhsorryNorm = (function () {
       .replace(/[əә]/g, 'e')        // ə (U+0259 라틴) ә (U+04D9 키릴) — "uən"
       .replace(/[Œœ]/g, 'oe')
       .replace(/ß/g, 'ss')
+      .replace(/§/g, 'ss')          // eagate "BLOSSOM" ↔ textage/songs "BLO§OM" (§ U+00A7 = ss)
       // 키릴 homoglyph
       .replace(/[Ии]/g, 'n')
       .replace(/[Аа]/g, 'a')
@@ -150,8 +160,8 @@ window.OhsorryNorm = (function () {
   }
 
   return {
-    VERSION: '0.0.2',
+    VERSION: '0.0.5',
     norm: norm,
     denorm: denorm,
   };
-})();
+});

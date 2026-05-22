@@ -218,8 +218,8 @@ window.OhsorryCore = {
   const CALC_OSR135_URL = GIST_RAW + '/OSR13.5%2B.js';
   // v3.3.7: adopt.js — v335E 채택 분기 (세 lib raw 값 → 최종 ★) 통합 lib
   const CALC_ADOPT_URL = GIST_RAW + '/adopt.js';
-  // ohsorry-shelf.js — renderChartRow (추천곡 곡명 클릭 토스트용). 실패해도 무시.
-  const CALC_SHELF_URL = GIST_RAW + '/ohsorry-shelf.js';
+  // ohsorryShelf.js — renderChartRow (추천곡 곡명 클릭 토스트용). 실패해도 무시.
+  const CALC_SHELF_URL = GIST_RAW + '/ohsorryShelf.js';
 
   // 외부 lib 메모리 캐시 (페이지 lifetime 유지) — batch (라이벌 다수) 처리 시 두 번째부터 fetch skip
   if (!window.__ohsorryLibCache) window.__ohsorryLibCache = {};
@@ -310,17 +310,17 @@ window.OhsorryCore = {
   } catch (e) {
     console.error('[step2] adopt.js 로드 실패:', e.message, '— 본체 inline 분기 fallback');
   }
-  // ohsorry-shelf.js — 추천곡 곡명 클릭 토스트 (renderChartRow) 용. 실패해도 무시 (토스트만 비활성).
+  // ohsorryShelf.js — 추천곡 곡명 클릭 토스트 (renderChartRow) 용. 실패해도 무시 (토스트만 비활성).
   try {
     const { data: shelfSrc, source: shelfSrcType } = await loadWithCache(CALC_SHELF_URL, 'ohSorry:libShelf', false);
     (new Function(shelfSrc))();
     shelfLib = window.OhSorryShelf;
     if (shelfLib) {
       shelfLib.injectStyle();
-      console.log(`[step2] ohsorry-shelf.js v${shelfLib.version} 로드 (${shelfSrcType})`);
+      console.log(`[step2] ohsorryShelf.js v${shelfLib.version} 로드 (${shelfSrcType})`);
     }
   } catch (e) {
-    console.warn('[step2] ohsorry-shelf.js 로드 실패 (무시 가능):', e.message);
+    console.warn('[step2] ohsorryShelf.js 로드 실패 (무시 가능):', e.message);
   }
 
   // -------- 1. 곡명 정규화 + 인덱싱 --------
@@ -398,28 +398,38 @@ window.OhsorryCore = {
     console.log(`[step2] zasa 보충 (ereter 미등록): ${zasaSupplemental.length}곡`);
   }
 
-  // -------- 2. 대상 페이지 설정 (LEVEL 12 + LEVEL 11 / DP) --------
-  // p.eagate.573.jp 도메인 안 어느 페이지에서나 실행 가능하도록
-  // difficulty.html 의 LEVEL 12 → LEVEL 11 순차 fetch.
-  //   difficult: 0~11 (0-indexed, 11=LEVEL 12, 10=LEVEL 11)
-  //   style:     0=SP, 1=DP
+  // -------- 2. 대상 페이지 설정 (수집 모드: level / series) --------
+  // p.eagate.573.jp 도메인 안 어느 페이지에서나 실행 가능.
+  // 수집 모드 (opts.fetchMode):
+  //   'level'  (기본) : difficulty.html 의 레벨별 페이지 fetch.
+  //                     opts.levels (게임레벨 배열, 예: [12,11]) — 없으면 [12,11].
+  //                     difficult 파라미터 = 게임레벨 - 1 (0-indexed, 11=LEVEL 12).
+  //                     style 0=SP / 1=DP.
+  //   'series' : series.html 에 list=0..32 POST → 시리즈 폴더 전곡 + 클리어램프 + 점수.
+  //              한 곡 row 에 BEGINNER~LEGGENDARIA 5개 차트. getAcSongList.js 와 동일 방식.
+  // opts 를 안 주면 (rival wrapper / DB 모드 등) 'level' + [12,11] — 기존 동작 그대로.
+  //
   // LEVEL 11 도 가져오는 이유: zasa★ 11.6~12.1 인 어려운 lv11 차트의 lamp 데이터를
   //                          ohSorryRating fallback 으로 ★ 추정 / EC·HC 추천에 활용.
+  const fetchMode = opts.fetchMode === 'series' ? 'series' : 'level';
   const SERIES = '33';            // 현재 시즌 (Sparkle Shower)
   const style = '1';              // DP
   const disp = '1';
-  // 가져올 레벨 목록 (LEVEL 12 → LEVEL 11 순서)
-  const LEVELS_TO_FETCH = [
-    { difficult: '11', label: 12 },  // LEVEL 12
-    { difficult: '10', label: 11 },  // LEVEL 11 (zasa★ 11.6+ 만 추정에 활용됨)
-  ];
+  // level 모드 — 가져올 게임레벨 목록 (1~12 만 허용, 내림차순 정렬, 중복 제거)
+  const requestedLevels = (Array.isArray(opts.levels) && opts.levels.length > 0)
+    ? [...new Set(opts.levels.map(Number).filter((n) => n >= 1 && n <= 12))].sort((a, b) => b - a)
+    : [12, 11];
+  // { difficult: '0'~'11' (게임레벨-1), label: 게임레벨 }
+  const LEVELS_TO_FETCH = requestedLevels.map((lv) => ({ difficult: String(lv - 1), label: lv }));
   const BASE_URL = isRival
     ? `https://p.eagate.573.jp/game/2dx/33/djdata/music/difficulty_rival.html`
     : `https://p.eagate.573.jp/game/2dx/33/djdata/music/difficulty.html`;
+  // series 모드용 — 시리즈 폴더 페이지 (getAcSongList.js 와 동일 엔드포인트)
+  const SERIES_URL = `https://p.eagate.573.jp/game/2dx/${SERIES}/djdata/music/series.html`;
   // 호환성을 위해 currentURL 도 만들어둠 (이전 코드와 동일한 변수 이름 사용)
   const currentURL = new URL(BASE_URL);
-  // 기존 로그 / UI 용 — 첫 (LEVEL 12) label
-  const levelText = LEVELS_TO_FETCH[0].label;
+  // 기존 로그 / UI 용 — 첫 label (LEVELS_TO_FETCH 가 비면 12 로 fallback)
+  const levelText = LEVELS_TO_FETCH[0] ? LEVELS_TO_FETCH[0].label : 12;
 
   // 도메인 체크 (잘못된 사이트에서 실행하면 의미 없으니 안내).
   // DB 모드 (dbData 있음) 에서는 eagate fetch 를 안 하므로 도메인 체크 스킵 → 그대로 진행.
@@ -438,7 +448,11 @@ window.OhsorryCore = {
     return;
   }
 
-  console.log(`[step2] LEVEL ${LEVELS_TO_FETCH.map(l => l.label).join(' + ')} / ${style === '1' ? 'DP' : 'SP'} 시작`);
+  if (fetchMode === 'series') {
+    console.log(`[step2] 시리즈 폴더 전곡 / ${style === '1' ? 'DP' : 'SP'} 시작`);
+  } else {
+    console.log(`[step2] LEVEL ${LEVELS_TO_FETCH.map(l => l.label).join(' + ')} / ${style === '1' ? 'DP' : 'SP'} 시작`);
+  }
 
   // -------- 3. 페이지 한 장 파싱 --------
   const LAMP_NAMES = {
@@ -495,6 +509,55 @@ window.OhsorryCore = {
     });
     // 다음 페이지가 있는지: <div class="navi-next"> a 가 존재하면 있음
     out.hasNext = !!doc.querySelector('div.next-prev div.navi-next a');
+    return out;
+  };
+
+  // -------- 3.5. 시리즈 페이지 한 장 파싱 (series 모드) --------
+  // series.html 응답의 <div class="series-all"> table 구조:
+  //   곡 row 하나 = <td> 안에 <a class="music_info"> 곡명 + <div class="series-info">.
+  //   series-info 안에 5개 <div class="score-cel"> (BEGINNER/NORMAL/HYPER/ANOTHER/LEGGENDARIA).
+  //   각 score-cel: <span>난이도</span> + clflgN.gif(클리어램프) + DJLEVEL.gif + "EX점수(Pg/Gr)".
+  // 곡 하나당 차트 5개를 만들되 — 시리즈 페이지엔 게임레벨(★) 정보가 없으므로 gameLevel=null.
+  //   이후 textage levels 로 역추정하고, 채보가 실재하지 않는 칸은 따로 걸러냄.
+  const SERIES_DIFF_NAMES = ['BEGINNER', 'NORMAL', 'HYPER', 'ANOTHER', 'LEGGENDARIA'];
+  const parseSeriesDoc = (doc) => {
+    const out = { charts: [] };
+    const rows = doc.querySelectorAll('div.series-all table tr');
+    rows.forEach((row) => {
+      const titleEl = row.querySelector('a.music_info');
+      if (!titleEl) return;  // 시리즈명 <th> / "ALL" 행 등은 a.music_info 없음 → skip
+      const title = titleEl.textContent.trim();
+      if (!title) return;
+      row.querySelectorAll('div.series-info div.score-cel').forEach((cel) => {
+        const diff = (cel.querySelector('span')?.textContent || '').trim().toUpperCase();
+        if (!SERIES_DIFF_NAMES.includes(diff)) return;
+        // 이미지 2장 — clflgN.gif (클리어램프) / DJLEVEL.gif (AAA~F, 미플레이는 ---.gif)
+        let lampNum = null, djLevel = null;
+        cel.querySelectorAll('img').forEach((img) => {
+          const src = img.getAttribute('src') || img.src || '';
+          const lm = src.match(/clflg(\d+)\.gif/);
+          if (lm) { lampNum = parseInt(lm[1], 10); return; }
+          const dm = src.match(/\/([A-F]+)\.gif/);
+          if (dm) djLevel = dm[1];
+        });
+        if (lampNum == null) return;  // 램프 이미지 자체가 없으면 파싱 불가 → skip
+        // EX 점수 + Pgreat/Great — "2046(826/394)" 패턴
+        const txt = (cel.textContent || '').replace(/\s+/g, ' ');
+        const sm = txt.match(/(\d+)\((\d+)\/(\d+)\)/);
+        let exScore = 0, pgreat = 0, great = 0;
+        if (sm) {
+          exScore = parseInt(sm[1], 10);
+          pgreat = parseInt(sm[2], 10);
+          great = parseInt(sm[3], 10);
+        }
+        out.charts.push({
+          title, diff,
+          lampNum, lamp: LAMP_NAMES[lampNum] || `?${lampNum}`,
+          exScore, pgreat, great, djLevel, missCount: null,
+          gameLevel: null,  // 시리즈 페이지엔 레벨 정보 없음 — textage 로 역추정
+        });
+      });
+    });
     return out;
   };
 
@@ -650,24 +713,111 @@ window.OhsorryCore = {
     return true;
   };
 
-  // 각 LEVEL 순차 실행 — 진행도 0~95% 까지 균등 분할 (eagate 모드만)
-  if (!dbData) {
-  const SPAN = 95 / LEVELS_TO_FETCH.length;
-  for (let i = 0; i < LEVELS_TO_FETCH.length; i++) {
-    const { difficult: lvD, label: lvL } = LEVELS_TO_FETCH[i];
-    const ok = await fetchOneLevel(lvD, lvL, i * SPAN, (i + 1) * SPAN);
-    if (!ok) return; // 첫 LEVEL 실패하면 중단
-  }
-  console.log(`[step2] 전 LEVEL 합산: ${pageCount}페이지 / ${allCharts.length}곡 파싱 완료`);
-  updateProgress(`완료! ${pageCount}페이지 ${allCharts.length}곡`, 100);
-  // 잠시 후 진행 패널 제거 (점수 패널이 같은 위치에 뜨므로)
-  await new Promise(r => setTimeout(r, 500));
-  document.getElementById('__dp_progress')?.remove();
+  // ===== oldCore: level 모드 수집 — difficulty.html 의 LEVELS_TO_FETCH 순차 fetch =====
+  // 진행도 0~95% 를 LEVEL 개수만큼 균등 분할. 첫 LEVEL 실패하면 false.
+  const collectByLevel = async () => {
+    if (LEVELS_TO_FETCH.length === 0) {
+      alert('가져올 레벨이 지정되지 않았습니다.');
+      return false;
+    }
+    const SPAN = 95 / LEVELS_TO_FETCH.length;
+    for (let i = 0; i < LEVELS_TO_FETCH.length; i++) {
+      const { difficult: lvD, label: lvL } = LEVELS_TO_FETCH[i];
+      const ok = await fetchOneLevel(lvD, lvL, i * SPAN, (i + 1) * SPAN);
+      if (!ok) return false; // 첫 LEVEL 실패하면 중단
+    }
+    console.log(`[step2] 전 LEVEL 합산: ${pageCount}페이지 / ${allCharts.length}곡 파싱 완료`);
+    return true;
+  };
 
-  if (allCharts.length === 0) {
-    alert('곡을 하나도 못 찾았어요. 페이지 구조가 변경됐을 수 있습니다.');
-    return;
-  }
+  // ===== series 모드 수집 — series.html 에 list=0..32 POST (시리즈 폴더 전곡) =====
+  // getAcSongList.js 와 동일한 엔드포인트 / POST body. 한 곡이 여러 시리즈에 중복
+  // 노출되므로 (title+diff) 키로 dedupe. 시리즈 0 실패 시 false, 그 외 시리즈는 skip.
+  const collectBySeries = async () => {
+    const SERIES_COUNT = 33;  // eagate list 파라미터는 0~32 (33개)
+    const seenChartKey = new Set();
+    for (let sn = 0; sn < SERIES_COUNT; sn++) {
+      const sd = sn + 1;  // 표시용 번호 — list 파라미터는 0~32 지만 화면엔 1~33 으로 보이게
+      updateProgress(`시리즈 ${sd}/${SERIES_COUNT} 요청 중...`, (sn / SERIES_COUNT) * 95);
+      let parsed;
+      try {
+        const body = new URLSearchParams({
+          list: String(sn),
+          play_style: style,
+          s: '1',
+          rival: (isRival && rivalToken) ? rivalToken : '',
+        });
+        const res = await fetch(SERIES_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: body.toString(),
+          credentials: 'include',
+        });
+        if (!res.ok) {
+          if (sn === 0) {
+            console.error(`[step2] 첫 시리즈 fetch 실패: HTTP ${res.status}`);
+            updateProgress(`시리즈 페이지 HTTP ${res.status} 에러`, 95);
+            alert(`시리즈 페이지를 가져오지 못했어요 (HTTP ${res.status}).\n로그인 상태인지 확인해주세요.`);
+            return false;
+          }
+          console.warn(`[step2] 시리즈 ${sd} HTTP ${res.status} — skip`);
+          continue;
+        }
+        const html = await res.text();
+        const doc = new DOMParser().parseFromString(html, 'text/html');
+        parsed = parseSeriesDoc(doc);
+      } catch (e) {
+        if (sn === 0) {
+          console.error('[step2] 첫 시리즈 fetch 실패:', e);
+          updateProgress(`시리즈 페이지 fetch 실패: ${e.message}`, 95);
+          alert(`시리즈 페이지 fetch 실패: ${e.message}`);
+          return false;
+        }
+        console.warn(`[step2] 시리즈 ${sd} fetch 실패: ${e.message} — skip`);
+        continue;
+      }
+      let added = 0;
+      for (const ch of parsed.charts) {
+        const k = ch.title + '|' + ch.diff;
+        if (seenChartKey.has(k)) continue;  // 다른 시리즈에서 이미 본 차트
+        seenChartKey.add(k);
+        allCharts.push(ch);
+        added++;
+      }
+      pageCount++;
+      console.log(`[step2] 시리즈 ${sd}/${SERIES_COUNT}: ${parsed.charts.length}차트 / 신규 ${added} (누적 ${allCharts.length})`);
+      updateProgress(
+        `시리즈 ${sd}/${SERIES_COUNT}: 신규 ${added}차트 (누적 ${allCharts.length})`,
+        ((sn + 1) / SERIES_COUNT) * 95,
+      );
+      // 첫 시리즈 곡이 0 이면 로그인 / 페이지 구조 의심
+      if (sn === 0 && allCharts.length === 0) {
+        alert('첫 시리즈에서 곡을 못 찾았어요. 로그인 상태가 아니거나 페이지 구조가 변경됐을 수 있습니다.');
+        return false;
+      }
+      // 사람처럼 시리즈 사이에 대기 (마지막 시리즈 뒤에는 생략)
+      if (sn < SERIES_COUNT - 1) {
+        await new Promise((r) => setTimeout(r, Math.round(randomDelay())));
+      }
+    }
+    console.log(`[step2] 전 시리즈 합산: ${pageCount}회 / ${allCharts.length}차트 파싱 완료`);
+    return true;
+  };
+
+  // 수집 실행 — fetchMode 분기 (eagate 모드만, DB 모드는 위에서 charts_json 으로 채움)
+  if (!dbData) {
+    const ok = fetchMode === 'series' ? await collectBySeries() : await collectByLevel();
+    if (!ok) return;  // 수집 실패 → 중단 (alert 는 각 수집 함수가 이미 표시)
+    const unit = fetchMode === 'series' ? '시리즈' : '페이지';
+    updateProgress(`완료! ${pageCount}${unit} ${allCharts.length}곡`, 100);
+    // 잠시 후 진행 패널 제거 (점수 패널이 같은 위치에 뜨므로)
+    await new Promise((r) => setTimeout(r, 500));
+    document.getElementById('__dp_progress')?.remove();
+
+    if (allCharts.length === 0) {
+      alert('곡을 하나도 못 찾았어요. 페이지 구조가 변경됐을 수 있습니다.');
+      return;
+    }
   }
 
   // -------- 4.5. textage 채보 메타로 noteCount 보강 --------
@@ -693,22 +843,49 @@ window.OhsorryCore = {
       (textageMap[key] = textageMap[key] || []).push({ notes: s.notes, levels: s.levels || {} });
     }
     const DIFF_TO_TEXTAGE = { NORMAL: 'DN', HYPER: 'DH', ANOTHER: 'DA', LEGGENDARIA: 'DX', BEGINNER: 'DB' };
-    let filledNote = 0;
+    let filledNote = 0, filledLevel = 0;
     for (const c of allCharts) {
       const entries = textageMap[norm(c.title)];
       if (!entries) continue;
       const tKey = DIFF_TO_TEXTAGE[c.diff];
       if (!tKey) continue;
-      // norm 충돌 시 — levels[slot] 이 차트 gameLevel 과 일치하는 엔트리 우선 (없으면 첫 엔트리)
+      // norm 충돌 시 — gameLevel 이 있으면 (level 모드) levels[slot] 일치 엔트리 우선,
+      //               없으면 (series 모드) 해당 diff 채보가 실재하는 엔트리 우선.
       let chosen = entries[0];
       if (entries.length > 1) {
-        chosen = entries.find((e) => e.levels[tKey] === c.gameLevel) || entries[0];
+        chosen = entries.find((e) => (c.gameLevel != null
+          ? e.levels[tKey] === c.gameLevel
+          : typeof e.levels[tKey] === 'number')) || entries[0];
+      }
+      // 게임레벨 역추정 — series 모드는 페이지에 레벨이 없어 textage levels 로 채움.
+      if (c.gameLevel == null && typeof chosen.levels[tKey] === 'number') {
+        c.gameLevel = chosen.levels[tKey];
+        filledLevel++;
       }
       const nc = chosen.notes[tKey];
       if (typeof nc !== 'number' || nc <= 0) continue;
       if (typeof c.noteCount !== 'number') { c.noteCount = nc; filledNote++; }
     }
-    console.log(`[step2] textage 보강 — noteCount ${filledNote}곡`);
+    console.log(`[step2] textage 보강 — noteCount ${filledNote}곡, gameLevel ${filledLevel}곡`);
+  }
+
+  // -------- 4.6. series 모드 — 실재하지 않는 채보 칸 제거 --------
+  // series.html 은 곡마다 BEGINNER~LEGGENDARIA 5칸을 항상 렌더한다 (DP BEGINNER 처럼
+  // 채보가 없는 칸도 clflg0 + ---.gif + 0(0/0) 으로). 아래 중 하나라도 만족하면 남긴다:
+  //   - textage levels 로 게임레벨이 확인된 차트
+  //   - 플레이 흔적이 있는 차트 — 클리어램프(lampNum>0) 또는 EX점수(exScore>0).
+  //     점수 0 이어도 램프(FAILED~FULL COMBO)만 있으면 실재 채보로 보고 유지.
+  //   - ereter / rating 에 등록된 차트
+  if (fetchMode === 'series') {
+    const before = allCharts.length;
+    allCharts = allCharts.filter((c) =>
+      c.gameLevel != null ||
+      c.lampNum > 0 ||
+      c.exScore > 0 ||
+      ereterMap.has(norm(c.title) + '|' + c.diff) ||
+      ratingMap.has(norm(c.title) + '|' + c.diff),
+    );
+    console.log(`[step2] series 모드 유령 차트 제거: ${before} → ${allCharts.length}차트`);
   }
 
   // -------- 5. 매칭 + 점수 계산 --------
