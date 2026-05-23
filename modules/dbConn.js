@@ -1,11 +1,17 @@
-// dbConn.js — 오소리 DB 통신 모듈 (v0.0.402)
+// dbConn.js — 오소리 DB 통신 모듈 (v0.0.403)
 //
 // 새 디비 (users + user_radars + scores) 로 마이그레이션.
 //   - upsertUserProfile: upsert_user + upsert_user_radar (sp/dp)
 //   - upsertUserChartScores: songs 매핑 캐시 + upsert_scores (text→int + title→song_id 변환)
+//   - uploadResult: 결과 패널 렌더 직후 호출되는 trigger — DB 모드 skip / payload 검증 / 결과 로깅
 //   - fetchUserProfile 은 다음 단계 (TODO)
 //
 // 본체 / 라이벌 wrapper 가 fetch + eval 해서 사용 (window.OhsorryDb 로 노출).
+//
+// v0.0.403 — uploadResult trigger 흡수:
+//   - 기존 ohsorryRender 안에 박혀있던 'OhsorryDb.upsertUserProfile + upsertUserChartScores
+//     호출 + DB 모드 skip + 결과 로깅' 흐름을 이 모듈로 이관. render 는 이제 한 줄로 호출.
+//   - 별도 dbUpload 모듈로 뺄까 검토했지만 둘 다 supabase 라 한 모듈에 두는 게 자연스러움.
 //
 // v0.0.402 — LAMP_MAP 에 풀네임 alias 추가:
 //   - calcOhsorryCore.js 의 LAMP_NAMES (NO PLAY / FAILED / EASY / CLEAR / HARD / EX HARD / FULL COMBO) 매칭
@@ -332,10 +338,62 @@ window.OhsorryDb = (function () {
     return data;
   }
 
+  // ============================================================
+  // uploadResult — 결과 패널 렌더 직후의 supabase 업로드 trigger.
+  // ohsorryRender 의 supabase upload 블록을 흡수. DB 모드 (dbData 있음) 자동 skip.
+  //
+  // 사용:
+  //   await window.OhsorryDb.uploadResult(result, { dbData });
+  //
+  // 반환:
+  //   { skipped: true, reason }                              — skip 한 경우
+  //   { profile: { ok, error }, scores: { ok, error } | null } — 시도한 경우
+  // ============================================================
+  async function uploadResult(result, ctx) {
+    const opts = ctx || {};
+
+    // 1. DB 모드 — 다른 유저 데이터 열람 중. 절대 upsert 하지 않음.
+    if (opts.dbData) {
+      console.log('[OhsorryDb] DB 모드 — supabase 재업로드 skip');
+      return { skipped: true, reason: 'dbMode' };
+    }
+
+    // 2. payload 자체 없음 (Core 가 빌드 안 함) — 조용히 skip.
+    if (!result || !result.dbPayload) {
+      return { skipped: true, reason: 'no dbPayload' };
+    }
+
+    const out = { profile: null, scores: null };
+
+    // 3. 유저 프로필 + radar upsert (upsert_user + upsert_user_radar SP/DP).
+    try {
+      out.profile = await upsertUserProfile(result.dbPayload);
+      if (out.profile && out.profile.ok) console.log('[OhsorryDb] supabase upsert 성공');
+      else console.warn('[OhsorryDb] supabase upsert 실패:', out.profile && out.profile.error);
+    } catch (e) {
+      out.profile = { ok: false, error: e && e.message };
+      console.warn('[OhsorryDb] supabase upsert 예외:', e && e.message);
+    }
+
+    // 4. 차트 점수 bulk upsert (upsert_scores). chartScoreRows 가 있을 때만.
+    if (result.chartScoreRows) {
+      try {
+        out.scores = await upsertUserChartScores(result.chartScoreRows);
+        if (out.scores && out.scores.ok) console.log('[OhsorryDb] chart scores upsert 성공');
+        else console.warn('[OhsorryDb] chart scores upsert 실패:', out.scores && out.scores.error);
+      } catch (e) {
+        out.scores = { ok: false, error: e && e.message };
+        console.warn('[OhsorryDb] chart scores upsert 예외:', e && e.message);
+      }
+    }
+    return out;
+  }
+
   return {
-    VERSION: '0.0.402',
+    VERSION: '0.0.403',
     upsertUserProfile: upsertUserProfile,
     upsertUserChartScores: upsertUserChartScores,
+    uploadResult: uploadResult,
     fetchUserProfile: fetchUserProfile,
     fetchServiceStatus: fetchServiceStatus,
   };

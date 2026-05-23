@@ -1,11 +1,11 @@
-// 2-calc-score.js — 오소리 본체 wrapper (v3.3.6)
+// 2-calc-score.js — 오소리 본체 wrapper (v3.3.7)
 //
 // 모듈 분리:
 //   - calcOhsorryCore.js (v0.0.335) : 계산 (ereter/zasa fetch + 페이지 순회 + ★ 추정 + 추천곡 + result build)
-//   - ohsorryRender.js   (v0.0.335) : UI (진행률 + 결과 패널 + 추천곡 sortable + 캡처)
-//   - dbConn.js          (v0.0.335) : supabase RPC (upsertUserProfile / fetchUserProfile)
+//   - ohsorryRender.js   (v0.0.346) : UI (진행률 + 결과 패널 + 추천곡 sortable + 캡처)
+//   - dbConn.js          (v0.0.403) : supabase RPC + uploadResult trigger (DB 모드 자동 skip)
 //
-// 이 wrapper 는 세 모듈을 Wgist 에서 fetch + eval 한 뒤 Core.compute({mode:'own'}) 만 호출.
+// 이 wrapper 는 위 모듈들을 gist 에서 fetch + eval 한 뒤 Core.compute({mode:'own'}) 만 호출.
 //
 // 사용법:
 //   1. p.eagate.573.jp 도메인 어느 페이지에서나 자동 실행 (eagate fetch 모드)
@@ -15,7 +15,7 @@
 // ============================================================
 
 (async function () {
-  const WRAPPER_VERSION = 'v3.3.6';
+  const WRAPPER_VERSION = 'v3.3.7';
   const GIST_BASE = 'https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw';
   const CORE_URL   = GIST_BASE + '/calcOhsorryCore.js';
   const RENDER_URL = GIST_BASE + '/ohsorryRender.js';

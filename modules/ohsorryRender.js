@@ -1,4 +1,4 @@
-// ohsorryRender.js — 오소리 결과 렌더 모듈 (v0.0.345)
+// ohsorryRender.js — 오소리 결과 렌더 모듈 (v0.0.346)
 //
 // calcOhsorryCore.compute() 가 반환한 result 객체를 받아 화면 패널 + 추천곡 + supabase upload.
 // 본체 / 라이벌 wrapper 가 fetch + eval 해서 사용.
@@ -933,26 +933,11 @@ window.OhsorryRender = {
     window.__dp_result = { total, matched, unmatched, details, perLevel, perLamp, allCharts, pageCount, ereterExtractedAt, starEstimate, starRaw, profile, recsEC, recsHC, recsEXH };
     console.log('💾 결과 데이터: window.__dp_result');
 
-    // ===== supabase upload — OhsorryDb 사용 (DB 모드는 skip) =====
-    if (!dbData && result.dbPayload && window.OhsorryDb && window.OhsorryDb.upsertUserProfile) {
-      try {
-        const r = await window.OhsorryDb.upsertUserProfile(result.dbPayload);
-        if (r.ok) console.log('[OhsorryRender] supabase upsert 성공');
-        else console.warn('[OhsorryRender] supabase upsert 실패:', r.error);
-      } catch (e) {
-        console.warn('[OhsorryRender] supabase upsert 예외:', e.message);
-      }
-      if (result.chartScoreRows && window.OhsorryDb.upsertUserChartScores) {
-        try {
-          const cr = await window.OhsorryDb.upsertUserChartScores(result.chartScoreRows);
-          if (cr.ok) console.log('[OhsorryRender] chart scores upsert 성공');
-          else console.warn('[OhsorryRender] chart scores upsert 실패:', cr.error);
-        } catch (e) {
-          console.warn('[OhsorryRender] chart scores upsert 예외:', e.message);
-        }
-      }
-    } else if (dbData) {
-      console.log('[OhsorryRender] DB 모드 — supabase 재업로드 skip');
+    // ===== supabase upload — OhsorryDb.uploadResult 위임 (DB 모드는 자동 skip) =====
+    // 트리거 로직이 dbConn v0.0.403 에 흡수됨 — render 는 한 줄 호출.
+    if (window.OhsorryDb && window.OhsorryDb.uploadResult) {
+      try { await window.OhsorryDb.uploadResult(result, { dbData }); }
+      catch (e) { console.warn('[OhsorryRender] uploadResult 예외:', e && e.message); }
     }
   },
 };

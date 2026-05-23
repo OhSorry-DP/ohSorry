@@ -308,6 +308,11 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### wrapper v3.3.7 / render v0.0.346 / db v0.0.403 — supabase 업로드 트리거를 dbConn 으로 흡수
+- 기존 `ohsorryRender` 안에 박혀있던 "결과 패널 렌더 직후 `OhsorryDb.upsertUserProfile` + `upsertUserChartScores` 호출 + 결과 로깅" 트리거 흐름을 `dbConn.js` 에 `uploadResult(result, { dbData })` 신규 함수로 흡수. 별도 dbUpload 모듈로 뺄까 검토했지만 둘 다 supabase 라 한 모듈에 두는 게 자연스러움.
+- `ohsorryRender.js` 의 supabase upload 블록 21줄 → `window.OhsorryDb.uploadResult(result, { dbData })` 한 줄로 축약. DB 모드 (dbData 있음 = ohSorryWeb 게스트 페이지) 일 때는 dbConn 안에서 자동 skip.
+- 부산물: render 가 upsert RPC 함수들을 직접 호출하지 않게 돼서 render 의 관심사가 UI 로 더 좁아짐.
+
 ### render v0.0.345 — v0.0.344 revert (상세통계 스택바 램프 색 원복)
 - 직전 v0.0.344 의 `lampPalette` shelf `LAMP_BG` 매핑을 되돌림 — 상세통계 스택바는 기존 자체 팔레트 (`fc #00aab2 / exh #ffcc44 / hd #dc3545 / cl #7dd3da / ez #52a447 / as #9966cc / fa #999 / np #e9ecef`) 유지.
 - ohSorryWeb 플레이데이터 탭의 색박스는 shelf `LAMP_BG` 재사용 유지 (그쪽은 의도된 design choice).
