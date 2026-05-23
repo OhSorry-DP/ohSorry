@@ -308,6 +308,12 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### core v0.0.345 — DB 모드일 때 OSR/oldOSR/OSR135/adopt 호출·fetch 모두 skip
+- 기존엔 `isInfData` (INFOhSorry 가 series='INF' / version='INFv...' 로 올린 데이터) 일 때만 ★ 모델 재실행을 건너뛰고 `dbData.star_estimate` 를 그대로 사용했음. 일반 AC DB 데이터 (= ohSorryWeb 게스트 페이지 유저 카드) 도 supabase 의 `users.star` 가 이미 채택값이라 OSR 다시 돌릴 필요 없음.
+- 변경: `if (dbData)` 분기로 확장 — INF/AC 구분 없이 `dbData` 가 있으면 OSR/oldOSR/OSR135/adopt 호출 전부 skip 하고 `dbData.star_estimate` 를 `starEstimate` + `starEstimateNew` (추천 풀 baseStar) 양쪽에 그대로 셋업.
+- 추가로 `oldOSR.js` / `osr.js` / `OSR13.5+.js` / `adopt.js` 4개 lib **fetch 자체** 도 `dbData` 있으면 skip — eval 비용 + 다운로드 절감. ohSorryWeb `prefetch.js` 의 `CORE_LIBS` 에서도 4개 제거.
+- 추천곡은 그대로 동작 — `ohsorryRecBase = starEstimateNew != null ? starEstimateNew : starEstimate` 이고 starEstimateNew 에 같은 값을 셋업해 기존 흐름 보존.
+
 ### wrapper v3.3.7 / render v0.0.346 / db v0.0.403 — supabase 업로드 트리거를 dbConn 으로 흡수
 - 기존 `ohsorryRender` 안에 박혀있던 "결과 패널 렌더 직후 `OhsorryDb.upsertUserProfile` + `upsertUserChartScores` 호출 + 결과 로깅" 트리거 흐름을 `dbConn.js` 에 `uploadResult(result, { dbData })` 신규 함수로 흡수. 별도 dbUpload 모듈로 뺄까 검토했지만 둘 다 supabase 라 한 모듈에 두는 게 자연스러움.
 - `ohsorryRender.js` 의 supabase upload 블록 21줄 → `window.OhsorryDb.uploadResult(result, { dbData })` 한 줄로 축약. DB 모드 (dbData 있음 = ohSorryWeb 게스트 페이지) 일 때는 dbConn 안에서 자동 skip.

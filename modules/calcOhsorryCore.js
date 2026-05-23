@@ -42,7 +42,7 @@ window.OhsorryCore = {
   let dbData = opts.dbData || null;
   const rivalToken = opts.rivalToken || null;
   const wrapperVersion = opts.wrapperVersion || 'unknown';
-  const CORE_VERSION_SHORT = '0.0.344'.replace(/^0\.0\./, '');  // '344'
+  const CORE_VERSION_SHORT = '0.0.345'.replace(/^0\.0\./, '');  // '345'
   const dbVersionString = `${wrapperVersion}-core${CORE_VERSION_SHORT}`;
   dbData = dbData || null;
   // -------- 0. ereter 데이터 로드 (Gist 에서 자동 fetch) --------
@@ -267,48 +267,55 @@ window.OhsorryCore = {
     console.error('[step2] ohSorryRating 로드 실패:', e.message);
   }
 
-  // oldOSR.js (v3.3.3 모델) + osr.js (v0.0.2 모델) + OSR13.5+.js lib fetch + eval
-  //   eval 은 UMD wrapper 라 window.oldOSR / window.ohSorryRating / window.OSR135 글로벌 등록
+  // oldOSR.js (v3.3.3 모델) + osr.js (v0.0.2 모델) + OSR13.5+.js + adopt.js lib fetch + eval
+  //   eval 은 UMD wrapper 라 window.oldOSR / window.ohSorryRating / window.OSR135 / window.adopt 글로벌 등록
+  // v3.3.8: DB 모드 (dbData 있음 = ohSorryWeb 게스트 페이지 / INF) 일 때는 fetch 자체 skip.
+  //   ★ 추정은 dbData.star_estimate 를 그대로 사용하므로 4 lib (oldOSR / osr / OSR13.5+ / adopt) 다 필요 없음.
+  //   ohSorryWeb 게스트 페이지 진입 시 그만큼 다운로드 절감 + lib eval 비용 절감.
   let oldOSR = null, ohSorryRatingLib = null, osr135Lib = null, shelfLib = null;
-  try {
-    const { data: oldOSRSrc, source: oldSrc } = await loadWithCache(CALC_OLD_OSR_URL, 'ohSorry:libOldOSR', false);
-    // UMD 가 window 에 등록 — IIFE 실행
-    (new Function(oldOSRSrc))();
-    oldOSR = window.oldOSR;
-    if (!oldOSR) throw new Error('oldOSR global 등록 실패');
-    console.log(`[step2] oldOSR.js v${oldOSR.version} 로드 (${oldSrc})`);
-  } catch (e) {
-    console.error('[step2] oldOSR.js 로드 실패:', e.message);
-  }
-  try {
-    const { data: osrSrc, source: newSrc } = await loadWithCache(CALC_OSR_URL, 'ohSorry:libOSR', false);
-    (new Function(osrSrc))();
-    ohSorryRatingLib = window.ohSorryRating;
-    if (!ohSorryRatingLib) throw new Error('ohSorryRating global 등록 실패');
-    console.log(`[step2] osr.js 로드 (${newSrc})`);
-  } catch (e) {
-    console.error('[step2] osr.js 로드 실패:', e.message);
-  }
-  // v3.3.5: OSR13.5+ lib (13.5 이상 ★ 정확도 ↑)
-  try {
-    const { data: osr135Src, source: src135 } = await loadWithCache(CALC_OSR135_URL, 'ohSorry:libOSR135', false);
-    (new Function(osr135Src))();
-    osr135Lib = window.OSR135;
-    if (!osr135Lib) throw new Error('OSR135 global 등록 실패');
-    console.log(`[step2] OSR13.5+.js v${osr135Lib.version} 로드 (${src135})`);
-  } catch (e) {
-    console.error('[step2] OSR13.5+.js 로드 실패:', e.message);
-  }
-  // v3.3.7: adopt.js — v335E 채택 분기 통합 lib (세 lib raw → 최종 ★)
   let adoptLib = null;
-  try {
-    const { data: adoptSrc, source: srcAdopt } = await loadWithCache(CALC_ADOPT_URL, 'ohSorry:libAdopt', false);
-    (new Function(adoptSrc))();
-    adoptLib = window.adopt;
-    if (!adoptLib) throw new Error('adopt global 등록 실패');
-    console.log(`[step2] adopt.js v${adoptLib.version} 로드 (${srcAdopt})`);
-  } catch (e) {
-    console.error('[step2] adopt.js 로드 실패:', e.message, '— 본체 inline 분기 fallback');
+  if (!dbData) {
+    try {
+      const { data: oldOSRSrc, source: oldSrc } = await loadWithCache(CALC_OLD_OSR_URL, 'ohSorry:libOldOSR', false);
+      // UMD 가 window 에 등록 — IIFE 실행
+      (new Function(oldOSRSrc))();
+      oldOSR = window.oldOSR;
+      if (!oldOSR) throw new Error('oldOSR global 등록 실패');
+      console.log(`[step2] oldOSR.js v${oldOSR.version} 로드 (${oldSrc})`);
+    } catch (e) {
+      console.error('[step2] oldOSR.js 로드 실패:', e.message);
+    }
+    try {
+      const { data: osrSrc, source: newSrc } = await loadWithCache(CALC_OSR_URL, 'ohSorry:libOSR', false);
+      (new Function(osrSrc))();
+      ohSorryRatingLib = window.ohSorryRating;
+      if (!ohSorryRatingLib) throw new Error('ohSorryRating global 등록 실패');
+      console.log(`[step2] osr.js 로드 (${newSrc})`);
+    } catch (e) {
+      console.error('[step2] osr.js 로드 실패:', e.message);
+    }
+    // v3.3.5: OSR13.5+ lib (13.5 이상 ★ 정확도 ↑)
+    try {
+      const { data: osr135Src, source: src135 } = await loadWithCache(CALC_OSR135_URL, 'ohSorry:libOSR135', false);
+      (new Function(osr135Src))();
+      osr135Lib = window.OSR135;
+      if (!osr135Lib) throw new Error('OSR135 global 등록 실패');
+      console.log(`[step2] OSR13.5+.js v${osr135Lib.version} 로드 (${src135})`);
+    } catch (e) {
+      console.error('[step2] OSR13.5+.js 로드 실패:', e.message);
+    }
+    // v3.3.7: adopt.js — v335E 채택 분기 통합 lib (세 lib raw → 최종 ★)
+    try {
+      const { data: adoptSrc, source: srcAdopt } = await loadWithCache(CALC_ADOPT_URL, 'ohSorry:libAdopt', false);
+      (new Function(adoptSrc))();
+      adoptLib = window.adopt;
+      if (!adoptLib) throw new Error('adopt global 등록 실패');
+      console.log(`[step2] adopt.js v${adoptLib.version} 로드 (${srcAdopt})`);
+    } catch (e) {
+      console.error('[step2] adopt.js 로드 실패:', e.message, '— 본체 inline 분기 fallback');
+    }
+  } else {
+    console.log('[step2] DB 모드 — ★ 추정 lib 4종 (oldOSR / osr / OSR13.5+ / adopt) fetch skip');
   }
   // ohsorryShelf.js — 추천곡 곡명 클릭 토스트 (renderChartRow) 용. 실패해도 무시 (토스트만 비활성).
   try {
@@ -1050,16 +1057,19 @@ window.OhsorryCore = {
   let starEstimateEreterOnly = null;
   let starEstimateLv12Only = null;
   let starEstimateAll = null;
-  // INF DB 데이터 판별 — INFOhSorry 가 series:'INF' / version:'INFv...' 로 업로드함
+  // INF DB 데이터 판별 — INFOhSorry 가 series:'INF' / version:'INFv...' 로 업로드함 (로그 라벨 분기 용)
   const isInfData = !!dbData && (dbData.series === 'INF' ||
     (typeof dbData.version === 'string' && dbData.version.indexOf('INF') === 0));
-  if (isInfData) {
-    // INF DB — INFOhSorry 가 이미 추정한 ★ 를 그대로 사용 (오소리 ★ 모델 재실행 X).
-    // INF 와 오소리(아케이드) 는 게임이 달라 오소리 모델을 INF lamp 에 돌리는 건 의미 없음.
+  // v3.3.8: DB 모드 (dbData 있음) 면 OSR/oldOSR/OSR135/adopt 호출 다 skip — supabase 저장값 그대로 사용.
+  //   기존엔 INF 일 때만 skip 했으나, AC + 게스트 페이지 일반 케이스도 동일하게 처리해 모델 재실행 비용 제거.
+  //   추천곡은 ohsorryRecBase = starEstimateNew != null ? starEstimateNew : starEstimate 이므로
+  //   starEstimateNew 에 같은 값을 셋업해 두면 기존 추천 흐름 그대로 동작.
+  if (dbData) {
     starEstimate = typeof dbData.star_estimate === 'number' ? dbData.star_estimate : null;
     starRaw = typeof dbData.raw_s === 'number' ? dbData.raw_s : null;
-    starEstimateNew = starEstimate;  // 추천 풀 baseStar (ohsorryRecBase) 용
-    console.log(`[오소리] INF DB 데이터 — ★ 모델 스킵, INF 추정값 ★${starEstimate != null ? starEstimate.toFixed(2) : 'N/A'} 그대로 사용`);
+    starEstimateNew = starEstimate;  // 추천 풀 baseStar (ohsorryRecBase) 용 — supabase 저장 ★ 와 동일
+    const label = isInfData ? 'INF DB' : 'AC DB';
+    console.log(`[오소리] ${label} 데이터 — ★ 모델 스킵, supabase 저장 ★${starEstimate != null ? starEstimate.toFixed(2) : 'N/A'} 그대로 사용`);
   } else {
   if (oldOSR && ratingData && Array.isArray(ereterData) && ereterData.length > 0) {
     try {
