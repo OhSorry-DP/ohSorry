@@ -1,4 +1,4 @@
-// ohsorryRender.js — 오소리 결과 렌더 모듈 (v0.0.344)
+// ohsorryRender.js — 오소리 결과 렌더 모듈 (v0.0.345)
 //
 // calcOhsorryCore.compute() 가 반환한 result 객체를 받아 화면 패널 + 추천곡 + supabase upload.
 // 본체 / 라이벌 wrapper 가 fetch + eval 해서 사용.
@@ -30,7 +30,7 @@
 // ============================================================
 
 window.OhsorryRender = {
-  VERSION: '0.0.344',
+  VERSION: '0.0.345',
 
   // 진행률 UI — core 의 onProgress 콜백에서 호출
   showProgress: function (msg, pct) {
@@ -649,18 +649,15 @@ window.OhsorryRender = {
             }
             return [...set].map(parseFloat).sort((a, b) => a - b);
           })();
-          // 램프 색 — ohsorryShelf lib 의 LAMP_BG 를 재사용 (single source of truth, shelf 와 시각 일관성).
-          //   shelf lib 미로드 시 fallback 색은 shelf 의 LAMP_BG 값과 동일하게 박아둠.
-          const sheLAMP = (typeof window !== 'undefined' && window.OhSorryShelf && window.OhSorryShelf.LAMP_BG) || {};
           const lampPalette = [
-            { key: 'fc',  color: sheLAMP.FC || 'linear-gradient(to bottom right, #0d47a1, #e3f2fd)', label: 'FC' },
-            { key: 'exh', color: sheLAMP.EX || '#dcaf45', label: 'EX-HARD' },
-            { key: 'hd',  color: sheLAMP.HC || '#e9ecef', label: 'HARD' },
-            { key: 'cl',  color: sheLAMP.NC || '#5cb8ea', label: 'CLEAR' },
-            { key: 'ez',  color: sheLAMP.EC || '#7bc16a', label: 'EASY' },
-            { key: 'as',  color: sheLAMP.AC || '#9966cc', label: 'ASSIST' },
-            { key: 'fa',  color: sheLAMP.F  || '#7a3030', label: 'FAILED' },
-            { key: 'np',  color: sheLAMP.NP || '#3a3a3a', label: 'NO PLAY' },
+            { key: 'fc',  color: '#00aab2', label: 'FC' },
+            { key: 'exh', color: '#ffcc44', label: 'EX-HARD' },
+            { key: 'hd',  color: '#dc3545', label: 'HARD' },
+            { key: 'cl',  color: '#7dd3da', label: 'CLEAR' },
+            { key: 'ez',  color: '#52a447', label: 'EASY' },
+            { key: 'as',  color: '#9966cc', label: 'ASSIST' },
+            { key: 'fa',  color: '#999',    label: 'FAILED' },
+            { key: 'np',  color: '#e9ecef', label: 'NO PLAY' },
           ];
           const djPalette = [
             { key: 'AAA',   color: '#ffcc44', label: 'AAA' },

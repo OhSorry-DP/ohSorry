@@ -308,6 +308,10 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### render v0.0.345 — v0.0.344 revert (상세통계 스택바 램프 색 원복)
+- 직전 v0.0.344 의 `lampPalette` shelf `LAMP_BG` 매핑을 되돌림 — 상세통계 스택바는 기존 자체 팔레트 (`fc #00aab2 / exh #ffcc44 / hd #dc3545 / cl #7dd3da / ez #52a447 / as #9966cc / fa #999 / np #e9ecef`) 유지.
+- ohSorryWeb 플레이데이터 탭의 색박스는 shelf `LAMP_BG` 재사용 유지 (그쪽은 의도된 design choice).
+
 ### render v0.0.344 — 상세통계 스택바 램프 색을 ohsorryShelf `LAMP_BG` 재사용
 - 상세통계의 난이도별 클리어 램프 스택바 색 (`lampPalette`) 을 ohsorryShelf v0.0.25 의 `LAMP_BG` 를 통해 가져옴 — shelf 와 동일한 색 (FC 그라데이션 / EX `#dcaf45` / HARD `#e9ecef` / CLEAR `#5cb8ea` / EASY `#7bc16a` / ASSIST `#9966cc` / FAILED `#7a3030` / NP `#3a3a3a`).
 - shelf lib 미로드 시는 동일 색으로 fallback (하드코드된 값이 shelf 의 LAMP_BG 와 일치).
