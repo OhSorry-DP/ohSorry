@@ -553,8 +553,9 @@
   }
 
   return {
-    version: '0.0.24',
+    version: '0.0.25',
     injectStyle: injectStyle,
+    LAMP_BG: LAMP_BG,                  // 외부에서 램프 색 재사용용 (ohSorryWeb users.js 플레이데이터 탭 등)
     djLevelFromScore: djLevelFromScore,
     renderShelf: renderShelf,
     renderLegend: renderLegend,

@@ -308,6 +308,10 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### ohsorryShelf v0.0.25 — `LAMP_BG` export
+- 내부 상수 `LAMP_BG` (램프별 배경 색 — FC 그라데이션 등) 을 lib export 에 노출. ohSorryWeb 의 유저 카드 플레이데이터 탭 등에서 동일 램프 색을 재사용하기 위함 (single source of truth).
+- 다른 export 변경 없음 — 기존 사용처는 영향 없음.
+
 ### ohsorryShelf v0.0.24 — 모바일 meta 줄 등급+컷대비 표기 (B 2229 B+167)
 - 모바일 곡 셀 2번째 줄을 `DJ등급 EX스코어 등급+컷대비` 형식으로 — 예: `B 2229 B+167` (B등급, EX 2229, B 등급 컷보다 167점 위).
 - `djLevelFromScore` / `djGradeMinEx` 추가 (`max = noteCount*2`, 등급 컷 2/9~8/9 — ohSorryWeb `rankingModal` 과 동일 로직). `djLevelFromScore` 를 lib export 에 노출 — 향후 rankingModal 도 재사용 가능한 단일 출처.
