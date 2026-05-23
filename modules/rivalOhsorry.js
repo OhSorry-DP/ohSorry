@@ -1,11 +1,12 @@
-// calc-rival-ohsorry.js — 라이벌 오소리 wrapper (v3.3.6)
+// calc-rival-ohsorry.js — 라이벌 오소리 wrapper (v3.3.8)
 //
 // 모듈 분리:
-//   - calcOhsorryCore.js (v0.0.335) : 계산
-//   - ohsorryRender.js   (v0.0.335) : UI
-//   - dbConn.js          (v0.0.335) : supabase RPC
+//   - calcOhsorryCore.js (v0.0.346) : 계산
+//   - ohsorryRender.js   (v0.0.346) : UI
+//   - dbConn.js          (v0.0.403) : supabase RPC
+//   - eagateFetch.js     (v0.0.1)   : p.eagate.573.jp difficulty/series.html fetch
 //
-// 이 wrapper 는 세 모듈을 gist 에서 fetch + eval 한 뒤:
+// 이 wrapper 는 위 모듈들을 gist 에서 fetch + eval 한 뒤:
 //   - IIDX ID 로 rival 토큰 조회 (rival_search.html POST)
 //   - 다수 라이벌 batch 처리
 //   - window.__dp_render_rival 노출 (URL 토큰 / override 토큰 / IIDX prompt → batch 분기)
@@ -16,16 +17,17 @@
 //   3. window.__dp_render_rival(null, token) 로 토큰 직접 주입 (batch 흐름)
 //   4. window.__dp_batch_rival_by_iidx('1511-6402, 1234-5678, ...') 로 다수 IIDX ID batch
 //
-// supabase version 컬럼: `${WRAPPER_VERSION}-core${CORE_VERSION_SHORT}` (예: 'v3.3.6-core335')
+// supabase version 컬럼: `${WRAPPER_VERSION}-core${CORE_VERSION_SHORT}` (예: 'v3.3.8-core346')
 // ============================================================
 
 (async function () {
-  const WRAPPER_VERSION = 'v3.3.6';
+  const WRAPPER_VERSION = 'v3.3.8';
   const GIST_BASE = 'https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw';
-  const CORE_URL   = GIST_BASE + '/calcOhsorryCore.js';
-  const RENDER_URL = GIST_BASE + '/ohsorryRender.js';
-  const DB_URL     = GIST_BASE + '/dbConn.js';
-  const NORM_URL   = GIST_BASE + '/normTitle.js';
+  const CORE_URL     = GIST_BASE + '/calcOhsorryCore.js';
+  const RENDER_URL   = GIST_BASE + '/ohsorryRender.js';
+  const DB_URL       = GIST_BASE + '/dbConn.js';
+  const NORM_URL     = GIST_BASE + '/normTitle.js';
+  const EAGATE_URL   = GIST_BASE + '/eagateFetch.js';
 
   async function loadModule(url, globalName) {
     if (window[globalName]) return window[globalName];
@@ -212,12 +214,17 @@
     showLoadingProgress('normTitle 로드 중', 5);
     try {
       await loadModule(NORM_URL,   'OhsorryNorm');
-      showLoadingProgress('dbConn 로드 중', 30);
+      showLoadingProgress('dbConn 로드 중', 25);
       await loadModule(DB_URL,     'OhsorryDb');
-      showLoadingProgress('render 로드 중', 55);
+      showLoadingProgress('render 로드 중', 50);
       await loadModule(RENDER_URL, 'OhsorryRender');
-      showLoadingProgress('core 로드 중', 80);
+      showLoadingProgress('core 로드 중', 75);
       const Core = await loadModule(CORE_URL, 'OhsorryCore');
+      // eagateFetch — DB 모드 (dbData 있음) 에선 supabase charts_json 으로 채우므로 불필요. fetch 모드만 load.
+      if (!dbData) {
+        showLoadingProgress('eagateFetch 로드 중', 95);
+        await loadModule(EAGATE_URL, 'OhsorryEagateFetch');
+      }
       showLoadingProgress('계산 시작', 100);
       return Core.compute({
         mode: 'rival',
@@ -238,6 +245,6 @@
   if (location.hostname.endsWith('p.eagate.573.jp')) {
     window.__dp_render_rival(null);
   } else {
-    console.log('[오소리/라이벌 v3.3.6] eagate 외 도메인 — window.__dp_render_rival(dbData) 로 DB 데이터를 넘겨 호출하세요.');
+    console.log('[오소리/라이벌 v3.3.8] eagate 외 도메인 — window.__dp_render_rival(dbData) 로 DB 데이터를 넘겨 호출하세요.');
   }
 })();

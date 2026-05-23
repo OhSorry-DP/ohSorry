@@ -271,7 +271,7 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 | 파일 | 버전 | 줄수 | 역할 |
 |---|---|---|---|
 | `ohsorry.js` | v3.3.6 | ~54 | **본체 wrapper** — eagate 도메인 자동 실행. core/render/db 셋 다 fetch+eval 한 뒤 `Core.compute({mode:'own'})` 호출. `window.__dp_render(dbData)` 노출 (DB 모드). |
-| `rivalOhsorry.js` | v3.3.6 | ~112 | **라이벌 wrapper** — 라이벌 페이지 (difficulty_rival.html?rival=&lt;토큰&gt;) 자동 실행. `__dp_fetch_rival_token` / `__dp_batch_rival_by_iidx` 헬퍼 + `Core.compute({mode:'rival'})`. IIDX ID prompt → 토큰 검색 → batch 흐름. |
+| `rivalOhsorry.js` | v3.3.8 | ~118 | **라이벌 wrapper** — 라이벌 페이지 (difficulty_rival.html?rival=&lt;토큰&gt;) 자동 실행. `__dp_fetch_rival_token` / `__dp_batch_rival_by_iidx` 헬퍼 + `Core.compute({mode:'rival'})`. IIDX ID prompt → 토큰 검색 → batch 흐름. |
 | `calcOhsorryCore.js` | v0.0.335 | ~1366 | **계산 core** — ereter / zasa / textage / ohSorryRating + 외부 lib (oldOSR / OSR / OSR135) fetch + 캐시, difficulty.html 페이지 순회 fetch, parseDoc, ★ 추정 (v335E 채택 분기), 추천곡 계산, 프로필 fetch. 결과 객체 (`result`) 를 반환하고 `Render.show(result)` 호출. DOM 안 만짐 (UI 는 render). |
 | `ohsorryRender.js` | v0.0.335 | ~854 | **UI render** — 진행률 UI (`showProgress`/`hideProgress`), 결과 패널 (프로필 / ★ / 노트레이더 / 추천곡 sortable / 상세통계), `__dp_rerun` / `__dp_confirmRerun` / `__dp_toggleRadar` 등. core 의 `result` 객체 받아서 표시 + `OhsorryDb.upsertUserProfile` 호출. |
 | `dbConn.js` | v0.0.335 | ~73 | **supabase 통신** — `upsertUserProfile(payload)` / `fetchUserProfile(iidxId)` 두 RPC 호출만 담당. SUPABASE_URL / SUPABASE_KEY 캡슐화. |
@@ -307,6 +307,10 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 ---
 
 ## 변경 이력
+
+### rivalOhsorry v3.3.8 — eagateFetch 모듈 load 누락 fix (라이벌 오소리 작동 불가 해소)
+- 본체 wrapper 는 v3.3.7 → v3.3.8 갱신 시 `eagateFetch` 모듈 load 가 추가됐는데 [rivalOhsorry.js](modules/rivalOhsorry.js) 는 v3.3.6 그대로 남아 4개 모듈만 load → `Core.compute` 가 eagate fetch 단계에서 `window.OhsorryEagateFetch` 부재로 alert ("eagateFetch 모듈이 로드되지 않았어요. 페이지 새로고침 후 재시도해주세요.") 띄우고 중단되던 회귀 fix.
+- 라이벌 wrapper 도 v3.3.8 로 동기화 — `EAGATE_URL` 추가, `dbData` 없을 때만 `eagateFetch` 모듈 load (본체와 동일 패턴). 진행률 박스 단계 4 → 5.
 
 ### wrapper v3.3.8 / core v0.0.346 / eagateFetch v0.0.1 — eagate 페이지 fetch 모듈 분리
 - 신규 [modules/eagateFetch.js](modules/eagateFetch.js) (`window.OhsorryEagateFetch`) — 기존 core 안의 closure 함수 `parseDoc` / `parseSeriesDoc` / `fetchOneLevel` / `collectByLevel` / `collectBySeries` + 관련 상수 (`STEP` / `MAX_PAGES` / `DELAY_MIN/MAX_MS` / `randomDelay`) + URL 빌드 (`BASE_URL` / `SERIES_URL` / `LEVELS_TO_FETCH`) 를 별도 모듈로 분리. 공개 API: `collectCharts({ fetchMode, levels, series, style, disp, isRival, rivalToken, updateProgress, alertFn })` → `{ ok, charts, pageCount, fetchMode, LEVELS_TO_FETCH }`. closure mutate 대신 결과 return.
