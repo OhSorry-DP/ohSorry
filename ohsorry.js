@@ -1,11 +1,14 @@
-// 2-calc-score.js — 오소리 본체 wrapper (v3.3.7)
+// 2-calc-score.js — 오소리 본체 wrapper (v3.3.8)
 //
 // 모듈 분리:
-//   - calcOhsorryCore.js (v0.0.335) : 계산 (ereter/zasa fetch + 페이지 순회 + ★ 추정 + 추천곡 + result build)
+//   - calcOhsorryCore.js (v0.0.346) : 계산 (★ 추정 + 추천곡 + result build) — DB 모드면 ★ lib fetch 도 skip
 //   - ohsorryRender.js   (v0.0.346) : UI (진행률 + 결과 패널 + 추천곡 sortable + 캡처)
 //   - dbConn.js          (v0.0.403) : supabase RPC + uploadResult trigger (DB 모드 자동 skip)
+//   - eagateFetch.js     (v0.0.1)   : p.eagate.573.jp difficulty/series.html fetch (DB 모드면 wrapper 가 안 받음)
 //
 // 이 wrapper 는 위 모듈들을 gist 에서 fetch + eval 한 뒤 Core.compute({mode:'own'}) 만 호출.
+// DB 모드 (dbData 있음 = ohSorryWeb 게스트 페이지 / INFOhSorry 등) 일 때는 eagateFetch 를 fetch 하지 않음 —
+// 그쪽은 supabase 의 charts_json 으로 채우므로 eagate 페이지 fetch 자체가 불필요.
 //
 // 사용법:
 //   1. p.eagate.573.jp 도메인 어느 페이지에서나 자동 실행 (eagate fetch 모드)
@@ -15,12 +18,13 @@
 // ============================================================
 
 (async function () {
-  const WRAPPER_VERSION = 'v3.3.7';
+  const WRAPPER_VERSION = 'v3.3.8';
   const GIST_BASE = 'https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw';
-  const CORE_URL   = GIST_BASE + '/calcOhsorryCore.js';
-  const RENDER_URL = GIST_BASE + '/ohsorryRender.js';
-  const DB_URL     = GIST_BASE + '/dbConn.js';
-  const NORM_URL   = GIST_BASE + '/normTitle.js';
+  const CORE_URL     = GIST_BASE + '/calcOhsorryCore.js';
+  const RENDER_URL   = GIST_BASE + '/ohsorryRender.js';
+  const DB_URL       = GIST_BASE + '/dbConn.js';
+  const NORM_URL     = GIST_BASE + '/normTitle.js';
+  const EAGATE_URL   = GIST_BASE + '/eagateFetch.js';
 
   async function loadModule(url, globalName) {
     if (window[globalName]) return window[globalName];
@@ -142,12 +146,18 @@
     showLoadingProgress('normTitle 로드 중', 5);
     try {
       await loadModule(NORM_URL,   'OhsorryNorm');
-      showLoadingProgress('dbConn 로드 중', 30);
+      showLoadingProgress('dbConn 로드 중', 25);
       await loadModule(DB_URL,     'OhsorryDb');
-      showLoadingProgress('render 로드 중', 55);
+      showLoadingProgress('render 로드 중', 50);
       await loadModule(RENDER_URL, 'OhsorryRender');
-      showLoadingProgress('core 로드 중', 80);
+      showLoadingProgress('core 로드 중', 75);
       const Core = await loadModule(CORE_URL, 'OhsorryCore');
+      // eagateFetch — DB 모드 (dbData 있음 = ohSorryWeb 게스트 페이지) 일 때는 받지 않음.
+      // DB 모드는 supabase 의 charts_json 으로 채우므로 eagate 페이지 fetch 가 필요 없음 → 다운로드 절감.
+      if (!dbData) {
+        showLoadingProgress('eagateFetch 로드 중', 95);
+        await loadModule(EAGATE_URL, 'OhsorryEagateFetch');
+      }
       showLoadingProgress('계산 시작', 100);
       return Core.compute({
         mode: 'own',

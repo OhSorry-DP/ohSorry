@@ -42,7 +42,7 @@ window.OhsorryCore = {
   let dbData = opts.dbData || null;
   const rivalToken = opts.rivalToken || null;
   const wrapperVersion = opts.wrapperVersion || 'unknown';
-  const CORE_VERSION_SHORT = '0.0.345'.replace(/^0\.0\./, '');  // '345'
+  const CORE_VERSION_SHORT = '0.0.346'.replace(/^0\.0\./, '');  // '346'
   const dbVersionString = `${wrapperVersion}-core${CORE_VERSION_SHORT}`;
   dbData = dbData || null;
   // -------- 0. ereter 데이터 로드 (Gist 에서 자동 fetch) --------
@@ -422,21 +422,12 @@ window.OhsorryCore = {
   const SERIES = '33';            // 현재 시즌 (Sparkle Shower)
   const style = '1';              // DP
   const disp = '1';
-  // level 모드 — 가져올 게임레벨 목록 (1~12 만 허용, 내림차순 정렬, 중복 제거)
+  // level 모드 — 가져올 게임레벨 목록 (1~12 만 허용, 내림차순 정렬, 중복 제거).
+  //   eagateFetch.collectCharts 가 ctx.levels 로 받아 자체적으로 LEVELS_TO_FETCH / URL 빌드.
+  //   core 는 fetchMode 만 유지 (이후 4.6 단계에서 series 모드 유령 차트 제거 분기에 사용).
   const requestedLevels = (Array.isArray(opts.levels) && opts.levels.length > 0)
     ? [...new Set(opts.levels.map(Number).filter((n) => n >= 1 && n <= 12))].sort((a, b) => b - a)
     : [12, 11];
-  // { difficult: '0'~'11' (게임레벨-1), label: 게임레벨 }
-  const LEVELS_TO_FETCH = requestedLevels.map((lv) => ({ difficult: String(lv - 1), label: lv }));
-  const BASE_URL = isRival
-    ? `https://p.eagate.573.jp/game/2dx/33/djdata/music/difficulty_rival.html`
-    : `https://p.eagate.573.jp/game/2dx/33/djdata/music/difficulty.html`;
-  // series 모드용 — 시리즈 폴더 페이지 (getAcSongList.js 와 동일 엔드포인트)
-  const SERIES_URL = `https://p.eagate.573.jp/game/2dx/${SERIES}/djdata/music/series.html`;
-  // 호환성을 위해 currentURL 도 만들어둠 (이전 코드와 동일한 변수 이름 사용)
-  const currentURL = new URL(BASE_URL);
-  // 기존 로그 / UI 용 — 첫 label (LEVELS_TO_FETCH 가 비면 12 로 fallback)
-  const levelText = LEVELS_TO_FETCH[0] ? LEVELS_TO_FETCH[0].label : 12;
 
   // 도메인 체크 (잘못된 사이트에서 실행하면 의미 없으니 안내).
   // DB 모드 (dbData 있음) 에서는 eagate fetch 를 안 하므로 도메인 체크 스킵 → 그대로 진행.
@@ -455,127 +446,12 @@ window.OhsorryCore = {
     return;
   }
 
-  if (fetchMode === 'series') {
-    console.log(`[step2] 시리즈 폴더 전곡 / ${style === '1' ? 'DP' : 'SP'} 시작`);
-  } else {
-    console.log(`[step2] LEVEL ${LEVELS_TO_FETCH.map(l => l.label).join(' + ')} / ${style === '1' ? 'DP' : 'SP'} 시작`);
-  }
+  // -------- 3. eagate 페이지 파싱은 modules/eagateFetch.js (v0.0.1+) 로 분리 --------
+  //   parseDoc (difficulty.html level 모드) + parseSeriesDoc (series.html series 모드)
+  //   둘 다 eagateFetch 모듈 안의 private 함수. core 는 결과 차트 배열만 받음.
 
-  // -------- 3. 페이지 한 장 파싱 --------
-  const LAMP_NAMES = {
-    0: 'NO PLAY', 1: 'FAILED',  2: 'ASSIST',    3: 'EASY',
-    4: 'CLEAR',   5: 'HARD',    6: 'EX HARD',   7: 'FULL COMBO',
-  };
-
-  const parseDoc = (doc) => {
-    const out = { charts: [], hasNext: false };
-    // 곡 목록은 <div class="series-difficulty"> 안의 table
-    const rows = doc.querySelectorAll('div.series-difficulty table tr');
-    rows.forEach(row => {
-      const tds = row.querySelectorAll('td');
-      if (tds.length !== 5) return;  // 5개 td 인 곡 row 만
-      const titleEl = tds[0].querySelector('a.music_info');
-      if (!titleEl) return;
-      const title = titleEl.textContent.trim();
-      const chartType = tds[1].textContent.trim();
-      // DJ LEVEL 이미지 (AAA/AA/A/B/C/D/E/F)
-      const djLevelImg = tds[2].querySelector('img');
-      let djLevel = null;
-      if (djLevelImg) {
-        const dm = (djLevelImg.getAttribute('src') || djLevelImg.src || '').match(/\/([A-F]+)\.gif/);
-        if (dm) djLevel = dm[1];
-      }
-      // EX 점수 + Pgreat/Great
-      const scoreText = tds[3].textContent.trim();
-      const scoreMatch = scoreText.match(/^(\d+)\((\d+)\/(\d+)\)/);
-      let exScore = 0, pgreat = 0, great = 0;
-      if (scoreMatch) {
-        exScore = parseInt(scoreMatch[1], 10);
-        pgreat = parseInt(scoreMatch[2], 10);
-        great = parseInt(scoreMatch[3], 10);
-      } else {
-        const m2 = scoreText.match(/^(\d+)/);
-        if (m2) exScore = parseInt(m2[1], 10);
-      }
-      // 미스 카운트 (BP/MISS) — score cell 의 추가 텍스트 또는 다른 td 어디에 있을 수도 있음
-      let missCount = null;
-      const allText = Array.from(tds).map(td => td.textContent || '').join(' ');
-      const missMatch = allText.match(/(?:BP|MISS|BAD)[:\s]*(\d+)/i);
-      if (missMatch) missCount = parseInt(missMatch[1], 10);
-      // 클리어 램프
-      const lampImg = tds[4].querySelector('img');
-      if (!lampImg) return;
-      const m = (lampImg.getAttribute('src') || lampImg.src || '').match(/clflg(\d+)\.gif/);
-      if (!m) return;
-      const lampNum = parseInt(m[1], 10);
-      out.charts.push({
-        title, diff: chartType,
-        lampNum, lamp: LAMP_NAMES[lampNum] || `?${lampNum}`,
-        exScore, pgreat, great, djLevel, missCount,
-      });
-    });
-    // 다음 페이지가 있는지: <div class="navi-next"> a 가 존재하면 있음
-    out.hasNext = !!doc.querySelector('div.next-prev div.navi-next a');
-    return out;
-  };
-
-  // -------- 3.5. 시리즈 페이지 한 장 파싱 (series 모드) --------
-  // series.html 응답의 <div class="series-all"> table 구조:
-  //   곡 row 하나 = <td> 안에 <a class="music_info"> 곡명 + <div class="series-info">.
-  //   series-info 안에 5개 <div class="score-cel"> (BEGINNER/NORMAL/HYPER/ANOTHER/LEGGENDARIA).
-  //   각 score-cel: <span>난이도</span> + clflgN.gif(클리어램프) + DJLEVEL.gif + "EX점수(Pg/Gr)".
-  // 곡 하나당 차트 5개를 만들되 — 시리즈 페이지엔 게임레벨(★) 정보가 없으므로 gameLevel=null.
-  //   이후 textage levels 로 역추정하고, 채보가 실재하지 않는 칸은 따로 걸러냄.
-  const SERIES_DIFF_NAMES = ['BEGINNER', 'NORMAL', 'HYPER', 'ANOTHER', 'LEGGENDARIA'];
-  const parseSeriesDoc = (doc) => {
-    const out = { charts: [] };
-    const rows = doc.querySelectorAll('div.series-all table tr');
-    rows.forEach((row) => {
-      const titleEl = row.querySelector('a.music_info');
-      if (!titleEl) return;  // 시리즈명 <th> / "ALL" 행 등은 a.music_info 없음 → skip
-      const title = titleEl.textContent.trim();
-      if (!title) return;
-      row.querySelectorAll('div.series-info div.score-cel').forEach((cel) => {
-        const diff = (cel.querySelector('span')?.textContent || '').trim().toUpperCase();
-        if (!SERIES_DIFF_NAMES.includes(diff)) return;
-        // 이미지 2장 — clflgN.gif (클리어램프) / DJLEVEL.gif (AAA~F, 미플레이는 ---.gif)
-        let lampNum = null, djLevel = null;
-        cel.querySelectorAll('img').forEach((img) => {
-          const src = img.getAttribute('src') || img.src || '';
-          const lm = src.match(/clflg(\d+)\.gif/);
-          if (lm) { lampNum = parseInt(lm[1], 10); return; }
-          const dm = src.match(/\/([A-F]+)\.gif/);
-          if (dm) djLevel = dm[1];
-        });
-        if (lampNum == null) return;  // 램프 이미지 자체가 없으면 파싱 불가 → skip
-        // EX 점수 + Pgreat/Great — "2046(826/394)" 패턴
-        const txt = (cel.textContent || '').replace(/\s+/g, ' ');
-        const sm = txt.match(/(\d+)\((\d+)\/(\d+)\)/);
-        let exScore = 0, pgreat = 0, great = 0;
-        if (sm) {
-          exScore = parseInt(sm[1], 10);
-          pgreat = parseInt(sm[2], 10);
-          great = parseInt(sm[3], 10);
-        }
-        out.charts.push({
-          title, diff,
-          lampNum, lamp: LAMP_NAMES[lampNum] || `?${lampNum}`,
-          exScore, pgreat, great, djLevel, missCount: null,
-          gameLevel: null,  // 시리즈 페이지엔 레벨 정보 없음 — textage 로 역추정
-        });
-      });
-    });
-    return out;
-  };
-
-  // -------- 4. offset=0,50,100,... 순회 (LEVEL 별로) --------
+  // -------- 4. allCharts / pageCount — eagateFetch 결과 보관, DB 모드는 charts_json 으로 직접 --------
   let allCharts = [];
-  const STEP = 50;
-  const MAX_PAGES = 30;  // 무한 루프 방어
-  // 사람이 페이지 넘기는 속도와 비슷하게: 페이지마다 0.8~1.2초 사이 랜덤 대기 (평균 1초)
-  const DELAY_MIN_MS = 800;
-  const DELAY_MAX_MS = 1200;
-  const randomDelay = () => DELAY_MIN_MS + Math.random() * (DELAY_MAX_MS - DELAY_MIN_MS);
   let pageCount = 0;
 
   // DB 모드 — charts_json 으로 allCharts 를 바로 채우고 아래 eagate fetch 블록은 전부 스킵.
@@ -618,207 +494,29 @@ window.OhsorryCore = {
     if (b) b.style.width = `${Math.min(100, Math.max(0, pct))}%`;
   };
 
-  // 한 LEVEL 의 전 페이지를 fetch 해서 charts 를 allCharts 에 push.
-  // 실패 시 false 반환 (로그인 만료 등) — 호출자가 중단 처리.
-  const fetchOneLevel = async (lvDifficult, lvLabel, basePctStart, basePctEnd) => {
-    let lvOffset = 0;
-    let lvPageCount = 0;
-    const lvSpan = basePctEnd - basePctStart;
-    const pctOf = (frac) => Math.min(basePctEnd, basePctStart + lvSpan * Math.max(0, Math.min(1, frac)));
-
-    // 첫 페이지 (offset=0)
-    updateProgress(`LEVEL ${lvLabel} page 1 (offset=0) 요청 중...`, pctOf(0.02));
-    let firstParse;
-    try {
-      const rivalQ = (isRival && rivalToken) ? `&rival=${encodeURIComponent(rivalToken)}` : '';
-      const firstUrl = `${BASE_URL}?difficult=${lvDifficult}&style=${style}&disp=${disp}&offset=0${rivalQ}`;
-      const res = await fetch(firstUrl, { credentials: 'include' });
-      if (!res.ok) {
-        console.error(`[step2] LEVEL ${lvLabel} 첫 페이지 fetch 실패: HTTP ${res.status}`);
-        updateProgress(`LEVEL ${lvLabel} 첫 페이지 HTTP ${res.status} 에러`, pctOf(1));
-        alert(
-          `LEVEL ${lvLabel} 첫 페이지를 가져오지 못했어요 (HTTP ${res.status}).\n로그인 상태인지 확인해주세요.`,
-        );
-        return false;
-      }
-      const html = await res.text();
-      const doc = new DOMParser().parseFromString(html, 'text/html');
-      firstParse = parseDoc(doc);
-    } catch (e) {
-      console.error(`[step2] LEVEL ${lvLabel} 첫 페이지 fetch 실패:`, e);
-      updateProgress(`LEVEL ${lvLabel} 첫 페이지 fetch 실패: ${e.message}`, pctOf(1));
-      alert(`LEVEL ${lvLabel} 첫 페이지 fetch 실패: ${e.message}`);
-      return false;
-    }
-    firstParse.charts.forEach((c) => { c.gameLevel = lvLabel; });
-    allCharts.push(...firstParse.charts);
-    lvPageCount++;
-    pageCount++;
-    console.log(`[step2] LEVEL ${lvLabel} page ${lvPageCount} (offset=0): ${firstParse.charts.length}곡`);
-    updateProgress(`LEVEL ${lvLabel} page ${lvPageCount} (offset=0): ${firstParse.charts.length}곡`, pctOf(0.08));
-    if (firstParse.charts.length === 0) {
-      // LEVEL 12 의 첫 페이지가 비어있으면 로그인 / 페이지 구조 의심
-      if (lvLabel === LEVELS_TO_FETCH[0].label) {
-        alert('첫 페이지에서 곡을 못 찾았어요. 로그인 상태가 아니거나 페이지 구조가 변경됐을 수 있습니다.');
-        return false;
-      }
-      // LEVEL 11 등 추가 fetch 의 첫 페이지가 비면 그냥 skip
-      console.log(`[step2] LEVEL ${lvLabel} 데이터 없음 — skip`);
-      return true;
-    }
-    let hasNext = firstParse.hasNext;
-    lvOffset = STEP;
-
-    while (hasNext && lvPageCount < MAX_PAGES) {
-      // 사람처럼 페이지 사이에 대기 (요청 보내기 전에)
-      const wait = Math.round(randomDelay());
-      const waitStartTs = Date.now();
-      while (Date.now() - waitStartTs < wait) {
-        const remain = Math.ceil((wait - (Date.now() - waitStartTs)) / 1000);
-        updateProgress(
-          `LEVEL ${lvLabel} page ${lvPageCount + 1} (offset=${lvOffset}) 다음 요청까지 ${remain}초...`,
-          pctOf(lvPageCount / MAX_PAGES),
-        );
-        await new Promise((r) => setTimeout(r, 250));
-      }
-
-      const rivalQ2 = (isRival && rivalToken) ? `&rival=${encodeURIComponent(rivalToken)}` : '';
-      const url = `${currentURL.origin}${currentURL.pathname}?difficult=${lvDifficult}&style=${style}&disp=${disp}&offset=${lvOffset}${rivalQ2}`;
-      try {
-        updateProgress(
-          `LEVEL ${lvLabel} page ${lvPageCount + 1} (offset=${lvOffset}) 요청 중...`,
-          pctOf((lvPageCount + 0.5) / MAX_PAGES),
-        );
-        const res = await fetch(url, { credentials: 'include' });
-        if (!res.ok) {
-          console.warn(`[step2] LEVEL ${lvLabel} HTTP ${res.status} at offset=${lvOffset}, 중단`);
-          updateProgress(`LEVEL ${lvLabel} HTTP ${res.status} 에러로 중단`, pctOf(1));
-          break;
-        }
-        const html = await res.text();
-        const doc = new DOMParser().parseFromString(html, 'text/html');
-        const parsed = parseDoc(doc);
-        parsed.charts.forEach((c) => { c.gameLevel = lvLabel; });
-        allCharts.push(...parsed.charts);
-        lvPageCount++;
-        pageCount++;
-        console.log(`[step2] LEVEL ${lvLabel} page ${lvPageCount} (offset=${lvOffset}): ${parsed.charts.length}곡`);
-        updateProgress(
-          `LEVEL ${lvLabel} page ${lvPageCount} (offset=${lvOffset}): ${parsed.charts.length}곡 (총 ${allCharts.length}곡)`,
-          pctOf((lvPageCount + 1) / MAX_PAGES),
-        );
-        if (parsed.charts.length === 0) break;
-        hasNext = parsed.hasNext;
-        lvOffset += STEP;
-      } catch (e) {
-        console.error(`[step2] LEVEL ${lvLabel} fetch 실패 at offset=${lvOffset}:`, e);
-        updateProgress(`LEVEL ${lvLabel} fetch 실패: ${e.message}`, pctOf(1));
-        break;
-      }
-    }
-    console.log(`[step2] LEVEL ${lvLabel} 완료: ${lvPageCount}페이지`);
-    return true;
-  };
-
-  // ===== oldCore: level 모드 수집 — difficulty.html 의 LEVELS_TO_FETCH 순차 fetch =====
-  // 진행도 0~95% 를 LEVEL 개수만큼 균등 분할. 첫 LEVEL 실패하면 false.
-  const collectByLevel = async () => {
-    if (LEVELS_TO_FETCH.length === 0) {
-      alert('가져올 레벨이 지정되지 않았습니다.');
-      return false;
-    }
-    const SPAN = 95 / LEVELS_TO_FETCH.length;
-    for (let i = 0; i < LEVELS_TO_FETCH.length; i++) {
-      const { difficult: lvD, label: lvL } = LEVELS_TO_FETCH[i];
-      const ok = await fetchOneLevel(lvD, lvL, i * SPAN, (i + 1) * SPAN);
-      if (!ok) return false; // 첫 LEVEL 실패하면 중단
-    }
-    console.log(`[step2] 전 LEVEL 합산: ${pageCount}페이지 / ${allCharts.length}곡 파싱 완료`);
-    return true;
-  };
-
-  // ===== series 모드 수집 — series.html 에 list=0..32 POST (시리즈 폴더 전곡) =====
-  // getAcSongList.js 와 동일한 엔드포인트 / POST body. 한 곡이 여러 시리즈에 중복
-  // 노출되므로 (title+diff) 키로 dedupe. 시리즈 0 실패 시 false, 그 외 시리즈는 skip.
-  const collectBySeries = async () => {
-    const SERIES_COUNT = 33;  // eagate list 파라미터는 0~32 (33개)
-    const seenChartKey = new Set();
-    for (let sn = 0; sn < SERIES_COUNT; sn++) {
-      const sd = sn + 1;  // 표시용 번호 — list 파라미터는 0~32 지만 화면엔 1~33 으로 보이게
-      updateProgress(`시리즈 ${sd}/${SERIES_COUNT} 요청 중...`, (sn / SERIES_COUNT) * 95);
-      let parsed;
-      try {
-        const body = new URLSearchParams({
-          list: String(sn),
-          play_style: style,
-          s: '1',
-          rival: (isRival && rivalToken) ? rivalToken : '',
-        });
-        const res = await fetch(SERIES_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: body.toString(),
-          credentials: 'include',
-        });
-        if (!res.ok) {
-          if (sn === 0) {
-            console.error(`[step2] 첫 시리즈 fetch 실패: HTTP ${res.status}`);
-            updateProgress(`시리즈 페이지 HTTP ${res.status} 에러`, 95);
-            alert(`시리즈 페이지를 가져오지 못했어요 (HTTP ${res.status}).\n로그인 상태인지 확인해주세요.`);
-            return false;
-          }
-          console.warn(`[step2] 시리즈 ${sd} HTTP ${res.status} — skip`);
-          continue;
-        }
-        const html = await res.text();
-        const doc = new DOMParser().parseFromString(html, 'text/html');
-        parsed = parseSeriesDoc(doc);
-      } catch (e) {
-        if (sn === 0) {
-          console.error('[step2] 첫 시리즈 fetch 실패:', e);
-          updateProgress(`시리즈 페이지 fetch 실패: ${e.message}`, 95);
-          alert(`시리즈 페이지 fetch 실패: ${e.message}`);
-          return false;
-        }
-        console.warn(`[step2] 시리즈 ${sd} fetch 실패: ${e.message} — skip`);
-        continue;
-      }
-      let added = 0;
-      for (const ch of parsed.charts) {
-        const k = ch.title + '|' + ch.diff;
-        if (seenChartKey.has(k)) continue;  // 다른 시리즈에서 이미 본 차트
-        seenChartKey.add(k);
-        allCharts.push(ch);
-        added++;
-      }
-      pageCount++;
-      console.log(`[step2] 시리즈 ${sd}/${SERIES_COUNT}: ${parsed.charts.length}차트 / 신규 ${added} (누적 ${allCharts.length})`);
-      updateProgress(
-        `시리즈 ${sd}/${SERIES_COUNT}: 신규 ${added}차트 (누적 ${allCharts.length})`,
-        ((sn + 1) / SERIES_COUNT) * 95,
-      );
-      // 첫 시리즈 곡이 0 이면 로그인 / 페이지 구조 의심
-      if (sn === 0 && allCharts.length === 0) {
-        alert('첫 시리즈에서 곡을 못 찾았어요. 로그인 상태가 아니거나 페이지 구조가 변경됐을 수 있습니다.');
-        return false;
-      }
-      // 사람처럼 시리즈 사이에 대기 (마지막 시리즈 뒤에는 생략)
-      if (sn < SERIES_COUNT - 1) {
-        await new Promise((r) => setTimeout(r, Math.round(randomDelay())));
-      }
-    }
-    console.log(`[step2] 전 시리즈 합산: ${pageCount}회 / ${allCharts.length}차트 파싱 완료`);
-    return true;
-  };
-
-  // 수집 실행 — fetchMode 분기 (eagate 모드만, DB 모드는 위에서 charts_json 으로 채움)
+  // 수집 실행 — eagateFetch 모듈에 위임 (v3.3.8+, modules/eagateFetch.js v0.0.1+).
+  // 이전 in-place 구현 (fetchOneLevel + collectByLevel + collectBySeries + parseDoc + parseSeriesDoc 약 400줄) 을
+  // 모듈로 분리. closure mutate 대신 { ok, charts, pageCount } return 형태. wrapper 가 dbData 없을 때만 모듈 로드.
   if (!dbData) {
-    const ok = fetchMode === 'series' ? await collectBySeries() : await collectByLevel();
-    if (!ok) return;  // 수집 실패 → 중단 (alert 는 각 수집 함수가 이미 표시)
+    if (!window.OhsorryEagateFetch || !window.OhsorryEagateFetch.collectCharts) {
+      alert('eagateFetch 모듈이 로드되지 않았어요. 페이지 새로고침 후 재시도해주세요.');
+      return;
+    }
+    const r = await window.OhsorryEagateFetch.collectCharts({
+      fetchMode,
+      levels: requestedLevels,
+      series: SERIES,
+      style, disp,
+      isRival, rivalToken,
+      updateProgress,
+    });
+    if (!r.ok) return;  // 수집 실패 → 중단 (alert 는 eagateFetch 내부에서 이미 표시)
+    allCharts = r.charts;
+    pageCount = r.pageCount;
     const unit = fetchMode === 'series' ? '시리즈' : '페이지';
     updateProgress(`완료! ${pageCount}${unit} ${allCharts.length}곡`, 100);
     // 잠시 후 진행 패널 제거 (점수 패널이 같은 위치에 뜨므로)
-    await new Promise((r) => setTimeout(r, 500));
+    await new Promise((rs) => setTimeout(rs, 500));
     document.getElementById('__dp_progress')?.remove();
 
     if (allCharts.length === 0) {

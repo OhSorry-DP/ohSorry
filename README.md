@@ -308,6 +308,12 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### wrapper v3.3.8 / core v0.0.346 / eagateFetch v0.0.1 — eagate 페이지 fetch 모듈 분리
+- 신규 [modules/eagateFetch.js](modules/eagateFetch.js) (`window.OhsorryEagateFetch`) — 기존 core 안의 closure 함수 `parseDoc` / `parseSeriesDoc` / `fetchOneLevel` / `collectByLevel` / `collectBySeries` + 관련 상수 (`STEP` / `MAX_PAGES` / `DELAY_MIN/MAX_MS` / `randomDelay`) + URL 빌드 (`BASE_URL` / `SERIES_URL` / `LEVELS_TO_FETCH`) 를 별도 모듈로 분리. 공개 API: `collectCharts({ fetchMode, levels, series, style, disp, isRival, rivalToken, updateProgress, alertFn })` → `{ ok, charts, pageCount, fetchMode, LEVELS_TO_FETCH }`. closure mutate 대신 결과 return.
+- core (v0.0.346) — 약 400 줄의 fetch 영역 제거. 본인 분석 모드 (`!dbData`) 일 때 `window.OhsorryEagateFetch.collectCharts(ctx)` 한 번 호출하고 결과를 `allCharts` / `pageCount` 에 할당. `fetchMode` 변수만 유지 (4.6 단계 series 모드 유령 차트 제거 분기에 사용).
+- wrapper (v3.3.8) — `EAGATE_URL` 추가, **`dbData` 없을 때만** `eagateFetch` 모듈 fetch. ohSorryWeb 게스트 페이지 / INFOhSorry 등 DB 모드는 supabase `charts_json` 으로 채우므로 이 모듈을 다운로드하지 않음.
+- core 파일 사이즈 ~79KB → ~68KB (-14%). DB 모드 흐름의 모듈 다운로드량 추가 감소.
+
 ### core v0.0.345 — DB 모드일 때 OSR/oldOSR/OSR135/adopt 호출·fetch 모두 skip
 - 기존엔 `isInfData` (INFOhSorry 가 series='INF' / version='INFv...' 로 올린 데이터) 일 때만 ★ 모델 재실행을 건너뛰고 `dbData.star_estimate` 를 그대로 사용했음. 일반 AC DB 데이터 (= ohSorryWeb 게스트 페이지 유저 카드) 도 supabase 의 `users.star` 가 이미 채택값이라 OSR 다시 돌릴 필요 없음.
 - 변경: `if (dbData)` 분기로 확장 — INF/AC 구분 없이 `dbData` 가 있으면 OSR/oldOSR/OSR135/adopt 호출 전부 skip 하고 `dbData.star_estimate` 를 `starEstimate` + `starEstimateNew` (추천 풀 baseStar) 양쪽에 그대로 셋업.
