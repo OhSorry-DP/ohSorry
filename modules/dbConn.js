@@ -1,4 +1,4 @@
-// dbConn.js — 오소리 DB 통신 모듈 (v0.0.403)
+// dbConn.js — 오소리 DB 통신 모듈 (v0.0.404)
 //
 // 새 디비 (users + user_radars + scores) 로 마이그레이션.
 //   - upsertUserProfile: upsert_user + upsert_user_radar (sp/dp)
@@ -386,11 +386,41 @@ window.OhsorryDb = (function () {
         console.warn('[OhsorryDb] chart scores upsert 예외:', e && e.message);
       }
     }
+
+    // 5. 오소리 패턴 vec (rateRef 잔차) upsert — ohSorryWeb 분석탭의 percentile 비교 분포.
+    //    result.userVec (calcOhsorryCore step2 결과) + iidx_id 있을 때만.
+    const iidxId = result.dbPayload && result.dbPayload.iidx_id;
+    if (iidxId && result.userVec) {
+      try {
+        await callUpsertPatternVec(iidxId, result.userVec);
+        console.log('[OhsorryDb] pattern vec upsert 성공');
+      } catch (e) {
+        console.warn('[OhsorryDb] pattern vec upsert 예외:', e && e.message);
+      }
+    }
     return out;
   }
 
+  // 오소리 패턴 vec upsert — user_radars 의 os_* 컬럼 (play_style=1, DP).
+  async function callUpsertPatternVec(iidxId, vec) {
+    const numOrNull = (v) => typeof v === 'number' && isFinite(v) ? v : null;
+    await callRpc('upsert_user_pattern_vec', {
+      p_iidx_id:    iidxId,
+      p_os_notes:   numOrNull(vec.NOTES),
+      p_os_chord:   numOrNull(vec.CHORD),
+      p_os_peak:    numOrNull(vec.PEAK),
+      p_os_charge:  numOrNull(vec.CHARGE),
+      p_os_scratch: numOrNull(vec.SCRATCH),
+      p_os_soflan:  numOrNull(vec['SOF-LAN']),
+      p_os_phrase:  numOrNull(vec.PHRASE),
+      p_os_jack:    numOrNull(vec.JACK),
+      p_os_trill:   numOrNull(vec.TRILL),
+      p_os_rand:    numOrNull(vec.RAND),
+    });
+  }
+
   return {
-    VERSION: '0.0.403',
+    VERSION: '0.0.404',
     upsertUserProfile: upsertUserProfile,
     upsertUserChartScores: upsertUserChartScores,
     uploadResult: uploadResult,

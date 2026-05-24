@@ -308,6 +308,11 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### 2026-05-25 — dbConn v0.0.404 — pattern vec supabase upsert
+- [modules/dbConn.js](modules/dbConn.js) — `uploadResult` 의 5단계로 `callUpsertPatternVec` 추가. `result.userVec` (calcOhsorryCore step2 의 rateRef 기준 vec) 을 supabase `user_radars` 의 `os_*` 10 컬럼에 upsert (DP row 만).
+- 사전 조건: [ohSorryAdmin migrate_add_os_vec_columns.sql](../ohSorryAdmin/sql/migrate_add_os_vec_columns.sql) + [setup_pattern_vec_rpc.sql](../ohSorryAdmin/sql/setup_pattern_vec_rpc.sql) 적용.
+- 용도: ohSorryWeb 분석탭의 사용자 percentile (`get_pattern_vec_percentiles` RPC) 비교 분포 누적.
+
 ### 2026-05-25 — calcWeakness analyzeFeature default topN 5 → 30
 - [modules/calcWeakness.js](modules/calcWeakness.js) — `analyzeFeature` 의 `topN` default 늘림. UI 는 보통 top 5 만 표시하지만 contributors 의 나머지가 추천곡 fallback 풀로 활용 가능 (ohSorryWeb 분석탭에서 기여곡 Top 5 외 차트를 추천곡 부족분 채움).
 
