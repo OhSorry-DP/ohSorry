@@ -506,15 +506,18 @@
         var key2 = sid2 + '|' + cn2;
         var pInfo = played[key2];
         var playedRate = pInfo ? pInfo.rate : null;
-        // 만점에 가까운 곡 (rate >= 95%) 만 제외. 강점 기여 곡 (rate 80~94) 도 추천 풀 포함.
+        // 만점에 가까운 곡 (rate >= 95%) 제외.
         if (playedRate != null && playedRate >= 95) continue;
+        var recBM = recRat ? bucketMeanOf(recRat) : null;
+        // 이미 평균 이상 친 곡 (residual >= 0, 강점 기여중) 제외 — 추천 의미 없음.
+        if (playedRate != null && typeof recBM === 'number' && playedRate >= recBM) continue;
         recommends.push({
           songId: sid2, chartName: cn2, title: sp2.t, lv: lv2, pt: pt2,
           rate: playedRate,
           lampNum: pInfo ? pInfo.lampNum : null,
           djLevel: pInfo ? pInfo.djLevel : null,
           isNp: playedRate == null,
-          bucketMean: recRat ? bucketMeanOf(recRat) : null,
+          bucketMean: recBM,
         });
       }
     }
