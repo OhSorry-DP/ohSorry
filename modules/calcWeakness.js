@@ -43,13 +43,25 @@
     return out;
   }
 
-  // 유저 약점/강점 9 feature 벡터.
-  // opts: { allCharts, patternsMap, normFn, minLv = 11 }
+  // 유저 약점/강점 10 feature 벡터.
+  // opts:
+  //   allCharts    유저 차트
+  //   patternsMap  patterns-all-slim.json
+  //   normFn       title 정규화
+  //   ratingMap    ohSorryRating.json 의 ratings (array) 또는 {key: rating} map.
+  //                  없으면 lv 단위 bucket (legacy), 있으면 ohSorryRating 의 estEc/Hc/Exh 0.5 단위 bucket 분석.
+  //   minLv        legacy (ratingMap 없을 때) 적용
+  // 알고리즘 (ratingMap 있을 때):
+  //   - 각 차트 → estEc, estHc, estExh 3 entry 로 펼침
+  //   - bucket = floor(★ × 2) / 2 (0.5 단위)
+  //   - bucket 별 평균 rate → 잔차 = rate - bucket평균
+  //   - feature 별 가중평균 (entry 기준)
   function calcUserWeakness(opts) {
     var allCharts = opts.allCharts || [];
     var patternsMap = opts.patternsMap || {};
     var normFn = opts.normFn || function (s) { return s; };
     var minLv = typeof opts.minLv === 'number' ? opts.minLv : 11;
+    var ratingMap = opts.ratingMap;
 
     // patternsMap 의 title norm → songId 매핑 (한 번만)
     var titleToId = {};
@@ -60,9 +72,27 @@
       if (k && !titleToId[k]) titleToId[k] = id;
     }
 
-    // 매칭 + lv 별 묶기
-    var byLv = {};
+    // ratingMap → key map
+    var ratingsByKey = null;
+    if (ratingMap) {
+      if (Array.isArray(ratingMap)) {
+        ratingsByKey = {};
+        for (var rI = 0; rI < ratingMap.length; rI++) {
+          var rt = ratingMap[rI];
+          if (!rt || !rt.title || !rt.diff) continue;
+          ratingsByKey[normFn(rt.title) + '|' + rt.diff] = rt;
+        }
+      } else if (typeof ratingMap === 'object') {
+        ratingsByKey = ratingMap;
+      }
+    }
+
+    var STAGES = [['estEc', 'ec'], ['estHc', 'hc'], ['estExh', 'exh']];
+    var bucketAgg = {};  // ratingMap 모드 — bucket(★) → {sum, n, mean}
+    var byLv = {};        // legacy — lv → entries
+    var entries = [];     // 모든 entry (ratingMap 모드는 chart × 3, legacy 모드는 chart × 1)
     var matched = 0;
+
     for (var i = 0; i < allCharts.length; i++) {
       var c = allCharts[i];
       if (!c || !c.title || !c.diff) continue;
@@ -73,30 +103,62 @@
       var sp = patternsMap[sid];
       if (!sp || !sp.c || !sp.c[cn]) continue;
       var lv = sp.c[cn].lv;
-      if (lv < minLv) continue;
       var pt = avgPt(sp.c[cn]);
-      // rate: scorePercent 우선 (ereter), 없으면 exScore/noteCount 로 계산 (ohSorry allCharts)
       var rate;
       if (typeof c.scorePercent === 'number') rate = c.scorePercent;
       else if (typeof c.exScore === 'number' && typeof c.noteCount === 'number' && c.noteCount > 0) {
         rate = (c.exScore / (c.noteCount * 2)) * 100;
       } else continue;
-      if (!byLv[lv]) byLv[lv] = [];
-      byLv[lv].push({ rate: rate, pt: pt });
-      matched++;
+
+      if (ratingsByKey) {
+        // ratingMap 매칭 → estEc/Hc/Exh 3 entry 펼치기
+        var ratKey = normFn(c.title) + '|' + c.diff;
+        var rat = ratingsByKey[ratKey];
+        if (!rat) continue;
+        matched++;
+        for (var si = 0; si < STAGES.length; si++) {
+          var estK = STAGES[si][0];
+          var stage = STAGES[si][1];
+          var star = rat[estK];
+          if (typeof star !== 'number') continue;
+          var bucket = Math.floor(star * 2) / 2;
+          entries.push({
+            chartId: sid + '|' + cn, title: c.title, diff: c.diff, lv: lv,
+            stage: stage, star: star, bucket: bucket,
+            rate: rate, pt: pt, lampNum: c.lampNum,
+          });
+          if (!bucketAgg[bucket]) bucketAgg[bucket] = { sum: 0, n: 0 };
+          bucketAgg[bucket].sum += rate;
+          bucketAgg[bucket].n += 1;
+        }
+      } else {
+        // legacy — lv 단위 bucket
+        if (lv < minLv) continue;
+        matched++;
+        var entry = {
+          chartId: sid + '|' + cn, title: c.title, diff: c.diff, lv: lv,
+          rate: rate, pt: pt, lampNum: c.lampNum,
+        };
+        if (!byLv[lv]) byLv[lv] = [];
+        byLv[lv].push(entry);
+        entries.push(entry);
+      }
     }
 
-    // lv 별 잔차 = rate - lv평균
-    var all = [];
-    for (var lv in byLv) {
-      if (!Object.prototype.hasOwnProperty.call(byLv, lv)) continue;
-      var arr = byLv[lv];
-      var sum = 0;
-      for (var j = 0; j < arr.length; j++) sum += arr[j].rate;
-      var mean = sum / arr.length;
-      for (var j2 = 0; j2 < arr.length; j2++) {
-        arr[j2].residual = arr[j2].rate - mean;
-        all.push(arr[j2]);
+    // 잔차 계산
+    if (ratingsByKey) {
+      for (var bk in bucketAgg) bucketAgg[bk].mean = bucketAgg[bk].sum / bucketAgg[bk].n;
+      for (var ei = 0; ei < entries.length; ei++) {
+        entries[ei].residual = entries[ei].rate - bucketAgg[entries[ei].bucket].mean;
+      }
+    } else {
+      for (var lv2 in byLv) {
+        if (!Object.prototype.hasOwnProperty.call(byLv, lv2)) continue;
+        var arr = byLv[lv2];
+        var sum = 0;
+        for (var j = 0; j < arr.length; j++) sum += arr[j].rate;
+        var mean = sum / arr.length;
+        for (var j2 = 0; j2 < arr.length; j2++) arr[j2].residual = arr[j2].rate - mean;
       }
     }
 
@@ -105,14 +167,31 @@
     for (var fi = 0; fi < FEATS.length; fi++) {
       var f = FEATS[fi];
       var sumRP = 0, sumP = 0;
-      for (var k2 = 0; k2 < all.length; k2++) {
-        sumRP += all[k2].residual * all[k2].pt[f];
-        sumP += all[k2].pt[f];
+      for (var k2 = 0; k2 < entries.length; k2++) {
+        var ptF = entries[k2].pt[f] || 0;
+        sumRP += entries[k2].residual * ptF;
+        sumP += ptF;
       }
       vec[f] = sumP > 0 ? sumRP / sumP : 0;
     }
-    vec.__meta = { matched: matched, lvCounts: countLv(byLv) };
+    vec.__meta = {
+      matched: matched,
+      entries: entries.length,
+      mode: ratingsByKey ? 'rating' : 'lv',
+      lvCounts: ratingsByKey ? null : countLv(byLv),
+      buckets: ratingsByKey ? countBuckets(bucketAgg) : null,
+    };
+    // __entries / __bucketAgg 는 analyzeFeature 가 재사용하도록 노출 (UI 표시 X)
+    vec.__entries = entries;
+    vec.__bucketAgg = bucketAgg;
+    vec.__byLv = byLv;
     return vec;
+  }
+
+  function countBuckets(bucketAgg) {
+    var out = {};
+    for (var bk in bucketAgg) out[bk] = bucketAgg[bk].n;
+    return out;
   }
 
   function countLv(byLv) {
@@ -207,9 +286,13 @@
   //   patternsMap  patterns-all-slim.json
   //   normFn       title 정규화
   //   userVec      이미 계산한 userVec (없으면 calcUserWeakness 내부 호출 — 비용 큼)
-  //   baseStar     사용자 추정 ★ (추천곡 ★ 범위 제한 용)
+  //   ratingMap    ohSorryRating.json 의 ratings 배열 (또는 {title|diff: rating} map). 추천 ★ 범위 비교용.
+  //                ratingMap 없으면 baseStar 비교 skip — 모든 차트 추천 후보.
+  //   baseStar     ohSorryRating 의 난이도 기준 ★ (estEc/estHc/estExh 와 같은 단위).
+  //                차트의 estEc/estHc/estExh 중 어느 하나라도 baseStar ± rangeN 안 들어가면 후보.
+  //   rangeN       baseStar ± rangeN 범위 (default 1)
   //   topN         default 5
-  //   minLv        default 11
+  //   minLv        default 11 (잔차 분석 lv 임계 — 추천 풀은 영향 X)
   // return:
   //   { feat, value, isStrength, summary: {strongAvg, allAvg, gap, n}, contributors, recommends }
   function analyzeFeature(opts) {
@@ -218,15 +301,34 @@
     var allCharts = opts.allCharts || [];
     var patternsMap = opts.patternsMap || {};
     var normFn = opts.normFn || function (s) { return s; };
-    var userVec = opts.userVec || calcUserWeakness({ allCharts: allCharts, patternsMap: patternsMap, normFn: normFn, minLv: opts.minLv });
+    var userVec = opts.userVec || calcUserWeakness({
+      allCharts: allCharts, patternsMap: patternsMap, normFn: normFn,
+      ratingMap: opts.ratingMap, minLv: opts.minLv,
+    });
     var baseStar = opts.baseStar;
+    var rangeN = typeof opts.rangeN === 'number' ? opts.rangeN : 1;
     var topN = opts.topN || 5;
-    var minLv = typeof opts.minLv === 'number' ? opts.minLv : 11;
+
+    // ratingMap — array 면 norm(title) + '|' + diff key 로 map 변환. 이미 map 이면 그대로.
+    var CHART2DIFF = { DP_NOR: 'NORMAL', DP_HYP: 'HYPER', DP_ANO: 'ANOTHER', DP_LEG: 'LEGGENDARIA' };
+    var ratingsByKey = null;
+    if (opts.ratingMap) {
+      if (Array.isArray(opts.ratingMap)) {
+        ratingsByKey = {};
+        for (var ri = 0; ri < opts.ratingMap.length; ri++) {
+          var rt = opts.ratingMap[ri];
+          if (!rt || !rt.title || !rt.diff) continue;
+          ratingsByKey[normFn(rt.title) + '|' + rt.diff] = rt;
+        }
+      } else if (typeof opts.ratingMap === 'object') {
+        ratingsByKey = opts.ratingMap;
+      }
+    }
 
     var value = userVec[feat] || 0;
     var isStrength = value >= 0;
 
-    // title norm → songId
+    // title norm → songId (recommends 풀 매칭용)
     var titleToId = {};
     for (var id in patternsMap) {
       if (!Object.prototype.hasOwnProperty.call(patternsMap, id)) continue;
@@ -235,41 +337,32 @@
       if (k && !titleToId[k]) titleToId[k] = id;
     }
 
-    // 유저 차트 매칭 + lv 평균 + 잔차
-    var lvAgg = {};
-    var charts = [];
-    for (var i = 0; i < allCharts.length; i++) {
-      var c = allCharts[i];
-      if (!c || !c.title || !c.diff) continue;
-      var cn = DIFF2CHART[c.diff];
-      if (!cn) continue;
-      var sid = titleToId[normFn(c.title)];
-      if (!sid) continue;
-      var sp = patternsMap[sid];
-      if (!sp || !sp.c || !sp.c[cn]) continue;
-      var lv = sp.c[cn].lv;
-      if (lv < minLv) continue;
-      var pt = avgPt(sp.c[cn])[feat] || 0;
-      var rate;
-      if (typeof c.scorePercent === 'number') rate = c.scorePercent;
-      else if (typeof c.exScore === 'number' && typeof c.noteCount === 'number' && c.noteCount > 0) {
-        rate = (c.exScore / (c.noteCount * 2)) * 100;
-      } else continue;
-      charts.push({
-        title: c.title, diff: c.diff, lv: lv, pt: pt, rate: rate,
-        lampNum: c.lampNum, songId: sid, chartName: cn,
-      });
-      if (!lvAgg[lv]) lvAgg[lv] = { sum: 0, n: 0 };
-      lvAgg[lv].sum += rate;
-      lvAgg[lv].n += 1;
+    // userVec.__entries 활용 — calcUserWeakness 가 이미 잔차 + bucket 계산함.
+    //   ratingMap 모드: 한 차트가 estEc/Hc/Exh 3 entry 로 펼쳐짐. chartId 별 dedup.
+    //   legacy 모드: 한 차트가 1 entry.
+    var entries = userVec.__entries || [];
+    var byChart = {};
+    for (var ei = 0; ei < entries.length; ei++) {
+      var en = entries[ei];
+      if (!byChart[en.chartId]) {
+        var parts = en.chartId.split('|');
+        byChart[en.chartId] = {
+          chartId: en.chartId, songId: parts[0], chartName: parts[1],
+          title: en.title, diff: en.diff, lv: en.lv,
+          pt: (en.pt && en.pt[feat]) || 0,
+          rate: en.rate, lampNum: en.lampNum,
+          residualSum: 0, n: 0,
+        };
+      }
+      byChart[en.chartId].residualSum += en.residual;
+      byChart[en.chartId].n += 1;
     }
-    for (var lvk in lvAgg) lvAgg[lvk].mean = lvAgg[lvk].sum / lvAgg[lvk].n;
-
-    // 잔차 + 기여도
-    for (var j = 0; j < charts.length; j++) {
-      var ch = charts[j];
-      ch.residual = ch.rate - lvAgg[ch.lv].mean;
-      ch.contrib = ch.residual * ch.pt;
+    var charts = [];
+    for (var ck in byChart) {
+      var bch = byChart[ck];
+      bch.residual = bch.residualSum / bch.n;
+      bch.contrib = bch.residual * bch.pt;
+      charts.push(bch);
     }
 
     // top 기여 곡 — 부호별 (강점=잘 친 / 약점=못 친)
@@ -321,11 +414,24 @@
         if (!Object.prototype.hasOwnProperty.call(sp2.c, cn2)) continue;
         var ch2 = sp2.c[cn2];
         var lv2 = ch2.lv;
-        if (baseStar != null) {
-          // baseStar 근처 (-2 ~ +2) 만. +2 까지 도전 lv 포함 (contributors lv12 곡들 추천에 들어가도록).
-          if (lv2 < baseStar - 2 || lv2 > baseStar + 2) continue;
-          // baseStar 2.5+ (초보 이상) — lv10 미만 곡은 추천 안 함 (저레벨 곡 추천 의미 X)
-          if (baseStar >= 2.5 && lv2 < 10) continue;
+        // baseStar 비교 — ratingMap 의 estEc/estHc/estExh 중 어느 하나라도 baseStar ± rangeN 안 들어가면 후보.
+        //   baseStar 는 ohSorryRating 의 난이도 ★ 단위 (estEc/estHc/estExh 와 같은 단위).
+        //   ratingMap 에 매칭 안 되는 차트 (lv1~10 차트 — ratings 는 lv11/12 만 가짐) 는 추천 풀 제외.
+        //   baseStar 또는 ratingMap 없으면 비교 skip (모든 차트 후보).
+        if (baseStar != null && ratingsByKey) {
+          var diff2 = CHART2DIFF[cn2];
+          var rat = diff2 ? ratingsByKey[normFn(sp2.t) + '|' + diff2] : null;
+          if (!rat) continue;
+          var inRange = false;
+          var ests = [rat.estEc, rat.estHc, rat.estExh];
+          for (var ei = 0; ei < ests.length; ei++) {
+            var ev = ests[ei];
+            if (typeof ev === 'number' && ev >= baseStar - rangeN && ev <= baseStar + rangeN) {
+              inRange = true;
+              break;
+            }
+          }
+          if (!inRange) continue;
         }
         var pt2 = avgPt(ch2)[feat] || 0;
         if (pt2 <= 0) continue;  // 그 feature 가 아예 없는 곡만 제외
@@ -341,16 +447,17 @@
       }
     }
     // 추출 룰 — 친 곡 (기여도 큰 곡) 3 + NP (새 곡) 2 조합.
-    //   친 곡 정렬 — |기여도| desc (= |pt × (rate - lvMean)|). contributors 와 같은 기준 (부호 무관).
+    //   친 곡 정렬 — |기여도| desc (= |pt × byChart.residual|). contributors 와 같은 기준 (부호 무관).
     //     강점 케이스 (잘 친 + pt 강한) / 약점 케이스 (못 친 + pt 강한) 둘 다 우선.
-    //     lv11+ 만 lvAgg 있음. 그 외 lv (10 등) 는 fallback 70.
+    //     byChart 에 entry 없는 차트 (잔차 분석 안 된 차트) — absContrib 0.
     //   NP 정렬 — pt desc (단순).
     //   부족 시 반대 풀에서 보충해서 총 topN 채움.
     var played2 = recommends.filter(function (r) { return !r.isNp; });
     var np = recommends.filter(function (r) { return r.isNp; });
     var absContrib = function (r) {
-      var lvMean = lvAgg[r.lv] ? lvAgg[r.lv].mean : 70;
-      return Math.abs(r.rate - lvMean) * r.pt;
+      var bch = byChart[r.songId + '|' + r.chartName];
+      if (!bch) return 0;
+      return Math.abs(bch.residual) * (r.pt || 0);
     };
     played2.sort(function (a, b) {
       var ca = absContrib(a);

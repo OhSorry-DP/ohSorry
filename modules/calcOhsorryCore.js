@@ -1079,7 +1079,7 @@ window.OhsorryCore = {
       const k = norm(patternsMap[id].t || '');
       if (k && !patternsTitleMap[k]) patternsTitleMap[k] = id;
     }
-    userVec = weaknessLib.calcUserWeakness({ allCharts, patternsMap, normFn: norm });
+    userVec = weaknessLib.calcUserWeakness({ allCharts, patternsMap, normFn: norm, ratingMap: ohSorryRatings });
     const vecLog = {};
     for (const f of weaknessLib.FEATS) vecLog[f] = +userVec[f].toFixed(2);
     console.log(`[step2] userVec (${userVec.__meta.matched}곡 매칭):`, vecLog);
