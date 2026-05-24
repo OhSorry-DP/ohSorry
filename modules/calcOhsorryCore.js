@@ -1147,6 +1147,7 @@ window.OhsorryCore = {
     };
     for (const c of allCharts) {
       if (recLevelMode === 'lv12' && c.gameLevel !== 12) continue;
+      if (recLevelMode === 'lv11+12' && c.gameLevel !== 11 && c.gameLevel !== 12) continue;
       const under = c.lampNum < threshold;
       const reachedForDj = reachedStageLamp(c.lampNum);
       // DJ레벨 미달 풀 제외 모드 — 클리어램프 미달 곡만 후보로 (램프 도달·DJ레벨 미달 곡 제외).
@@ -1277,9 +1278,11 @@ window.OhsorryCore = {
   //   threshold 6 = EX-HARD lamp 이상 클리어. getDiffField 'exh' = EXH ★.
   //   buildPools 의 새 룰 (topClearStar 기반 강/약/정리) + sample15 강점 매치 desc 자동 적용.
   //   accuracyOK = AAA only, reachedStageLamp = lamp >= 6 — buildPools 내부 isEXH 분기로 처리.
+  //   recLevelMode 'lv12' → 'lv11+12' override — EC/HC 와 동일 lv 범위 (lv11 차트도 EXH 추천 풀 포함).
   const buildExhRecs = (baseStar, recLevelMode, djMode) => {
     if (baseStar == null) return [];
-    return buildRecs(6, 'exh', baseStar, recLevelMode, djMode);
+    const exhMode = recLevelMode === 'lv12' ? 'lv11+12' : recLevelMode;
+    return buildRecs(6, 'exh', baseStar, exhMode, djMode);
   };
 
   // EC 는 실력값 없을 때 0.3 으로 fallback (저렙 진입자도 추천 받을 수 있게)
