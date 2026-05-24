@@ -356,7 +356,7 @@
   //   baseStar     ohSorryRating 의 난이도 기준 ★ (estEc/estHc/estExh 와 같은 단위).
   //                차트의 estEc/estHc/estExh 중 어느 하나라도 baseStar ± rangeN 안 들어가면 후보.
   //   rangeN       baseStar ± rangeN 범위 (default 1)
-  //   topN         default 5
+  //   topN         default 30 (UI 표시 5 외에 fallback 풀로 활용 가능)
   //   minLv        default 11 (잔차 분석 lv 임계 — 추천 풀은 영향 X)
   // return:
   //   { feat, value, isStrength, summary: {strongAvg, allAvg, gap, n}, contributors, recommends }
@@ -372,7 +372,7 @@
     });
     var baseStar = opts.baseStar;
     var rangeN = typeof opts.rangeN === 'number' ? opts.rangeN : 1;
-    var topN = opts.topN || 5;
+    var topN = opts.topN || 30;
 
     // ratingMap — array 면 norm(title) + '|' + diff key 로 map 변환. 이미 map 이면 그대로.
     // zasaMap 도 같이 결합 — ratingMap 미수록 차트 (lv10) 추천 풀에도 포함.

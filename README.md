@@ -308,6 +308,9 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### 2026-05-25 — calcWeakness analyzeFeature default topN 5 → 30
+- [modules/calcWeakness.js](modules/calcWeakness.js) — `analyzeFeature` 의 `topN` default 늘림. UI 는 보통 top 5 만 표시하지만 contributors 의 나머지가 추천곡 fallback 풀로 활용 가능 (ohSorryWeb 분석탭에서 기여곡 Top 5 외 차트를 추천곡 부족분 채움).
+
 ### 2026-05-25 — calcWeakness rateRef (absolute reference) 옵션 + calcOhsorryCore 통합
 - [modules/calcWeakness.js](modules/calcWeakness.js) — `calcUserWeakness` / `analyzeFeature` 에 `rateRef` 옵션 추가. rateRef 있으면 self-relative bucketMean 대신 absolute reference (★ × 0.5 bucket → 평균 EX rate) 기준 잔차 분석 → 사용자간 vec 직접 비교 가능. bucket 영역 밖은 lowest/highest bucket clamp.
 - [modules/calcOhsorryCore.js](modules/calcOhsorryCore.js) — `rate-reference-slim.json` (gist 신규) fetch + `calcUserWeakness` 에 rateRef 전달. 실패 시 self-relative fallback.
