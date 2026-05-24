@@ -220,6 +220,12 @@ window.OhsorryCore = {
   const CALC_ADOPT_URL = GIST_RAW + '/adopt.js';
   // ohsorryShelf.js — renderChartRow (추천곡 곡명 클릭 토스트용). 실패해도 무시.
   const CALC_SHELF_URL = GIST_RAW + '/ohsorryShelf.js';
+  // 패턴 분석 — 유저 약점/강점 9 feature 벡터 + 차트별 강점 매치 점수 (추천 정렬 가중치).
+  //   patterns-all-slim.json: 2348 차트 × 9 feature pt (DP 1P/2P 분리).
+  //   calcWeakness.js: 유저 차트 점수 + patterns → 약점/강점 벡터 + chartStrengthMatch helper.
+  //   추천에 영향 — sample15 정렬을 강점 매치 desc 로 (기존 count desc 대신).
+  const PATTERNS_URL = GIST_RAW + '/patterns-all-slim.json';
+  const CALC_WEAKNESS_URL = GIST_RAW + '/calcWeakness.js';
 
   // 외부 lib 메모리 캐시 (페이지 lifetime 유지) — batch (라이벌 다수) 처리 시 두 번째부터 fetch skip
   if (!window.__ohsorryLibCache) window.__ohsorryLibCache = {};
@@ -328,6 +334,25 @@ window.OhsorryCore = {
     }
   } catch (e) {
     console.warn('[step2] ohsorryShelf.js 로드 실패 (무시 가능):', e.message);
+  }
+
+  // 패턴 데이터 + weakness 모듈 fetch (실패 시 추천 가중치 없이 진행, 기존 정렬 fallback)
+  let patternsMap = null, weaknessLib = null;
+  try {
+    const { data: pData, source: pSrc } = await loadWithCache(PATTERNS_URL, 'ohSorry:patterns', true);
+    patternsMap = pData;
+    console.log(`[step2] patterns-all-slim.json ${Object.keys(patternsMap).length}곡 로드 (${pSrc})`);
+  } catch (e) {
+    console.warn('[step2] patterns-all-slim.json 로드 실패 (가중치 비활성):', e.message);
+  }
+  try {
+    const { data: wSrc, source: wSrcType } = await loadWithCache(CALC_WEAKNESS_URL, 'ohSorry:libWeakness', false);
+    (new Function(wSrc))();
+    weaknessLib = window.OhsorryWeakness;
+    if (!weaknessLib) throw new Error('OhsorryWeakness global 등록 실패');
+    console.log(`[step2] calcWeakness.js 로드 (${wSrcType})`);
+  } catch (e) {
+    console.warn('[step2] calcWeakness.js 로드 실패 (가중치 비활성):', e.message);
   }
 
   // -------- 1. 곡명 정규화 + 인덱싱 --------
@@ -1045,6 +1070,29 @@ window.OhsorryCore = {
   let recBaseStar = recBaseMode === 'ereter' ? eraterTrueStar : ohsorryRecBase;
   console.log(`[step2] 추천곡 기준: ${recBaseMode} (★${recBaseStar != null ? recBaseStar.toFixed(2) : 'N/A'}, ohsorry=OSR단독 ${ohsorryRecBase != null ? ohsorryRecBase.toFixed(2) : 'N/A'})`);
 
+  // 유저 약점/강점 9 feature 벡터 + 차트별 강점 매치 점수 (추천 정렬 가중치).
+  // patterns 또는 calcWeakness lib 로드 실패 시 가중치 없이 (chartStrengthMatch 항상 0 → fallback to count desc).
+  let userVec = null;
+  const patternsTitleMap = {};
+  if (patternsMap && weaknessLib) {
+    for (const id in patternsMap) {
+      const k = norm(patternsMap[id].t || '');
+      if (k && !patternsTitleMap[k]) patternsTitleMap[k] = id;
+    }
+    userVec = weaknessLib.calcUserWeakness({ allCharts, patternsMap, normFn: norm });
+    const vecLog = {};
+    for (const f of weaknessLib.FEATS) vecLog[f] = +userVec[f].toFixed(2);
+    console.log(`[step2] userVec (${userVec.__meta.matched}곡 매칭):`, vecLog);
+  }
+  const chartStrengthMatch = (r) => {
+    if (!userVec || !weaknessLib) return 0;
+    const sid = patternsTitleMap[norm(r.title || '')];
+    if (!sid) return 0;
+    const cn = weaknessLib.DIFF2CHART[r.chart];
+    if (!cn || !patternsMap[sid] || !patternsMap[sid].c[cn]) return 0;
+    return weaknessLib.chartStrengthMatch(patternsMap[sid].c[cn], userVec);
+  };
+
   const recsEC = [], recsHC = [], recsEXH = [];
 
   // Fisher-Yates shuffle
@@ -1057,35 +1105,36 @@ window.OhsorryCore = {
     return a;
   };
 
-  // 도전곡 최대 offset — baseStar 위로 얼마까지 도전곡 풀에 포함할지.
-  //   ★0.5 → +1.0, ★14.0 → +0.3 선형 보간.
-  const challengeOffset = (baseStar) => {
-    if (baseStar <= 0.5) return 1.0;
-    if (baseStar >= 14.0) return 0.3;
-    return 1.0 - ((baseStar - 0.5) * 0.7) / 13.5;
-  };
-
-  // 3 풀 분리 — stage 별 범위:
-  //   HC (기본):
-  //     easy = [base, base+0.2], hard = [base+offset-0.3, base+offset], cleanup = [0, base)
-  //   EC (살짝 아래로 시프트 — EASY 클리어 부담이 적어 자기 ★ 살짝 아래도 도전 권장):
-  //     easy = [base-0.1, base+0.1], hard = [base+offset-0.4, base+offset-0.1], cleanup = [0, base-0.1)
-  //   (cleanup 의 상한은 if-else 순서 덕분에 자연스럽게 easy 의 하한까지로 좁혀짐)
-  // 추천 풀 — 카테고리 (미도달 / 도달DJ미도달) × 분류 (hard / easy / cleanup)
+  // 추천 풀 — 카테고리 (미도달 / 도달DJ미도달) × 분류 (hard / easy / cleanup).
+  // 새 룰 (2026-05-24~):
+  //   topClearStar = 그 stage 를 클리어 한 차트의 ★ 최댓값 (e[ec/hc])
+  //   hi = max(topClearStar, baseStar), lo = min(topClearStar, baseStar)
+  //   강도전 (hard)   = [hi, hi+1.0]
+  //   약도전 (easy)   = [lo, hi)
+  //   정리곡 (cleanup) = [0, lo)
+  //   topClearStar < baseStar (초보·자사★ 미도달 케이스) 시 → 강도전 기준이 baseStar 로 자동 fallback
   const buildPools = (threshold, getDiffField, baseStar, recLevelMode, djMode) => {
     const empty = { hard: [], easy: [], cleanup: [] };
     const underLamp = { hard: [], easy: [], cleanup: [] };       // lampNum < threshold
     const reached   = { hard: [], easy: [], cleanup: [] };       // lampNum >= threshold && !accuracyOK
     if (baseStar == null) return { underLamp: empty, reached: empty };
-    const offset = challengeOffset(baseStar);
     const isEC = getDiffField === 'ec';
-    const hardMax = baseStar + offset - (isEC ? 0.1 : 0);
-    const hardMin = baseStar + offset - (isEC ? 0.4 : 0.3);
-    const easyMax = baseStar + (isEC ? 0.1 : 0.2);
-    const easyMin = baseStar - (isEC ? 0.1 : 0);
-    // stage 별 정확도 임계치 — EC: A 이상이면 OK / HC: AA 이상 / EXH: AAA 만
     const isHC  = getDiffField === 'hc';
     const isEXH = getDiffField === 'exh';
+    // 그 stage 클리어 한 차트들의 ★ 중 최댓값
+    let topClearStar = 0;
+    for (const c of allCharts) {
+      if (c.lampNum < threshold) continue;
+      const e0 = ereterMap.get(norm(c.title) + '|' + c.diff);
+      if (!e0 || typeof e0[getDiffField] !== 'number') continue;
+      if (e0[getDiffField] > topClearStar) topClearStar = e0[getDiffField];
+    }
+    const hi = Math.max(topClearStar, baseStar);
+    const lo = Math.min(topClearStar, baseStar);
+    const hardMin = hi;
+    const hardMax = hi + 1.0;
+    const easyMin = lo;
+    // stage 별 정확도 임계치 — EC: A 이상이면 OK / HC: AA 이상 / EXH: AAA 만
     const accuracyOK = (djLv) => {
       if (isEXH) return djLv === 'AAA';
       if (isHC)  return djLv === 'AAA' || djLv === 'AA';
@@ -1134,11 +1183,12 @@ window.OhsorryCore = {
         margin: baseStar - dv,
         gameLevel,
       };
-      // dv 기반 분류 — stage 도달 여부 무관 (도달 곡도 dv 가 hard 범위면 hard 로)
+      // dv 기반 분류 (새 룰) — stage 도달 여부 무관 (도달 곡도 dv 가 hard 범위면 hard 로)
+      //   강도전 [hardMin = hi, hardMax = hi+1]  /  약도전 [easyMin = lo, hardMin)  /  정리곡 [0, easyMin)
       let cls;
-      if (dv >= hardMin && dv <= hardMax && dv > easyMax) cls = 'hard';
-      else if (dv >= easyMin && dv <= easyMax) cls = 'easy';
-      else if (dv < baseStar) {
+      if (dv >= hardMin && dv <= hardMax) cls = 'hard';
+      else if (dv >= easyMin && dv < hardMin) cls = 'easy';
+      else if (dv < easyMin) {
         if (isEC && typeof e.hc === 'number' && e.hc < baseStar - 3) continue;  // 너무 쉬운 곡 제외
         cls = 'cleanup';
       } else continue;
@@ -1152,10 +1202,16 @@ window.OhsorryCore = {
     const countField = getDiffField + '_n';
     const keyOf = r => (r.title || '') + '|' + r.chart;
 
-    // 카테고리 내 모든 분류 합쳐서 sample 15 (count desc top 10 + random 5)
+    // 카테고리 내 모든 분류 합쳐서 sample 15 (top 10 + random 5).
+    // userVec 있으면 강점 매치 desc (동점 시 count desc tiebreak), 없으면 기존 count desc.
     const sample15 = (cat) => {
       const pool = [...cat.hard, ...cat.easy, ...cat.cleanup];
-      const sorted = [...pool].sort((a, b) => (b[countField] || 0) - (a[countField] || 0));
+      const sorted = userVec
+        ? [...pool].sort((a, b) => {
+            const sa = chartStrengthMatch(a), sb = chartStrengthMatch(b);
+            return (sb - sa) || ((b[countField] || 0) - (a[countField] || 0));
+          })
+        : [...pool].sort((a, b) => (b[countField] || 0) - (a[countField] || 0));
       const top10 = sorted.slice(0, 10);
       const usedKeys = new Set(top10.map(keyOf));
       const rest = pool.filter(r => !usedKeys.has(keyOf(r)));
@@ -1217,51 +1273,13 @@ window.OhsorryCore = {
   };
 
   // EXH 전용 추천 — EC/HC 와 별개 로직.
-  //   EXH 미클리어 (lamp < 6) + EXH/FC/PFC 이지만 AAA 미도달인 곡 중 자기 실력 (baseStar) 근처 곡만,
-  //   EXH ★ 낮은 순으로 30곡 → rate(%) 높은 순으로 정렬 → 10곡 표시.
-  //   (미스 카운트는 Good 수치를 몰라 못 구함 → rate = exScore / (noteCount*2) 로 클리어 근접도 판단.)
-  //   rate 없는 곡 (noteCount 미보강 / 미플레이) 은 뒤로 밀어서 정렬.
-  //   baseStar 가 없으면 (실력값 추정 불가) 빈 배열 반환.
+  // EXH 추천 — EC/HC 와 동일 구조 (buildRecs 재사용).
+  //   threshold 6 = EX-HARD lamp 이상 클리어. getDiffField 'exh' = EXH ★.
+  //   buildPools 의 새 룰 (topClearStar 기반 강/약/정리) + sample15 강점 매치 desc 자동 적용.
+  //   accuracyOK = AAA only, reachedStageLamp = lamp >= 6 — buildPools 내부 isEXH 분기로 처리.
   const buildExhRecs = (baseStar, recLevelMode, djMode) => {
     if (baseStar == null) return [];
-    const candidates = [];
-    for (const c of allCharts) {
-      if (recLevelMode === 'lv12' && c.gameLevel !== 12) continue;
-      // DJ레벨 미달 풀 제외 모드 — EXH 클리어 (lamp>=6) 곡은 후보에서 제외.
-      if (djMode === 'off' && c.lampNum >= 6) continue;
-      if (c.lampNum >= 6 && c.djLevel === 'AAA') continue;
-      if (c.lampNum >= 6 && c.exScore === 0) continue;
-      const e = ereterMap.get(norm(c.title) + '|' + c.diff);
-      if (!e || e.level == null) continue;
-      if (e.level < 11.6 || e.level > 12.7) continue;
-      if (typeof e.exh !== 'number') continue;
-      // 실력 +1 이상 곡 제외 (도전 살짝 허용) + 실력 -2 미만 곡 제외 (너무 쉬움)
-      if (e.exh > baseStar + 1) continue;
-      if (e.exh < baseStar - 2) continue;
-      // rate = EX 점수 / 만점 (= noteCount*2). noteCount 없거나 미플레이면 null.
-      const rate = (typeof c.exScore === 'number' && typeof c.noteCount === 'number' && c.noteCount > 0)
-        ? c.exScore / (c.noteCount * 2) : null;
-      candidates.push({
-        title: c.title, chart: c.diff, level: e.level,
-        ec: e.ec, hc: e.hc, exh: e.exh,
-        ec_n: e.ec_n, hc_n: e.hc_n, exh_n: e.exh_n,
-        diffValue: e.exh, currentLamp: c.lamp,
-        rate: rate,
-      });
-    }
-    // 1. EXH ★ 낮은 순 → top 30
-    candidates.sort((a, b) => a.diffValue - b.diffValue);
-    const top30 = candidates.slice(0, 30);
-    // 2. rate 높은 순 (null 은 뒤로) → 10곡
-    top30.sort((a, b) => {
-      const ra = a.rate;
-      const rb = b.rate;
-      if (ra == null && rb == null) return 0;
-      if (ra == null) return 1;
-      if (rb == null) return -1;
-      return rb - ra;
-    });
-    return top30.slice(0, 10);
+    return buildRecs(6, 'exh', baseStar, recLevelMode, djMode);
   };
 
   // EC 는 실력값 없을 때 0.3 으로 fallback (저렙 진입자도 추천 받을 수 있게)

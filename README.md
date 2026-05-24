@@ -308,6 +308,18 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### 2026-05-24 — 패턴 분석 통합 — calcOhsorryCore 강점 매치 정렬 + 새 추천 범위 룰 + EXH 통합
+- **신규 [modules/calcWeakness.js](modules/calcWeakness.js)** (UMD) — 유저 9 feature (NOTES/CHORD/PEAK/CHARGE/SCRATCH/PHRASE/JACK/TRILL/RAND) 약점/강점 벡터 + 차트별 강점·약점 매치 점수 helper. 잔차 분석 (같은 lv 내 평균 rate 잔차 ↔ feature 가중평균). gist 배포 (`window.OhsorryWeakness`).
+- **신규 gist `patterns-all-slim.json`** (627 KB / 2171곡 / 2348 차트) — DP NOR/HYP/ANO/LEG 차트별 9 feature pt. ohSorryRating 의 [build-patterns-all.js](../ohSorryRating/scripts/build-patterns-all.js) + slim 빌드.
+- **[modules/calcOhsorryCore.js](modules/calcOhsorryCore.js) 통합:**
+  - patterns + calcWeakness fetch + `userVec` 계산 (`[step2] userVec` 콘솔 로그)
+  - sample15 정렬 — `userVec` 있으면 강점 매치 desc / 없으면 기존 count desc (fallback 안전)
+  - 추천 범위 룰 변경 — `challengeOffset` 폐기, `topClearStar` (그 stage 클리어한 ★ 최댓값) 기반 강/약/정리 분리
+    - 강도전 = `[hi, hi+1]` / 약도전 = `[lo, hi)` / 정리곡 = `[0, lo)` (hi = max(topClear, base), lo = min)
+    - 초보 (topClear < base) 케이스 → 강도전이 자동 baseStar 로 fallback
+  - `buildExhRecs` → `buildRecs(6, 'exh')` wrapper (EC/HC 와 동일 구조, 50+ 줄 → 5 줄)
+- 알고리즘 / 데이터 빌드 상세 — [ohSorryRating README "패턴 분석"](../ohSorryRating/README.md#패턴-분석-textage-stat-기반-2026-05-24) 참고
+
 ### adopt v0.0.2 — OSR135 10.0+ 직행 + under-blend 폐기 (재학습 OSR135 반영)
 - gist 의 [adopt.js](https://gist.githubusercontent.com/.../adopt.js) v0.0.1 → v0.0.2. OSR135 재학습 결과 zone 별 MAE 가 oldOSR / OSR 대비 전 영역에서 압도적 → 채택 분기 단순화.
   - **OSR135_TH: 13.5 → 10.0** (10.0+ 면 OSR135 직행). 9.0~10.0 블렌드, < 9.0 baseStar2 유지.
