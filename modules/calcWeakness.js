@@ -22,7 +22,8 @@
   if (typeof module === 'object' && module.exports) module.exports = api;  // Node
   if (typeof window !== 'undefined') window.OhsorryWeakness = api;         // 브라우저
 })(function () {
-  var FEATS = ['rand', 'doji', 'kdan', 'tril', 'tate', 'sara', 'cnbs', 'notes', 'peak'];
+  // FEATS — 우리 정의 표기 (UPPERCASE + hyphen). patterns-all-slim.json 의 데이터 key 와 일치.
+  var FEATS = ['NOTES', 'CHORD', 'PEAK', 'CHARGE', 'SCRATCH', 'SOF-LAN', 'PHRASE', 'JACK', 'TRILL', 'RAND'];
   var DIFF2CHART = {
     NORMAL: 'DP_NOR',
     HYPER: 'DP_HYP',
