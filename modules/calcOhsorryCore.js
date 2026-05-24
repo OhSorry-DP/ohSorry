@@ -1404,6 +1404,8 @@ window.OhsorryCore = {
     recBaseMode, recBaseStar,
     recLevelModeDefault: REC_LEVEL_MODE_DEFAULT,
     recDjModeDefault: REC_DJ_MODE_DEFAULT,
+    userVec,
+    weaknessLib,
     norm, SERIES, shelfLib,
     dbPayload, chartScoreRows,
   };

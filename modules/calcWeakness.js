@@ -138,12 +138,76 @@
     return -chartStrengthMatch(chartPt, userVec);
   }
 
+  // browser 전용 high-level helper — patterns gist fetch + cache + userVec 계산.
+  // 호출처: ohSorry browser (calcOhsorryCore), ohSorryWeb 게스트 페이지, INFOhSorry — 동일 사용.
+  //
+  // opts:
+  //   allCharts      유저 차트 점수 배열
+  //   normFn         title 정규화 (window.OhsorryNorm.norm)
+  //   patternsUrl    (optional) 기본 OhSorry-DP gist 의 patterns-all-slim.json
+  //   minLv          (optional, default 11) 잔차 분석 lv 임계
+  //   cacheTtlMs     (optional, default 1시간) localStorage cache 유효시간
+  //   force          (optional) cache 무시 강제 fetch
+  // return: calcUserWeakness 결과 (9 feature 벡터 + __meta), 실패 시 throw
+  var DEFAULT_PATTERNS_URL = 'https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw/patterns-all-slim.json';
+  var CACHE_KEY = 'OhsorryWeakness:patternsMap';
+  var CACHE_TS_KEY = 'OhsorryWeakness:patternsMap:ts';
+  var memCache = null;
+
+  async function fetchPatternsMap(opts) {
+    opts = opts || {};
+    var url = opts.patternsUrl || DEFAULT_PATTERNS_URL;
+    var ttl = typeof opts.cacheTtlMs === 'number' ? opts.cacheTtlMs : 60 * 60 * 1000;
+    // memory cache 우선 (page lifetime)
+    if (!opts.force && memCache && memCache.url === url) return memCache.data;
+    // localStorage cache (browser only)
+    var hasLs = typeof localStorage !== 'undefined';
+    if (!opts.force && hasLs) {
+      try {
+        var raw = localStorage.getItem(CACHE_KEY);
+        var ts  = localStorage.getItem(CACHE_TS_KEY);
+        if (raw && ts && (Date.now() - new Date(ts).getTime()) < ttl) {
+          var data = JSON.parse(raw);
+          memCache = { url: url, data: data };
+          return data;
+        }
+      } catch (e) {}
+    }
+    var res = await fetch(url + (url.indexOf('?') >= 0 ? '&' : '?') + 't=' + Date.now(), { cache: 'no-store' });
+    if (!res.ok) throw new Error('patterns fetch ' + res.status);
+    var fresh = await res.json();
+    memCache = { url: url, data: fresh };
+    if (hasLs) {
+      try {
+        localStorage.setItem(CACHE_KEY, JSON.stringify(fresh));
+        localStorage.setItem(CACHE_TS_KEY, new Date().toISOString());
+      } catch (e) {}
+    }
+    return fresh;
+  }
+
+  async function fetchAndCalcWeakness(opts) {
+    opts = opts || {};
+    if (!opts.allCharts) throw new Error('fetchAndCalcWeakness: allCharts 필수');
+    if (!opts.normFn)    throw new Error('fetchAndCalcWeakness: normFn 필수');
+    var patternsMap = await fetchPatternsMap(opts);
+    return calcUserWeakness({
+      allCharts: opts.allCharts,
+      patternsMap: patternsMap,
+      normFn: opts.normFn,
+      minLv: opts.minLv,
+    });
+  }
+
   return {
     FEATS: FEATS,
     DIFF2CHART: DIFF2CHART,
+    DEFAULT_PATTERNS_URL: DEFAULT_PATTERNS_URL,
     avgPt: avgPt,
     calcUserWeakness: calcUserWeakness,
     chartStrengthMatch: chartStrengthMatch,
     chartWeaknessMatch: chartWeaknessMatch,
+    fetchPatternsMap: fetchPatternsMap,
+    fetchAndCalcWeakness: fetchAndCalcWeakness,
   };
 });
