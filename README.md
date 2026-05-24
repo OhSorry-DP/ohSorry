@@ -308,6 +308,10 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### 2026-05-25 — rivalOhsorry — 레벨 선택 모달 제거 (무조건 시리즈)
+- [modules/rivalOhsorry.js](modules/rivalOhsorry.js) — `askFetchOptions` 의 레벨별/전곡 선택 UI 제거. 무조건 `{ fetchMode: 'series', levels: undefined }` 반환.
+- 호출처 (`__dp_batch_rival_by_iidx` / `__dp_render_rival`) 흐름 그대로 유지 (Promise 시그니처).
+
 ### 2026-05-25 — dbConn v0.0.404 — pattern vec supabase upsert
 - [modules/dbConn.js](modules/dbConn.js) — `uploadResult` 의 5단계로 `callUpsertPatternVec` 추가. `result.userVec` (calcOhsorryCore step2 의 rateRef 기준 vec) 을 supabase `user_radars` 의 `os_*` 10 컬럼에 upsert (DP row 만).
 - 사전 조건: [ohSorryAdmin migrate_add_os_vec_columns.sql](../ohSorryAdmin/sql/migrate_add_os_vec_columns.sql) + [setup_pattern_vec_rpc.sql](../ohSorryAdmin/sql/setup_pattern_vec_rpc.sql) 적용.

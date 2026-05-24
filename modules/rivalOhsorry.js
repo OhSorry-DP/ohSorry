@@ -68,74 +68,10 @@
     document.getElementById('__dp_progress')?.remove();
   }
 
-  // eagate fetch 모드에서 곡 데이터 수집 범위를 묻는 모달 (ohsorry.js 와 동일 구조).
-  //   - 레벨별 : 선택한 LEVEL 폴더만 (difficulty_rival.html). 기본 11·12 체크.
-  //   - 전곡   : 시리즈 폴더 전체 (series.html, 약 1분).
-  // batch (여러 라이벌) 처리 시 루프 시작 전에 1회만 띄우고 모든 라이벌에 공통 적용.
-  // resolve 값 → Core.compute 의 opts.fetchMode / opts.levels 로 전달.
+  // eagate fetch 모드 — 무조건 시리즈 (전곡, 약 1분). 레벨별 선택 모달 제거 (사용자 결정으로 단순화).
+  //   호출처 (__dp_batch_rival_by_iidx / __dp_render_rival) 흐름 유지 위해 Promise 시그니처만 유지.
   function askFetchOptions() {
-    return new Promise((resolve) => {
-      document.getElementById('__dp_fetch_modal')?.remove();
-      const ov = document.createElement('div');
-      ov.id = '__dp_fetch_modal';
-      ov.style.cssText =
-        'position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif';
-      // 레벨 — 체크박스는 숨기고 label 클릭으로 토글. 선택 상태는 paintLv 가 글자색/굵기로 표시.
-      const lvBtns = [12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1].map((lv) =>
-        '<label style="display:inline-flex;align-items:center;justify-content:center;' +
-        'min-width:24px;padding:4px 6px;font-size:13px;cursor:pointer;user-select:none">' +
-        `<input type="checkbox" class="__dplv" value="${lv}"${lv >= 11 ? ' checked' : ''} style="display:none">${lv}</label>`,
-      ).join('');
-      ov.innerHTML = `
-        <div style="background:#fff;border-radius:12px;padding:22px 24px;width:330px;max-width:calc(100vw - 32px);box-sizing:border-box;box-shadow:0 8px 32px rgba(0,0,0,.25);color:#212529">
-          <div style="font-size:15px;font-weight:700;margin-bottom:3px">라이벌 오소리 — 곡 데이터 불러오기</div>
-          <div style="font-size:12px;color:#888;margin-bottom:16px">라이벌의 어떤 곡을 가져올까요? (여러 명이면 모두 공통 적용)</div>
-          <label style="display:flex;align-items:flex-start;gap:8px;margin-bottom:8px;cursor:pointer">
-            <input type="radio" name="__dpfm" value="level" checked style="margin-top:2px">
-            <span><b style="font-size:13px">레벨별</b><br><span style="font-size:11px;color:#888">선택한 LEVEL 폴더만 (빠름)</span></span>
-          </label>
-          <div id="__dp_lv_box" style="display:flex;flex-wrap:wrap;gap:8px 10px;padding:6px 10px 12px 28px">${lvBtns}</div>
-          <label style="display:flex;align-items:flex-start;gap:8px;margin-bottom:18px;cursor:pointer">
-            <input type="radio" name="__dpfm" value="series" style="margin-top:2px">
-            <span><b style="font-size:13px">전곡</b><br><span style="font-size:11px;color:#888">시리즈 폴더 전체 — 라이벌 1명당 약 1분</span></span>
-          </label>
-          <button id="__dp_fetch_ok" style="width:100%;padding:9px 0;border:0;border-radius:7px;background:#1d9e75;color:#fff;font-size:13px;font-weight:600;cursor:pointer">시작</button>
-        </div>
-      `;
-      document.body.appendChild(ov);
-      const lvBox = ov.querySelector('#__dp_lv_box');
-      // 레벨 선택 표시 — 꺼짐: 연한 글자 / 켜짐: 진한 + 볼드. (기본 체크박스가 한눈에 안 보여서)
-      const paintLv = (label) => {
-        const on = label.querySelector('input').checked;
-        label.style.color = on ? '#212529' : '#ced4da';
-        label.style.fontWeight = on ? '700' : '400';
-      };
-      ov.querySelectorAll('#__dp_lv_box label').forEach((label) => {
-        paintLv(label);
-        label.querySelector('input').addEventListener('change', () => paintLv(label));
-      });
-      // 레벨별 라디오가 선택됐을 때만 레벨 체크박스 활성화
-      const syncLvBox = () => {
-        const isLevel = ov.querySelector('input[name="__dpfm"]:checked').value === 'level';
-        lvBox.style.opacity = isLevel ? '1' : '.35';
-        lvBox.style.pointerEvents = isLevel ? 'auto' : 'none';
-      };
-      ov.querySelectorAll('input[name="__dpfm"]').forEach((r) => { r.onchange = syncLvBox; });
-      syncLvBox();
-      ov.querySelector('#__dp_fetch_ok').onclick = () => {
-        const mode = ov.querySelector('input[name="__dpfm"]:checked').value;
-        let levels = [];
-        if (mode === 'level') {
-          levels = [...ov.querySelectorAll('.__dplv:checked')].map((c) => Number(c.value));
-          if (levels.length === 0) {
-            alert('레벨을 하나 이상 선택하거나 전곡을 골라주세요.');
-            return;
-          }
-        }
-        ov.remove();
-        resolve({ fetchMode: mode, levels });
-      };
-    });
+    return Promise.resolve({ fetchMode: 'series', levels: undefined });
   }
 
   // IIDX ID (8자리 숫자) → 라이벌 토큰 조회 헬퍼.
