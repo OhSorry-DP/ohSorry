@@ -322,8 +322,8 @@
         var ch2 = sp2.c[cn2];
         var lv2 = ch2.lv;
         if (baseStar != null) {
-          // baseStar 근처 (-2 ~ +1) 만
-          if (lv2 < baseStar - 2 || lv2 > baseStar + 1) continue;
+          // baseStar 근처 (-2 ~ +2) 만. +2 까지 도전 lv 포함 (contributors lv12 곡들 추천에 들어가도록).
+          if (lv2 < baseStar - 2 || lv2 > baseStar + 2) continue;
           // baseStar 2.5+ (초보 이상) — lv10 미만 곡은 추천 안 함 (저레벨 곡 추천 의미 X)
           if (baseStar >= 2.5 && lv2 < 10) continue;
         }
