@@ -308,6 +308,12 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### 2026-05-25 — calcWeakness rateRef (absolute reference) 옵션 + calcOhsorryCore 통합
+- [modules/calcWeakness.js](modules/calcWeakness.js) — `calcUserWeakness` / `analyzeFeature` 에 `rateRef` 옵션 추가. rateRef 있으면 self-relative bucketMean 대신 absolute reference (★ × 0.5 bucket → 평균 EX rate) 기준 잔차 분석 → 사용자간 vec 직접 비교 가능. bucket 영역 밖은 lowest/highest bucket clamp.
+- [modules/calcOhsorryCore.js](modules/calcOhsorryCore.js) — `rate-reference-slim.json` (gist 신규) fetch + `calcUserWeakness` 에 rateRef 전달. 실패 시 self-relative fallback.
+- rateRef 데이터: ohSorryRating 의 3550명 ereter-fetched plays 평균 (isotonic monotonic). [ohSorryRating README](../ohSorryRating/README.md) 참고.
+- 본체 추천 동작 영향 없음 — vec 가 self-relative 든 absolute 든 ordering 비슷.
+
 ### 2026-05-25 — calcOhsorryCore userVec 계산 시 zasaMap 전달 (lv10 차트 포함)
 - [modules/calcOhsorryCore.js](modules/calcOhsorryCore.js) — `calcUserWeakness` 호출에 `zasaMap: zasaData` 추가. calcWeakness 가 ratingMap 미수록 lv10 차트도 zasa level 기반 임의 estEc/Hc/Exh 로 잔차 분석 풀에 포함.
 - 본체 추천 동작 영향 없음 — userVec 정확도만 향상.

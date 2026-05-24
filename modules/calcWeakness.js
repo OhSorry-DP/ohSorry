@@ -61,6 +61,33 @@
   var GAP_HC = 6.2;
   var GAP_EXH = 2.3;
 
+  // rateRef ({ ec: { "9.5": {mean, n}, ... }, hc: {...}, exh: {...} }) → stage 별 sorted bucket cache.
+  // clamp: bucket < min → min bucket rate / bucket > max → max bucket rate.
+  function makeRateRefCache(rateRef) {
+    if (!rateRef) return null;
+    var cache = {};
+    var stages = ['ec', 'hc', 'exh'];
+    for (var si = 0; si < stages.length; si++) {
+      var s = stages[si];
+      var ref = rateRef[s];
+      if (!ref) continue;
+      var bks = [];
+      for (var k in ref) if (Object.prototype.hasOwnProperty.call(ref, k)) bks.push(parseFloat(k));
+      bks.sort(function (a, b) { return a - b; });
+      if (bks.length === 0) continue;
+      cache[s] = { ref: ref, min: bks[0], max: bks[bks.length - 1] };
+    }
+    return cache;
+  }
+  function refRateOf(refCache, stage, bucket) {
+    if (!refCache) return null;
+    var rc = refCache[stage];
+    if (!rc) return null;
+    var b = bucket < rc.min ? rc.min : (bucket > rc.max ? rc.max : bucket);
+    var entry = rc.ref[b.toFixed(1)];
+    return entry && typeof entry.mean === 'number' ? entry.mean : null;
+  }
+
   function calcUserWeakness(opts) {
     var allCharts = opts.allCharts || [];
     var patternsMap = opts.patternsMap || {};
@@ -68,6 +95,10 @@
     var minLv = typeof opts.minLv === 'number' ? opts.minLv : 11;
     var ratingMap = opts.ratingMap;
     var zasaMap = opts.zasaMap;
+    // rateRef — absolute reference (3550명 ereter-fetched 평균). 있으면 self-relative bucketMean 대신 사용.
+    //   잔차 = rate - rateRef[stage][bucket] → 모든 사용자 동일 baseline → vec 직접 비교 가능.
+    //   bucket 이 reference 영역 밖이면 lowest/highest bucket 으로 clamp.
+    var refCache = makeRateRefCache(opts.rateRef);
 
     // patternsMap 의 title norm → songId 매핑 (한 번만)
     var titleToId = {};
@@ -149,14 +180,20 @@
           var star = rat[estK];
           if (typeof star !== 'number') continue;
           var bucket = Math.floor(star * 2) / 2;
+          // rateRef 모드면 entry 별로 즉시 residual 계산 (absolute), 아니면 bucketAgg 누적 후 후속 계산 (self-relative).
+          var refRate = refCache ? refRateOf(refCache, stage, bucket) : null;
           entries.push({
             chartId: sid + '|' + cn, title: c.title, diff: c.diff, lv: lv,
             stage: stage, star: star, bucket: bucket,
             rate: rate, pt: pt, lampNum: c.lampNum,
+            referenceRate: refRate,
+            residual: refRate != null ? rate - refRate : null,  // self-relative 모드는 뒤에서 계산
           });
-          if (!bucketAgg[bucket]) bucketAgg[bucket] = { sum: 0, n: 0 };
-          bucketAgg[bucket].sum += rate;
-          bucketAgg[bucket].n += 1;
+          if (refRate == null) {
+            if (!bucketAgg[bucket]) bucketAgg[bucket] = { sum: 0, n: 0 };
+            bucketAgg[bucket].sum += rate;
+            bucketAgg[bucket].n += 1;
+          }
         }
       } else {
         // legacy — lv 단위 bucket
@@ -172,13 +209,13 @@
       }
     }
 
-    // 잔차 계산
-    if (ratingsByKey) {
+    // 잔차 계산 — rateRef 모드면 entry 별로 이미 계산됨. self-relative 모드만 후속 계산.
+    if (ratingsByKey && !refCache) {
       for (var bk in bucketAgg) bucketAgg[bk].mean = bucketAgg[bk].sum / bucketAgg[bk].n;
       for (var ei = 0; ei < entries.length; ei++) {
         entries[ei].residual = entries[ei].rate - bucketAgg[entries[ei].bucket].mean;
       }
-    } else {
+    } else if (!ratingsByKey) {
       for (var lv2 in byLv) {
         if (!Object.prototype.hasOwnProperty.call(byLv, lv2)) continue;
         var arr = byLv[lv2];
@@ -204,13 +241,14 @@
     vec.__meta = {
       matched: matched,
       entries: entries.length,
-      mode: ratingsByKey ? 'rating' : 'lv',
+      mode: ratingsByKey ? (refCache ? 'rating+ref' : 'rating') : 'lv',
       lvCounts: ratingsByKey ? null : countLv(byLv),
-      buckets: ratingsByKey ? countBuckets(bucketAgg) : null,
+      buckets: (ratingsByKey && !refCache) ? countBuckets(bucketAgg) : null,
     };
-    // __entries / __bucketAgg 는 analyzeFeature 가 재사용하도록 노출 (UI 표시 X)
+    // __entries / __bucketAgg / __refCache 는 analyzeFeature 가 재사용하도록 노출 (UI 표시 X)
     vec.__entries = entries;
     vec.__bucketAgg = bucketAgg;
+    vec.__refCache = refCache;
     vec.__byLv = byLv;
     return vec;
   }
@@ -330,7 +368,7 @@
     var normFn = opts.normFn || function (s) { return s; };
     var userVec = opts.userVec || calcUserWeakness({
       allCharts: allCharts, patternsMap: patternsMap, normFn: normFn,
-      ratingMap: opts.ratingMap, zasaMap: opts.zasaMap, minLv: opts.minLv,
+      ratingMap: opts.ratingMap, zasaMap: opts.zasaMap, rateRef: opts.rateRef, minLv: opts.minLv,
     });
     var baseStar = opts.baseStar;
     var rangeN = typeof opts.rangeN === 'number' ? opts.rangeN : 1;
@@ -455,18 +493,23 @@
         djLevel: typeof pc.djLevel === 'string' ? pc.djLevel : (typeof pc.scoreRank === 'string' ? pc.scoreRank : null),
       };
     }
-    // bucketAgg — userVec.__bucketAgg (있으면), 추천곡 bucketMean 계산용.
+    // bucketMean 소스 — rateRef (absolute, stage 별) 우선, 없으면 userVec.__bucketAgg (self-relative).
     var bucketAggForRec = userVec.__bucketAgg || null;
+    var refCacheForRec = userVec.__refCache || makeRateRefCache(opts.rateRef);
+    var STAGE_KEYS = [['estEc', 'ec'], ['estHc', 'hc'], ['estExh', 'exh']];
     function bucketMeanOf(rat) {
-      if (!bucketAggForRec) return null;
-      var ests = [rat.estEc, rat.estHc, rat.estExh];
       var sum = 0, n = 0;
-      for (var bi = 0; bi < ests.length; bi++) {
-        var ev = ests[bi];
+      for (var bi = 0; bi < STAGE_KEYS.length; bi++) {
+        var ev = rat[STAGE_KEYS[bi][0]];
         if (typeof ev !== 'number') continue;
         var b = Math.floor(ev * 2) / 2;
-        var agg = bucketAggForRec[b];
-        if (agg && typeof agg.mean === 'number') { sum += agg.mean; n++; }
+        var r = null;
+        if (refCacheForRec) r = refRateOf(refCacheForRec, STAGE_KEYS[bi][1], b);
+        if (r == null && bucketAggForRec) {
+          var agg = bucketAggForRec[b];
+          if (agg && typeof agg.mean === 'number') r = agg.mean;
+        }
+        if (r != null) { sum += r; n++; }
       }
       return n > 0 ? sum / n : null;
     }

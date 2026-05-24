@@ -226,6 +226,9 @@ window.OhsorryCore = {
   //   추천에 영향 — sample15 정렬을 강점 매치 desc 로 (기존 count desc 대신).
   const PATTERNS_URL = GIST_RAW + '/patterns-all-slim.json';
   const CALC_WEAKNESS_URL = GIST_RAW + '/calcWeakness.js';
+  // rate-reference-slim.json — 3550명 ereter-fetched 평균 EX rate (estEc/Hc/Exh × 0.5 bucket, isotonic monotonic).
+  //   calcWeakness 에 rateRef 전달 시 absolute reference 기준 잔차 분석 → 사용자간 vec 직접 비교 가능.
+  const RATE_REF_URL = GIST_RAW + '/rate-reference-slim.json';
 
   // 외부 lib 메모리 캐시 (페이지 lifetime 유지) — batch (라이벌 다수) 처리 시 두 번째부터 fetch skip
   if (!window.__ohsorryLibCache) window.__ohsorryLibCache = {};
@@ -337,7 +340,7 @@ window.OhsorryCore = {
   }
 
   // 패턴 데이터 + weakness 모듈 fetch (실패 시 추천 가중치 없이 진행, 기존 정렬 fallback)
-  let patternsMap = null, weaknessLib = null;
+  let patternsMap = null, weaknessLib = null, rateRefData = null;
   try {
     const { data: pData, source: pSrc } = await loadWithCache(PATTERNS_URL, 'ohSorry:patterns', true);
     patternsMap = pData;
@@ -353,6 +356,14 @@ window.OhsorryCore = {
     console.log(`[step2] calcWeakness.js 로드 (${wSrcType})`);
   } catch (e) {
     console.warn('[step2] calcWeakness.js 로드 실패 (가중치 비활성):', e.message);
+  }
+  // rate-reference — calcWeakness 의 absolute 잔차 분석용. 실패해도 self-relative 모드로 fallback.
+  try {
+    const { data: rrData, source: rrSrc } = await loadWithCache(RATE_REF_URL, 'ohSorry:rateRef', true);
+    rateRefData = rrData;
+    console.log(`[step2] rate-reference-slim.json 로드 (${rrSrc})`);
+  } catch (e) {
+    console.warn('[step2] rate-reference-slim.json 로드 실패 (self-relative fallback):', e.message);
   }
 
   // -------- 1. 곡명 정규화 + 인덱싱 --------
@@ -1096,7 +1107,7 @@ window.OhsorryCore = {
       const k = norm(patternsMap[id].t || '');
       if (k && !patternsTitleMap[k]) patternsTitleMap[k] = id;
     }
-    userVec = weaknessLib.calcUserWeakness({ allCharts, patternsMap, normFn: norm, ratingMap: ohSorryRatings, zasaMap: zasaData });
+    userVec = weaknessLib.calcUserWeakness({ allCharts, patternsMap, normFn: norm, ratingMap: ohSorryRatings, zasaMap: zasaData, rateRef: rateRefData });
     const vecLog = {};
     for (const f of weaknessLib.FEATS) vecLog[f] = +userVec[f].toFixed(2);
     console.log(`[step2] userVec (${userVec.__meta.matched}곡 매칭):`, vecLog);
