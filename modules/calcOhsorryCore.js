@@ -1166,10 +1166,10 @@ window.OhsorryCore = {
           level: r.zasaLevel,
           ec: typeof r.estEc === 'number' ? r.estEc : null,
           hc: typeof r.estHc === 'number' ? r.estHc : null,
-          exh: null,
+          exh: typeof r.estExh === 'number' ? r.estExh : null,
           ec_n: r.nEcCleared || 0,
           hc_n: r.nHcCleared || 0,
-          exh_n: 0,
+          exh_n: r.nExhCleared || 0,
         };
         gameLevel = r.gameLevel ?? null;
       }
