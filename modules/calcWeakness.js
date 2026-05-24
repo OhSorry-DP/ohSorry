@@ -294,9 +294,23 @@
     // 추천곡 — patternsMap 의 차트 중 그 feature 가 0+ 인 곡 + 사용자 잘 못 친 / NP + baseStar 근처
     //   분석 (calcUserWeakness) 은 lv11+ 만 보지만 추천 풀은 lv 무관 (사용자 ★ 근처 일치 시 도전 가치).
     //   pt 임계는 0 (feature 가 있는 곡 = pt>0). feature 별 분포 (CHARGE 처럼 대부분 0) 차이 흡수.
+    // played map — allCharts 전체에서 (lv 필터 없이) 다시 매칭. charts (lv11+ 만) 활용하면 lv1~10 차트가 모두 NP 로 분류됨.
     var played = {};
-    for (var k3 = 0; k3 < charts.length; k3++) {
-      played[charts[k3].songId + '|' + charts[k3].chartName] = charts[k3].rate;
+    for (var pi = 0; pi < allCharts.length; pi++) {
+      var pc = allCharts[pi];
+      if (!pc || !pc.title || !pc.diff) continue;
+      var pcn = DIFF2CHART[pc.diff];
+      if (!pcn) continue;
+      var psid = titleToId[normFn(pc.title)];
+      if (!psid) continue;
+      var psp = patternsMap[psid];
+      if (!psp || !psp.c || !psp.c[pcn]) continue;
+      var prate;
+      if (typeof pc.scorePercent === 'number') prate = pc.scorePercent;
+      else if (typeof pc.exScore === 'number' && typeof pc.noteCount === 'number' && pc.noteCount > 0) {
+        prate = (pc.exScore / (pc.noteCount * 2)) * 100;
+      } else continue;
+      played[psid + '|' + pcn] = prate;
     }
     var recommends = [];
     for (var sid2 in patternsMap) {
