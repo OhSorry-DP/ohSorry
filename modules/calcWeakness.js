@@ -291,7 +291,9 @@
     strongAvg = strongN > 0 ? strongAvg / Math.min(strongN, sortedByPt.length) : 0;
     var gap = strongAvg - allAvg;
 
-    // 추천곡 — patternsMap 의 차트 중 그 feature 강한 + 사용자 잘 못 친 / NP + baseStar 근처
+    // 추천곡 — patternsMap 의 차트 중 그 feature 가 0+ 인 곡 + 사용자 잘 못 친 / NP + baseStar 근처
+    //   분석 (calcUserWeakness) 은 lv11+ 만 보지만 추천 풀은 lv 무관 (사용자 ★ 근처 일치 시 도전 가치).
+    //   pt 임계는 0 (feature 가 있는 곡 = pt>0). feature 별 분포 (CHARGE 처럼 대부분 0) 차이 흡수.
     var played = {};
     for (var k3 = 0; k3 < charts.length; k3++) {
       played[charts[k3].songId + '|' + charts[k3].chartName] = charts[k3].rate;
@@ -305,13 +307,12 @@
         if (!Object.prototype.hasOwnProperty.call(sp2.c, cn2)) continue;
         var ch2 = sp2.c[cn2];
         var lv2 = ch2.lv;
-        if (lv2 < minLv) continue;
         if (baseStar != null) {
           // baseStar 근처 (-2 ~ +1) 만
           if (lv2 < baseStar - 2 || lv2 > baseStar + 1) continue;
         }
         var pt2 = avgPt(ch2)[feat] || 0;
-        if (pt2 < 30) continue;  // feature 약한 곡 (영향 작음) 제외
+        if (pt2 <= 0) continue;  // 그 feature 가 아예 없는 곡만 제외
         var key2 = sid2 + '|' + cn2;
         var playedRate = played[key2];
         // 이미 잘 친 곡 (rate >= 80%) 제외
