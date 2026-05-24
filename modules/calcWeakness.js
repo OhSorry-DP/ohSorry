@@ -326,14 +326,28 @@
         });
       }
     }
-    // 정렬 — pt desc primary, NP > 낮은 rate 순
-    recommends.sort(function (a, b) {
+    // 추출 룰 — 친 곡 (점수 올릴 여지 있는 곡) 3 + NP (새 곡) 2 조합.
+    //   각 풀 pt desc 정렬 후 top N. 부족 시 반대 풀에서 보충해서 총 topN 채움.
+    var played2 = recommends.filter(function (r) { return !r.isNp; });
+    var np = recommends.filter(function (r) { return r.isNp; });
+    played2.sort(function (a, b) {
       if (b.pt !== a.pt) return b.pt - a.pt;
-      if (a.isNp && !b.isNp) return -1;
-      if (b.isNp && !a.isNp) return 1;
       return (a.rate || 0) - (b.rate || 0);
     });
-    recommends = recommends.slice(0, topN);
+    np.sort(function (a, b) { return b.pt - a.pt; });
+    var nPlayed = Math.min(3, played2.length);
+    var nNp = Math.min(topN - nPlayed, np.length);
+    var pick = played2.slice(0, nPlayed).concat(np.slice(0, nNp));
+    var need = topN - pick.length;
+    if (need > 0) {
+      var usedKeys = {};
+      pick.forEach(function (r) { usedKeys[r.songId + '|' + r.chartName] = 1; });
+      var restAll = played2.slice(nPlayed).concat(np.slice(nNp))
+        .filter(function (r) { return !usedKeys[r.songId + '|' + r.chartName]; })
+        .sort(function (a, b) { return b.pt - a.pt; });
+      pick = pick.concat(restAll.slice(0, need));
+    }
+    recommends = pick;
 
     return {
       feat: feat, value: value, isStrength: isStrength,
