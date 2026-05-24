@@ -275,7 +275,7 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 | `calcOhsorryCore.js` | v0.0.335 | ~1366 | **계산 core** — ereter / zasa / textage / ohSorryRating + 외부 lib (oldOSR / OSR / OSR135) fetch + 캐시, difficulty.html 페이지 순회 fetch, parseDoc, ★ 추정 (v335E 채택 분기), 추천곡 계산, 프로필 fetch. 결과 객체 (`result`) 를 반환하고 `Render.show(result)` 호출. DOM 안 만짐 (UI 는 render). |
 | `ohsorryRender.js` | v0.0.335 | ~854 | **UI render** — 진행률 UI (`showProgress`/`hideProgress`), 결과 패널 (프로필 / ★ / 노트레이더 / 추천곡 sortable / 상세통계), `__dp_rerun` / `__dp_confirmRerun` / `__dp_toggleRadar` 등. core 의 `result` 객체 받아서 표시 + `OhsorryDb.upsertUserProfile` 호출. |
 | `dbConn.js` | v0.0.335 | ~73 | **supabase 통신** — `upsertUserProfile(payload)` / `fetchUserProfile(iidxId)` 두 RPC 호출만 담당. SUPABASE_URL / SUPABASE_KEY 캡슐화. |
-| `ohsorryShelf.js` | v0.0.23 | ~532 | **서열표 렌더 lib** — charts 배열 → 격자 HTML (`renderShelf` / `renderChartRow` / `renderStackbar` / `injectStyle`). `calcOhsorryCore` 가 추천곡 토스트용으로, ohSorryWeb 게스트 페이지가 서열표 탭용으로 gist fetch. ohSorryRating 에서 이관. |
+| `ohsorryShelf.js` | v0.0.26 | ~565 | **서열표 렌더 lib** — charts 배열 → 격자 HTML (`renderShelf` / `renderChartRow` / `renderStackbar` / `injectStyle`). `calcOhsorryCore` 가 추천곡 토스트용으로, ohSorryWeb 게스트 페이지가 서열표 탭용으로 gist fetch. ohSorryRating 에서 이관. |
 | `2-calc-score.js` | (legacy) | ~9 | **호환용 redirect** — 기존 사용자가 콘솔에 붙여넣던 URL 그대로 유지. 내부에서 `ohsorry.js` 를 fetch + eval 만 함. |
 
 **의존 흐름**:
@@ -307,6 +307,11 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 ---
 
 ## 변경 이력
+
+### ohsorryShelf v0.0.26 — renderStackbar zasaData 옵션 추가 (오소리 유저 NP 미집계 fix)
+- `renderStackbar(charts, gameLevel, opts)` — `opts.zasaData` 받으면 zasa-data.charts 를 base 로 깔고 charts 매칭, 미매칭 zasa 곡은 NP 로 카운트.
+- 기존 회귀: 오소리(아케이드) 유저 `charts_json` 은 플레이한 곡만 들어있어, 격자 (`renderShelf`) 는 NP placeholder 가 채워졌으나 하단 stackbar 는 raw charts 로 집계 → NP 0곡으로 잘못 표기되던 문제. INF 유저는 TSV 가 미플레이 곡까지 들고있어 무관.
+- API 호환: `opts` 인자 생략 가능 (기존 호출부 그대로 동작).
 
 ### rivalOhsorry v3.3.8 — eagateFetch 모듈 load 누락 fix (라이벌 오소리 작동 불가 해소)
 - 본체 wrapper 는 v3.3.7 → v3.3.8 갱신 시 `eagateFetch` 모듈 load 가 추가됐는데 [rivalOhsorry.js](modules/rivalOhsorry.js) 는 v3.3.6 그대로 남아 4개 모듈만 load → `Core.compute` 가 eagate fetch 단계에서 `window.OhsorryEagateFetch` 부재로 alert ("eagateFetch 모듈이 로드되지 않았어요. 페이지 새로고침 후 재시도해주세요.") 띄우고 중단되던 회귀 fix.

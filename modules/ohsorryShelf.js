@@ -17,7 +17,8 @@
 //   container.innerHTML = html;
 //
 //   OhSorryShelf.renderLegend();              // lamp 색상 범례 HTML
-//   OhSorryShelf.renderStackbar(charts, 12);  // 표 전체 lamp 분포 스택드바 HTML
+//   OhSorryShelf.renderStackbar(charts, 12, { zasaData });  // 표 전체 lamp 분포 스택드바 HTML
+//     zasaData (선택) — 오소리 유저: 미플레이 zasa 곡을 NP 로 카운트 (없으면 charts 만 집계)
 //   OhSorryShelf.renderChartRow(chart);       // INFOhSorry DP탭 모바일 1행 HTML (곡명 클릭 토스트용)
 //
 // 곡 base 결정:
@@ -448,15 +449,47 @@
   }
 
   // 표 전체 lamp 분포 스택드 바 HTML — gameLevel 로 필터한 charts 전체 집계
-  function renderStackbar(charts, gameLevel) {
+  //   opts.zasaData — 있으면 zasa-data.charts 를 base 로 깔고 charts 매칭, 미매칭 zasa 곡은 NP 로 카운트
+  //     (오소리(아케이드) charts_json 은 플레이한 곡만 들어있어 이 옵션 없으면 NP 가 0 으로 잘못 집계됨)
+  function renderStackbar(charts, gameLevel, opts) {
+    opts = opts || {};
     var counts = {};
     var total = 0;
-    for (var i = 0; i < charts.length; i++) {
-      var c = charts[i];
-      if (gameLevel != null && c.gameLevel !== gameLevel) continue;
-      var lp = lampOf(c);
-      counts[lp] = (counts[lp] || 0) + 1;
-      total++;
+    if (opts.zasaData && Array.isArray(opts.zasaData.charts)) {
+      // zasa base — 미매칭 zasa 곡은 NP, charts_json 에만 있는 곡 (미분류) 은 본인 lamp 로 추가
+      var chartIdx = {};
+      for (var ci = 0; ci < charts.length; ci++) {
+        var cc = charts[ci];
+        chartIdx[norm(decEnt(cc.title)) + '|' + cc.diff] = cc;
+      }
+      var zasaKeySet = {};
+      for (var zi = 0; zi < opts.zasaData.charts.length; zi++) {
+        var zc = opts.zasaData.charts[zi];
+        if (gameLevel != null && zc.gameLevel !== gameLevel) continue;
+        var zkey = norm(zc.title) + '|' + zc.diff;
+        zasaKeySet[zkey] = true;
+        var matched = chartIdx[zkey];
+        var lpz = matched ? lampOf(matched) : 'NP';
+        counts[lpz] = (counts[lpz] || 0) + 1;
+        total++;
+      }
+      for (var ci2 = 0; ci2 < charts.length; ci2++) {
+        var cc2 = charts[ci2];
+        if (gameLevel != null && cc2.gameLevel !== gameLevel) continue;
+        var ckey = norm(decEnt(cc2.title)) + '|' + cc2.diff;
+        if (zasaKeySet[ckey]) continue;
+        var lpu = lampOf(cc2);
+        counts[lpu] = (counts[lpu] || 0) + 1;
+        total++;
+      }
+    } else {
+      for (var i = 0; i < charts.length; i++) {
+        var c = charts[i];
+        if (gameLevel != null && c.gameLevel !== gameLevel) continue;
+        var lp = lampOf(c);
+        counts[lp] = (counts[lp] || 0) + 1;
+        total++;
+      }
     }
     if (total === 0) return '';
     var h = '<div class="shelf-stackbar">';
@@ -553,7 +586,7 @@
   }
 
   return {
-    version: '0.0.25',
+    version: '0.0.26',
     injectStyle: injectStyle,
     LAMP_BG: LAMP_BG,                  // 외부에서 램프 색 재사용용 (ohSorryWeb users.js 플레이데이터 탭 등)
     djLevelFromScore: djLevelFromScore,
