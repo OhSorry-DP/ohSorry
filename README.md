@@ -308,6 +308,10 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### 2026-05-25 — calcWeakness analyzeFeature 추천곡 entry 에 bucketMean 추가
+- [modules/calcWeakness.js](modules/calcWeakness.js) — `analyzeFeature` 의 recommends entry 에 `bucketMean` (estEc/Hc/Exh 3 bucket 평균의 평균) 노출. ohSorryWeb 분석 탭이 "현재 EX → 목표 EX (+차이)" 표기로 그 차트 feature 기여 가능 점수 시각화에 사용.
+- 본체 추천 동작 영향 없음 — 신규 필드만 추가.
+
 ### 2026-05-24 — 패턴 분석 통합 — calcOhsorryCore 강점 매치 정렬 + 새 추천 범위 룰 + EXH 통합
 - **신규 [modules/calcWeakness.js](modules/calcWeakness.js)** (UMD) — 유저 9 feature (NOTES/CHORD/PEAK/CHARGE/SCRATCH/PHRASE/JACK/TRILL/RAND) 약점/강점 벡터 + 차트별 강점·약점 매치 점수 helper. 잔차 분석 (같은 lv 내 평균 rate 잔차 ↔ feature 가중평균). gist 배포 (`window.OhsorryWeakness`).
 - **신규 gist `patterns-all-slim.json`** (627 KB / 2171곡 / 2348 차트) — DP NOR/HYP/ANO/LEG 차트별 9 feature pt. ohSorryRating 의 [build-patterns-all.js](../ohSorryRating/scripts/build-patterns-all.js) + slim 빌드.

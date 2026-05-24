@@ -48,20 +48,26 @@
   //   allCharts    유저 차트
   //   patternsMap  patterns-all-slim.json
   //   normFn       title 정규화
-  //   ratingMap    ohSorryRating.json 의 ratings (array) 또는 {key: rating} map.
-  //                  없으면 lv 단위 bucket (legacy), 있으면 ohSorryRating 의 estEc/Hc/Exh 0.5 단위 bucket 분석.
+  //   ratingMap    ohSorryRating.json 의 ratings (array). lv11/12 차트 estEc/Hc/Exh.
+  //   zasaMap      zasa-data.json 의 charts (array). lv10 차트 zasaLevel 보충 (ratingMap 미수록 차트).
+  //                  zasaMap 매칭 차트는 임의 추정 estEc/Hc/Exh 적용 (gap GAP_EC/HC/EXH 차감).
   //   minLv        legacy (ratingMap 없을 때) 적용
   // 알고리즘 (ratingMap 있을 때):
-  //   - 각 차트 → estEc, estHc, estExh 3 entry 로 펼침
+  //   - 각 차트 → estEc, estHc, estExh 3 entry 로 펼침 (lv11/12 정확값, lv10 zasa 추정값)
   //   - bucket = floor(★ × 2) / 2 (0.5 단위)
   //   - bucket 별 평균 rate → 잔차 = rate - bucket평균
   //   - feature 별 가중평균 (entry 기준)
+  var GAP_EC = 10.3;   // zasaLevel - estEc 평균 gap (ohSorryRating 추정)
+  var GAP_HC = 6.2;
+  var GAP_EXH = 2.3;
+
   function calcUserWeakness(opts) {
     var allCharts = opts.allCharts || [];
     var patternsMap = opts.patternsMap || {};
     var normFn = opts.normFn || function (s) { return s; };
     var minLv = typeof opts.minLv === 'number' ? opts.minLv : 11;
     var ratingMap = opts.ratingMap;
+    var zasaMap = opts.zasaMap;
 
     // patternsMap 의 title norm → songId 매핑 (한 번만)
     var titleToId = {};
@@ -84,6 +90,27 @@
         }
       } else if (typeof ratingMap === 'object') {
         ratingsByKey = ratingMap;
+      }
+    }
+
+    // zasaMap 결합 — ratingMap 미수록 차트 (lv10 등) 에 임의 추정 estEc/Hc/Exh 적용.
+    //   gap = zasaLevel - estXX 평균 (ohSorryRating 차트 기준). 정확도는 떨어지지만 잔차 분석 풀 확장.
+    if (zasaMap && ratingsByKey && Array.isArray(zasaMap)) {
+      for (var zi = 0; zi < zasaMap.length; zi++) {
+        var z = zasaMap[zi];
+        if (!z || !z.title || !z.diff) continue;
+        if (typeof z.level !== 'number') continue;
+        var zk = normFn(z.title) + '|' + z.diff;
+        if (ratingsByKey[zk]) continue;  // ratingMap 에 이미 있음 (lv11/12)
+        var zl = z.level;
+        ratingsByKey[zk] = {
+          title: z.title, diff: z.diff,
+          gameLevel: z.gameLevel, zasaLevel: zl,
+          estEc: zl - GAP_EC,
+          estHc: zl - GAP_HC,
+          estExh: zl - GAP_EXH,
+          __fromZasa: true,
+        };
       }
     }
 
@@ -303,13 +330,14 @@
     var normFn = opts.normFn || function (s) { return s; };
     var userVec = opts.userVec || calcUserWeakness({
       allCharts: allCharts, patternsMap: patternsMap, normFn: normFn,
-      ratingMap: opts.ratingMap, minLv: opts.minLv,
+      ratingMap: opts.ratingMap, zasaMap: opts.zasaMap, minLv: opts.minLv,
     });
     var baseStar = opts.baseStar;
     var rangeN = typeof opts.rangeN === 'number' ? opts.rangeN : 1;
     var topN = opts.topN || 5;
 
     // ratingMap — array 면 norm(title) + '|' + diff key 로 map 변환. 이미 map 이면 그대로.
+    // zasaMap 도 같이 결합 — ratingMap 미수록 차트 (lv10) 추천 풀에도 포함.
     var CHART2DIFF = { DP_NOR: 'NORMAL', DP_HYP: 'HYPER', DP_ANO: 'ANOTHER', DP_LEG: 'LEGGENDARIA' };
     var ratingsByKey = null;
     if (opts.ratingMap) {
@@ -322,6 +350,22 @@
         }
       } else if (typeof opts.ratingMap === 'object') {
         ratingsByKey = opts.ratingMap;
+      }
+    }
+    if (opts.zasaMap && ratingsByKey && Array.isArray(opts.zasaMap)) {
+      for (var zi2 = 0; zi2 < opts.zasaMap.length; zi2++) {
+        var z2 = opts.zasaMap[zi2];
+        if (!z2 || !z2.title || !z2.diff) continue;
+        if (typeof z2.level !== 'number') continue;
+        var zk2 = normFn(z2.title) + '|' + z2.diff;
+        if (ratingsByKey[zk2]) continue;
+        var zl2 = z2.level;
+        ratingsByKey[zk2] = {
+          title: z2.title, diff: z2.diff,
+          gameLevel: z2.gameLevel, zasaLevel: zl2,
+          estEc: zl2 - GAP_EC, estHc: zl2 - GAP_HC, estExh: zl2 - GAP_EXH,
+          __fromZasa: true,
+        };
       }
     }
 
@@ -387,7 +431,7 @@
     // 추천곡 — patternsMap 의 차트 중 그 feature 가 0+ 인 곡 + 사용자 잘 못 친 / NP + baseStar 근처
     //   분석 (calcUserWeakness) 은 lv11+ 만 보지만 추천 풀은 lv 무관 (사용자 ★ 근처 일치 시 도전 가치).
     //   pt 임계는 0 (feature 가 있는 곡 = pt>0). feature 별 분포 (CHARGE 처럼 대부분 0) 차이 흡수.
-    // played map — allCharts 전체에서 (lv 필터 없이) 다시 매칭. charts (lv11+ 만) 활용하면 lv1~10 차트가 모두 NP 로 분류됨.
+    // played map — allCharts 전체에서 (lv 필터 없이) 다시 매칭. value = { rate, lampNum, djLevel }
     var played = {};
     for (var pi = 0; pi < allCharts.length; pi++) {
       var pc = allCharts[pi];
@@ -403,7 +447,26 @@
       else if (typeof pc.exScore === 'number' && typeof pc.noteCount === 'number' && pc.noteCount > 0) {
         prate = (pc.exScore / (pc.noteCount * 2)) * 100;
       } else continue;
-      played[psid + '|' + pcn] = prate;
+      played[psid + '|' + pcn] = {
+        rate: prate,
+        lampNum: typeof pc.lampNum === 'number' ? pc.lampNum : null,
+        djLevel: typeof pc.djLevel === 'string' ? pc.djLevel : (typeof pc.scoreRank === 'string' ? pc.scoreRank : null),
+      };
+    }
+    // bucketAgg — userVec.__bucketAgg (있으면), 추천곡 bucketMean 계산용.
+    var bucketAggForRec = userVec.__bucketAgg || null;
+    function bucketMeanOf(rat) {
+      if (!bucketAggForRec) return null;
+      var ests = [rat.estEc, rat.estHc, rat.estExh];
+      var sum = 0, n = 0;
+      for (var bi = 0; bi < ests.length; bi++) {
+        var ev = ests[bi];
+        if (typeof ev !== 'number') continue;
+        var b = Math.floor(ev * 2) / 2;
+        var agg = bucketAggForRec[b];
+        if (agg && typeof agg.mean === 'number') { sum += agg.mean; n++; }
+      }
+      return n > 0 ? sum / n : null;
     }
     var recommends = [];
     for (var sid2 in patternsMap) {
@@ -414,16 +477,17 @@
         if (!Object.prototype.hasOwnProperty.call(sp2.c, cn2)) continue;
         var ch2 = sp2.c[cn2];
         var lv2 = ch2.lv;
+        var recRat = null;
         // baseStar 비교 — ratingMap 의 estEc/estHc/estExh 중 어느 하나라도 baseStar ± rangeN 안 들어가면 후보.
         //   baseStar 는 ohSorryRating 의 난이도 ★ 단위 (estEc/estHc/estExh 와 같은 단위).
         //   ratingMap 에 매칭 안 되는 차트 (lv1~10 차트 — ratings 는 lv11/12 만 가짐) 는 추천 풀 제외.
         //   baseStar 또는 ratingMap 없으면 비교 skip (모든 차트 후보).
         if (baseStar != null && ratingsByKey) {
           var diff2 = CHART2DIFF[cn2];
-          var rat = diff2 ? ratingsByKey[normFn(sp2.t) + '|' + diff2] : null;
-          if (!rat) continue;
+          recRat = diff2 ? ratingsByKey[normFn(sp2.t) + '|' + diff2] : null;
+          if (!recRat) continue;
           var inRange = false;
-          var ests = [rat.estEc, rat.estHc, rat.estExh];
+          var ests = [recRat.estEc, recRat.estHc, recRat.estExh];
           for (var ei = 0; ei < ests.length; ei++) {
             var ev = ests[ei];
             if (typeof ev === 'number' && ev >= baseStar - rangeN && ev <= baseStar + rangeN) {
@@ -432,53 +496,31 @@
             }
           }
           if (!inRange) continue;
+        } else if (ratingsByKey) {
+          // baseStar 없어도 bucketMean 계산 위해 rat 조회
+          var diff3 = CHART2DIFF[cn2];
+          recRat = diff3 ? ratingsByKey[normFn(sp2.t) + '|' + diff3] : null;
         }
         var pt2 = avgPt(ch2)[feat] || 0;
         if (pt2 <= 0) continue;  // 그 feature 가 아예 없는 곡만 제외
         var key2 = sid2 + '|' + cn2;
-        var playedRate = played[key2];
+        var pInfo = played[key2];
+        var playedRate = pInfo ? pInfo.rate : null;
         // 만점에 가까운 곡 (rate >= 95%) 만 제외. 강점 기여 곡 (rate 80~94) 도 추천 풀 포함.
         if (playedRate != null && playedRate >= 95) continue;
         recommends.push({
           songId: sid2, chartName: cn2, title: sp2.t, lv: lv2, pt: pt2,
-          rate: playedRate == null ? null : playedRate,
+          rate: playedRate,
+          lampNum: pInfo ? pInfo.lampNum : null,
+          djLevel: pInfo ? pInfo.djLevel : null,
           isNp: playedRate == null,
+          bucketMean: recRat ? bucketMeanOf(recRat) : null,
         });
       }
     }
-    // 추출 룰 — 친 곡 (기여도 큰 곡) 3 + NP (새 곡) 2 조합.
-    //   친 곡 정렬 — |기여도| desc (= |pt × byChart.residual|). contributors 와 같은 기준 (부호 무관).
-    //     강점 케이스 (잘 친 + pt 강한) / 약점 케이스 (못 친 + pt 강한) 둘 다 우선.
-    //     byChart 에 entry 없는 차트 (잔차 분석 안 된 차트) — absContrib 0.
-    //   NP 정렬 — pt desc (단순).
-    //   부족 시 반대 풀에서 보충해서 총 topN 채움.
-    var played2 = recommends.filter(function (r) { return !r.isNp; });
-    var np = recommends.filter(function (r) { return r.isNp; });
-    var absContrib = function (r) {
-      var bch = byChart[r.songId + '|' + r.chartName];
-      if (!bch) return 0;
-      return Math.abs(bch.residual) * (r.pt || 0);
-    };
-    played2.sort(function (a, b) {
-      var ca = absContrib(a);
-      var cb = absContrib(b);
-      if (ca !== cb) return cb - ca;
-      return b.pt - a.pt;
-    });
-    np.sort(function (a, b) { return b.pt - a.pt; });
-    var nPlayed = Math.min(3, played2.length);
-    var nNp = Math.min(topN - nPlayed, np.length);
-    var pick = played2.slice(0, nPlayed).concat(np.slice(0, nNp));
-    var need = topN - pick.length;
-    if (need > 0) {
-      var usedKeys = {};
-      pick.forEach(function (r) { usedKeys[r.songId + '|' + r.chartName] = 1; });
-      var restAll = played2.slice(nPlayed).concat(np.slice(nNp))
-        .filter(function (r) { return !usedKeys[r.songId + '|' + r.chartName]; })
-        .sort(function (a, b) { return b.pt - a.pt; });
-      pick = pick.concat(restAll.slice(0, need));
-    }
-    recommends = pick;
+    // 단순 pt desc 정렬 — top N. 친/NP 비율 강제 X.
+    recommends.sort(function (a, b) { return b.pt - a.pt; });
+    recommends = recommends.slice(0, topN);
 
     return {
       feat: feat, value: value, isStrength: isStrength,
