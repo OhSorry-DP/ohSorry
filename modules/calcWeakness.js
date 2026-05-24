@@ -402,10 +402,12 @@
       byChart[en.chartId].n += 1;
     }
     var charts = [];
+    var totalContrib = 0;
     for (var ck in byChart) {
       var bch = byChart[ck];
       bch.residual = bch.residualSum / bch.n;
       bch.contrib = bch.residual * bch.pt;
+      totalContrib += bch.contrib;
       charts.push(bch);
     }
 
@@ -527,6 +529,7 @@
 
     return {
       feat: feat, value: value, isStrength: isStrength,
+      totalContrib: totalContrib,  // Σ byChart.contrib — UI 가 /100 스케일 단일 값 표시용 (기여곡 row 와 같은 단위)
       summary: {
         strongAvg: +strongAvg.toFixed(1),
         allAvg: +allAvg.toFixed(1),

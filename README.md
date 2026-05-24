@@ -312,9 +312,10 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 - [modules/calcOhsorryCore.js](modules/calcOhsorryCore.js) — `calcUserWeakness` 호출에 `zasaMap: zasaData` 추가. calcWeakness 가 ratingMap 미수록 lv10 차트도 zasa level 기반 임의 estEc/Hc/Exh 로 잔차 분석 풀에 포함.
 - 본체 추천 동작 영향 없음 — userVec 정확도만 향상.
 
-### 2026-05-25 — calcWeakness analyzeFeature 추천곡 entry 에 bucketMean 추가 + 기여중 곡 풀에서 제외
+### 2026-05-25 — calcWeakness analyzeFeature 추천곡 entry 에 bucketMean 추가 + 기여중 곡 풀에서 제외 + totalContrib 노출
 - [modules/calcWeakness.js](modules/calcWeakness.js) — `analyzeFeature` 의 recommends entry 에 `bucketMean` (estEc/Hc/Exh 3 bucket 평균의 평균) 노출. ohSorryWeb 분석 탭이 "현재 EX → 목표 EX (+차이)" 표기로 그 차트 feature 기여 가능 점수 시각화에 사용.
 - 추천 풀 필터 강화 — 이미 bucketMean 이상 친 곡 (residual >= 0, 강점 기여중) 은 추천 의미 없어 제외. 기존엔 rate >= 95% 만 제외.
+- `totalContrib` (Σ byChart.contrib) return 값 추가 — UI 가 feature 별 현재 누적 기여를 기여곡 row 와 같은 스케일로 표시.
 - 본체 추천 동작 영향 없음 — analyzeFeature 만 사용 (calcOhsorryCore 미사용).
 
 ### 2026-05-24 — 패턴 분석 통합 — calcOhsorryCore 강점 매치 정렬 + 새 추천 범위 룰 + EXH 통합
