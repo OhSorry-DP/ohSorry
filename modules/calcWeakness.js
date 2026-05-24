@@ -200,6 +200,151 @@
     });
   }
 
+  // 한 feature 의 상세 분석 — top 기여 곡 (부호별) + "올리려면" 추천 곡.
+  // opts:
+  //   feat         feature 키 ('NOTES'/'CHORD'/...)
+  //   allCharts    유저 차트 점수 배열
+  //   patternsMap  patterns-all-slim.json
+  //   normFn       title 정규화
+  //   userVec      이미 계산한 userVec (없으면 calcUserWeakness 내부 호출 — 비용 큼)
+  //   baseStar     사용자 추정 ★ (추천곡 ★ 범위 제한 용)
+  //   topN         default 5
+  //   minLv        default 11
+  // return:
+  //   { feat, value, isStrength, summary: {strongAvg, allAvg, gap, n}, contributors, recommends }
+  function analyzeFeature(opts) {
+    opts = opts || {};
+    var feat = opts.feat;
+    var allCharts = opts.allCharts || [];
+    var patternsMap = opts.patternsMap || {};
+    var normFn = opts.normFn || function (s) { return s; };
+    var userVec = opts.userVec || calcUserWeakness({ allCharts: allCharts, patternsMap: patternsMap, normFn: normFn, minLv: opts.minLv });
+    var baseStar = opts.baseStar;
+    var topN = opts.topN || 5;
+    var minLv = typeof opts.minLv === 'number' ? opts.minLv : 11;
+
+    var value = userVec[feat] || 0;
+    var isStrength = value >= 0;
+
+    // title norm → songId
+    var titleToId = {};
+    for (var id in patternsMap) {
+      if (!Object.prototype.hasOwnProperty.call(patternsMap, id)) continue;
+      var t = (patternsMap[id] && patternsMap[id].t) || '';
+      var k = normFn(t);
+      if (k && !titleToId[k]) titleToId[k] = id;
+    }
+
+    // 유저 차트 매칭 + lv 평균 + 잔차
+    var lvAgg = {};
+    var charts = [];
+    for (var i = 0; i < allCharts.length; i++) {
+      var c = allCharts[i];
+      if (!c || !c.title || !c.diff) continue;
+      var cn = DIFF2CHART[c.diff];
+      if (!cn) continue;
+      var sid = titleToId[normFn(c.title)];
+      if (!sid) continue;
+      var sp = patternsMap[sid];
+      if (!sp || !sp.c || !sp.c[cn]) continue;
+      var lv = sp.c[cn].lv;
+      if (lv < minLv) continue;
+      var pt = avgPt(sp.c[cn])[feat] || 0;
+      var rate;
+      if (typeof c.scorePercent === 'number') rate = c.scorePercent;
+      else if (typeof c.exScore === 'number' && typeof c.noteCount === 'number' && c.noteCount > 0) {
+        rate = (c.exScore / (c.noteCount * 2)) * 100;
+      } else continue;
+      charts.push({
+        title: c.title, diff: c.diff, lv: lv, pt: pt, rate: rate,
+        lampNum: c.lampNum, songId: sid, chartName: cn,
+      });
+      if (!lvAgg[lv]) lvAgg[lv] = { sum: 0, n: 0 };
+      lvAgg[lv].sum += rate;
+      lvAgg[lv].n += 1;
+    }
+    for (var lvk in lvAgg) lvAgg[lvk].mean = lvAgg[lvk].sum / lvAgg[lvk].n;
+
+    // 잔차 + 기여도
+    for (var j = 0; j < charts.length; j++) {
+      var ch = charts[j];
+      ch.residual = ch.rate - lvAgg[ch.lv].mean;
+      ch.contrib = ch.residual * ch.pt;
+    }
+
+    // top 기여 곡 — 부호별 (강점=잘 친 / 약점=못 친)
+    var sorted = charts.slice().sort(isStrength
+      ? function (a, b) { return b.contrib - a.contrib; }
+      : function (a, b) { return a.contrib - b.contrib; });
+    var contributors = sorted.slice(0, topN);
+
+    // 자연어 설명 — 그 feature pt 강한 차트 (상위 30%) 의 평균 rate vs 전체 평균
+    var allAvg = 0;
+    if (charts.length > 0) {
+      for (var k1 = 0; k1 < charts.length; k1++) allAvg += charts[k1].rate;
+      allAvg /= charts.length;
+    }
+    var sortedByPt = charts.slice().sort(function (a, b) { return b.pt - a.pt; });
+    var strongN = Math.max(1, Math.floor(charts.length * 0.3));
+    var strongAvg = 0;
+    for (var k2 = 0; k2 < Math.min(strongN, sortedByPt.length); k2++) strongAvg += sortedByPt[k2].rate;
+    strongAvg = strongN > 0 ? strongAvg / Math.min(strongN, sortedByPt.length) : 0;
+    var gap = strongAvg - allAvg;
+
+    // 추천곡 — patternsMap 의 차트 중 그 feature 강한 + 사용자 잘 못 친 / NP + baseStar 근처
+    var played = {};
+    for (var k3 = 0; k3 < charts.length; k3++) {
+      played[charts[k3].songId + '|' + charts[k3].chartName] = charts[k3].rate;
+    }
+    var recommends = [];
+    for (var sid2 in patternsMap) {
+      if (!Object.prototype.hasOwnProperty.call(patternsMap, sid2)) continue;
+      var sp2 = patternsMap[sid2];
+      if (!sp2 || !sp2.c) continue;
+      for (var cn2 in sp2.c) {
+        if (!Object.prototype.hasOwnProperty.call(sp2.c, cn2)) continue;
+        var ch2 = sp2.c[cn2];
+        var lv2 = ch2.lv;
+        if (lv2 < minLv) continue;
+        if (baseStar != null) {
+          // baseStar 근처 (-2 ~ +1) 만
+          if (lv2 < baseStar - 2 || lv2 > baseStar + 1) continue;
+        }
+        var pt2 = avgPt(ch2)[feat] || 0;
+        if (pt2 < 30) continue;  // feature 약한 곡 (영향 작음) 제외
+        var key2 = sid2 + '|' + cn2;
+        var playedRate = played[key2];
+        // 이미 잘 친 곡 (rate >= 80%) 제외
+        if (playedRate != null && playedRate >= 80) continue;
+        recommends.push({
+          songId: sid2, chartName: cn2, title: sp2.t, lv: lv2, pt: pt2,
+          rate: playedRate == null ? null : playedRate,
+          isNp: playedRate == null,
+        });
+      }
+    }
+    // 정렬 — pt desc primary, NP > 낮은 rate 순
+    recommends.sort(function (a, b) {
+      if (b.pt !== a.pt) return b.pt - a.pt;
+      if (a.isNp && !b.isNp) return -1;
+      if (b.isNp && !a.isNp) return 1;
+      return (a.rate || 0) - (b.rate || 0);
+    });
+    recommends = recommends.slice(0, topN);
+
+    return {
+      feat: feat, value: value, isStrength: isStrength,
+      summary: {
+        strongAvg: +strongAvg.toFixed(1),
+        allAvg: +allAvg.toFixed(1),
+        gap: +gap.toFixed(1),
+        n: charts.length,
+      },
+      contributors: contributors,
+      recommends: recommends,
+    };
+  }
+
   return {
     FEATS: FEATS,
     DIFF2CHART: DIFF2CHART,
@@ -210,5 +355,6 @@
     chartWeaknessMatch: chartWeaknessMatch,
     fetchPatternsMap: fetchPatternsMap,
     fetchAndCalcWeakness: fetchAndCalcWeakness,
+    analyzeFeature: analyzeFeature,
   };
 });
