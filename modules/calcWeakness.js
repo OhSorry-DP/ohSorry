@@ -310,6 +310,8 @@
         if (baseStar != null) {
           // baseStar 근처 (-2 ~ +1) 만
           if (lv2 < baseStar - 2 || lv2 > baseStar + 1) continue;
+          // baseStar 2.5+ (초보 이상) — lv10 미만 곡은 추천 안 함 (저레벨 곡 추천 의미 X)
+          if (baseStar >= 2.5 && lv2 < 10) continue;
         }
         var pt2 = avgPt(ch2)[feat] || 0;
         if (pt2 <= 0) continue;  // 그 feature 가 아예 없는 곡만 제외
