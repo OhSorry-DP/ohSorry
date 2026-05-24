@@ -331,8 +331,8 @@
         if (pt2 <= 0) continue;  // 그 feature 가 아예 없는 곡만 제외
         var key2 = sid2 + '|' + cn2;
         var playedRate = played[key2];
-        // 이미 잘 친 곡 (rate >= 80%) 제외
-        if (playedRate != null && playedRate >= 80) continue;
+        // 만점에 가까운 곡 (rate >= 95%) 만 제외. 강점 기여 곡 (rate 80~94) 도 추천 풀 포함.
+        if (playedRate != null && playedRate >= 95) continue;
         recommends.push({
           songId: sid2, chartName: cn2, title: sp2.t, lv: lv2, pt: pt2,
           rate: playedRate == null ? null : playedRate,
@@ -340,13 +340,23 @@
         });
       }
     }
-    // 추출 룰 — 친 곡 (점수 올릴 여지 있는 곡) 3 + NP (새 곡) 2 조합.
-    //   각 풀 pt desc 정렬 후 top N. 부족 시 반대 풀에서 보충해서 총 topN 채움.
+    // 추출 룰 — 친 곡 (기여도 큰 곡) 3 + NP (새 곡) 2 조합.
+    //   친 곡 정렬 — |기여도| desc (= |pt × (rate - lvMean)|). contributors 와 같은 기준 (부호 무관).
+    //     강점 케이스 (잘 친 + pt 강한) / 약점 케이스 (못 친 + pt 강한) 둘 다 우선.
+    //     lv11+ 만 lvAgg 있음. 그 외 lv (10 등) 는 fallback 70.
+    //   NP 정렬 — pt desc (단순).
+    //   부족 시 반대 풀에서 보충해서 총 topN 채움.
     var played2 = recommends.filter(function (r) { return !r.isNp; });
     var np = recommends.filter(function (r) { return r.isNp; });
+    var absContrib = function (r) {
+      var lvMean = lvAgg[r.lv] ? lvAgg[r.lv].mean : 70;
+      return Math.abs(r.rate - lvMean) * r.pt;
+    };
     played2.sort(function (a, b) {
-      if (b.pt !== a.pt) return b.pt - a.pt;
-      return (a.rate || 0) - (b.rate || 0);
+      var ca = absContrib(a);
+      var cb = absContrib(b);
+      if (ca !== cb) return cb - ca;
+      return b.pt - a.pt;
     });
     np.sort(function (a, b) { return b.pt - a.pt; });
     var nPlayed = Math.min(3, played2.length);
