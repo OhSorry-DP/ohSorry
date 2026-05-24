@@ -744,9 +744,9 @@ window.OhsorryCore = {
 
   // ----- v3.3.5: 외부 lib 3종 (oldOSR + OSR + OSR135) 분기 채택 -----
   //   oldOSR (v3.3.3): runStarModel — fallback 용 (OSR 실패 시)
-  //   OSR (v0.0.2):    IRT + ridge OLS 기반 user★ 추정 (ereter scale) — 13 미만 영역 메인
-  //   OSR135 (v0.0.2): bin50 + 50% 임계 + 상향 bin 부분 보너스 — 13+ 영역 메인 (14+ MAE 0.014)
-  //   분기 (D2): OSR135 ≥ 13.0 → OSR135 / else → OSR / 둘 다 없으면 oldOSR
+  //   OSR (v0.0.2):    IRT + ridge OLS 기반 user★ 추정 (ereter scale) — < 10.0 영역 메인 (group lib base)
+  //   OSR135:          재학습 후 전 zone 에서 압도적 정확 — 10.0+ 메인 (adopt v0.0.2)
+  //   분기: OSR135 ≥ 10.0 → OSR135 / 9.0~10.0 블렌드 / < 9.0 → OSR (group lib) / 둘 다 없으면 oldOSR
   let starEstimate = null;
   let starRaw = null;
   let starEstimateOld = null;
@@ -838,27 +838,26 @@ window.OhsorryCore = {
     starEstimateOld = newOldStar;
   }
 
-  // 채택 로직 (v335E — 1021명 검증 통과) — D3 분기 + spread gate:
+  // 채택 로직 (v335E + adopt v0.0.2 — OSR135 우선) — D3 분기 + spread gate:
   //   [신뢰도 게이트] OSR135 세 분기(EC/HC/EXH) 중 0(데이터 없음) 제외, max-min spread > 2.5 면
   //                  OSR135 내부 불일치 → 신뢰 X → baseStar2 직행
   //   spread ≤ 2.5 일 때만 OSR135 사용:
-  //     ≥13.5            → OSR135 직행 (14+ 정확도 핵심)
-  //     12.5 ≤ x < 13.5  → 블렌드 구간:
-  //         osr > osr135 → 기본 OSR135 직행. 단, OSR135 ≥ 13.0 + gap ≥ 0.35 면 낮은 base 와 제한 블렌드
-  //         diffBlend = baseStar2 ↔ osr135 (osr135 위치로 12.5~13.5 선형)
+  //     ≥10.0            → OSR135 직행 (재학습 결과 전 zone 에서 OSR135 가 최강 — adopt v0.0.2)
+  //     9.0 ≤ x < 10.0   → 블렌드 구간:
+  //         diffBlend = baseStar2 ↔ osr135 (osr135 위치로 9.0~10.0 선형)
   //         gapW = clamp((osr135 - osr) / 3) — gap 작으면 diffBlend, 크면 (osr 망가짐) osr135 직행
   //         최종 = diffBlend × (1-gapW) + osr135 × gapW
-  //     < 12.5           → baseStar2
+  //     < 9.0            → baseStar2
   //   group 별 base 값 (baseStar2):
   //     group A·B → OSR  (없으면 oldOSR fallback)
   //     group C   → OSR값 ≥ 11.0 → OSR / < 11.0 → oldOSR / 10.5~11.0 보간
+  // v0.0.2 (adopt.js): under-blend 분기 폐기 — 전 zone 에서 OSR135 가 OSR 보다 정확해진 이상
+  //   "OSR135 가 과소평가 → OSR 로 끌어올림" 전제 자체가 무너짐.
   // 내부 계산용 starEstimateNew (OSR) 는 그대로 유지 — 추천 풀 baseStar (ohsorryRecBase) 에서 사용
-  const OSR135_TH = 13.5;       // OSR135 직행 하한
-  const BLEND_W = 1.0;          // 12.5~13.5 블렌드 폭
+  const OSR135_TH = 10.0;       // OSR135 직행 하한 (v0.0.2: 13.5 → 10.0)
+  const BLEND_W = 1.0;          // 9.0~10.0 블렌드 폭
   const GAP_GUARD = 3.0;        // OSR135-OSR gap (osr 망가짐 판정)
   const SPREAD_MAX = 2.5;       // OSR135 세 분기 spread 신뢰 상한
-  const OSR135_UNDER_TH = 13.0;  // OSR>OSR135 과소평가 보정 하한 (12점대 과상승 방지)
-  const OSR135_UNDER_GAP = 0.35; // OSR 과 OSR135 차이가 충분히 큰 경우만 보정
   const isAB135 = osrGroup === 'A' || osrGroup === 'B';
   // group 별 base 값 (baseStar2) + 로그 라벨 (groupLib)
   let baseStar2, groupLib;
@@ -903,22 +902,6 @@ window.OhsorryCore = {
     const lib = baseStar2 != null ? groupLib : 'OSR13.5+(fb)';
     const reason = baseStar2 != null ? `OSR135 ${starEstimate135.toFixed(2)} < ${OSR135_TH - BLEND_W}` : 'group lib 없음';
     console.log(`[step2] ★ = ${lib} ${starEstimate.toFixed(2)} (${reason})`);
-  } else if (starEstimateNew != null && starEstimateNew > starEstimate135) {
-    const lowBase = Math.min(
-      starEstimateNew,
-      starEstimateOld != null ? starEstimateOld : starEstimateNew,
-    );
-    if (
-      starEstimate135 >= OSR135_UNDER_TH &&
-      starEstimateNew - starEstimate135 >= OSR135_UNDER_GAP &&
-      lowBase > starEstimate135
-    ) {
-      starEstimate = starEstimate135 * 0.35 + lowBase * 0.65;
-      console.log(`[step2] ★ = OSR13.5+ under-blend ${starEstimate.toFixed(2)} (osr ${starEstimateNew.toFixed(2)} > osr135 ${starEstimate135.toFixed(2)}, lowBase ${lowBase.toFixed(2)})`);
-    } else {
-      starEstimate = starEstimate135;
-      console.log(`[step2] ★ = OSR13.5+ ${starEstimate.toFixed(2)} (osr ${starEstimateNew.toFixed(2)} > osr135 → 직행)`);
-    }
   } else {
     const t = (starEstimate135 - (OSR135_TH - BLEND_W)) / BLEND_W;
     const diffBlend = baseStar2 * (1 - t) + starEstimate135 * t;

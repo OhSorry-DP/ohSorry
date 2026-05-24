@@ -308,6 +308,13 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### adopt v0.0.2 — OSR135 10.0+ 직행 + under-blend 폐기 (재학습 OSR135 반영)
+- gist 의 [adopt.js](https://gist.githubusercontent.com/.../adopt.js) v0.0.1 → v0.0.2. OSR135 재학습 결과 zone 별 MAE 가 oldOSR / OSR 대비 전 영역에서 압도적 → 채택 분기 단순화.
+  - **OSR135_TH: 13.5 → 10.0** (10.0+ 면 OSR135 직행). 9.0~10.0 블렌드, < 9.0 baseStar2 유지.
+  - **under-blend 분기 제거** — "OSR > OSR135 면 OSR 신뢰" 보정 폐기. OSR135 가 OSR 보다 정확해진 이상 전제 무너짐.
+- [modules/calcOhsorryCore.js](modules/calcOhsorryCore.js) — adopt.js fetch 실패 시 inline fallback 도 동일 정리 (`OSR135_TH=10.0`, under-blend 분기 제거, 헤더 주석 갱신).
+- 변경 사유는 [ohSorryRating README](../ohSorryRating/README.md#변경-이력) 참고 — zone 별 MAE 표 포함.
+
 ### ohsorryShelf v0.0.26 — renderStackbar zasaData 옵션 추가 (오소리 유저 NP 미집계 fix)
 - `renderStackbar(charts, gameLevel, opts)` — `opts.zasaData` 받으면 zasa-data.charts 를 base 로 깔고 charts 매칭, 미매칭 zasa 곡은 NP 로 카운트.
 - 기존 회귀: 오소리(아케이드) 유저 `charts_json` 은 플레이한 곡만 들어있어, 격자 (`renderShelf`) 는 NP placeholder 가 채워졌으나 하단 stackbar 는 raw charts 로 집계 → NP 0곡으로 잘못 표기되던 문제. INF 유저는 TSV 가 미플레이 곡까지 들고있어 무관.
