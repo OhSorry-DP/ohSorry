@@ -308,6 +308,10 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### 2026-05-25 — calcOhsorryCore userVec 계산 시 zasaMap 전달 (lv10 차트 포함)
+- [modules/calcOhsorryCore.js](modules/calcOhsorryCore.js) — `calcUserWeakness` 호출에 `zasaMap: zasaData` 추가. calcWeakness 가 ratingMap 미수록 lv10 차트도 zasa level 기반 임의 estEc/Hc/Exh 로 잔차 분석 풀에 포함.
+- 본체 추천 동작 영향 없음 — userVec 정확도만 향상.
+
 ### 2026-05-25 — calcWeakness analyzeFeature 추천곡 entry 에 bucketMean 추가
 - [modules/calcWeakness.js](modules/calcWeakness.js) — `analyzeFeature` 의 recommends entry 에 `bucketMean` (estEc/Hc/Exh 3 bucket 평균의 평균) 노출. ohSorryWeb 분석 탭이 "현재 EX → 목표 EX (+차이)" 표기로 그 차트 feature 기여 가능 점수 시각화에 사용.
 - 본체 추천 동작 영향 없음 — 신규 필드만 추가.
