@@ -30,7 +30,7 @@
 // ============================================================
 
 window.OhsorryRender = {
-  VERSION: '0.0.345',
+  VERSION: '0.0.347',
 
   // 진행률 UI — core 의 onProgress 콜백에서 호출
   showProgress: function (msg, pct) {
@@ -240,8 +240,11 @@ window.OhsorryRender = {
         #__dp_score_panel details.toggle-rec .rec-reroll:hover { color: #333; }
         #__dp_score_panel details.toggle-rec .rec-reroll:active { color: #000; }
         #__dp_score_panel .profile { display: flex; gap: 12px; align-items: center; padding: 12px; background: #f8f9fb; border-radius: 6px; margin-bottom: 0; }
-        #__dp_score_panel .profile-img { flex-shrink: 0; width: 64px; height: 64px; background: #e9ecef; border-radius: 4px; overflow: hidden; }
+        #__dp_score_panel .profile-img-col { display: flex; flex-direction: column; align-items: center; gap: 4px; flex-shrink: 0; }
+        #__dp_score_panel .profile-img { width: 64px; height: 64px; background: #e9ecef; border-radius: 4px; overflow: hidden; }
         #__dp_score_panel .profile-img img { width: 100%; height: 100%; object-fit: cover; }
+        #__dp_score_panel .profile-web-link { font-size: 10px; color: #666; text-decoration: underline; cursor: pointer; line-height: 1.2; white-space: nowrap; }
+        #__dp_score_panel .profile-web-link:hover { color: #212529; }
         #__dp_score_panel .profile-info { flex: 1; min-width: 0; }
         #__dp_score_panel .profile-name { font-size: 16px; font-weight: 600; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         #__dp_score_panel .profile-id { font-size: 11px; color: #666; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -313,7 +316,12 @@ window.OhsorryRender = {
 
       ${profile ? `
         <div class="profile">
-          ${profile.qproImg ? `<div class="profile-img"><img src="${escHtml(profile.qproImg)}" alt="qpro"></div>` : ''}
+          ${(profile.qproImg || profile.iidxId) ? `
+            <div class="profile-img-col">
+              ${profile.qproImg ? `<div class="profile-img"><img src="${escHtml(profile.qproImg)}" alt="qpro"></div>` : ''}
+              ${profile.iidxId ? `<a class="profile-web-link" href="https://ohsorry.vercel.app/#user@${escHtml(profile.iidxId)}" target="_blank" rel="noopener">오소리웹으로 이동</a>` : ''}
+            </div>
+          ` : ''}
           <div class="profile-info">
             <div class="profile-name">${escHtml(profile.djName || 'DJ')}</div>
             <div class="profile-id">IIDX ID: ${escHtml(profile.iidxId || '-')}</div>

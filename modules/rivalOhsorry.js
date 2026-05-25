@@ -92,16 +92,37 @@
   };
 
   // 단위 int → 한자 (setup_users.sql 매핑 — 12=皆伝 / 11=中伝 / 10~1=十段~初段 / 0=一級 / -8~-1=九級~二級).
-  //   string (이미 한자) 으로 들어오면 그대로.
-  function rankToKanji(r) {
-    if (typeof r === 'string') return r || '-';
-    if (typeof r !== 'number') return '-';
-    if (r === 12) return '皆伝';
-    if (r === 11) return '中伝';
-    if (r >= 1 && r <= 10) return ['初','二','三','四','五','六','七','八','九','十'][r-1] + '段';
-    if (r === 0) return '一級';
-    if (r >= -8 && r <= -1) return ['二','三','四','五','六','七','八','九'][-r-1] + '級';
-    return '-';
+  //   string (이미 한자) 으로 들어오면 그대로 label 로 사용 (색 분류는 텍스트 매칭).
+  // 색 규칙은 ohsorryRender.js 프로필 카드 (rankStyle) 와 동일 — 皆伝/中伝 shimmer, 9~10段 red, 1~8段 blue, 級/그외 gray.
+  function rankInfo(r) {
+    if (r == null || r === '') return { label: '-', color: '#6c757d', cls: '' };
+    // string 입력 — kanji 매칭으로 색 분류
+    if (typeof r === 'string') {
+      const label = r;
+      if (r.includes('皆伝')) return { label, color: null, cls: 'rank-kaiden' };
+      if (r.includes('中伝')) return { label, color: null, cls: 'rank-chuden' };
+      const KANJI_NUM = { '一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9, '十': 10 };
+      const m = r.match(/([一二三四五六七八九十]+)\s*段/);
+      if (m) {
+        const s = m[1];
+        const n = s === '十' ? 10 : (s.length === 1 && KANJI_NUM[s] ? KANJI_NUM[s] : null);
+        if (n != null) return { label, color: n >= 9 ? '#dc3545' : '#1971c2', cls: '' };
+      }
+      return { label, color: '#6c757d', cls: '' };
+    }
+    if (typeof r !== 'number') return { label: '-', color: '#6c757d', cls: '' };
+    if (r === 12) return { label: '皆伝', color: null, cls: 'rank-kaiden' };
+    if (r === 11) return { label: '中伝', color: null, cls: 'rank-chuden' };
+    if (r >= 1 && r <= 10) {
+      const kanji = ['初','二','三','四','五','六','七','八','九','十'][r-1] + '段';
+      return { label: kanji, color: r >= 9 ? '#dc3545' : '#1971c2', cls: '' };
+    }
+    if (r === 0) return { label: '一級', color: '#6c757d', cls: '' };
+    if (r >= -8 && r <= -1) {
+      const kanji = ['二','三','四','五','六','七','八','九'][-r-1] + '級';
+      return { label: kanji, color: '#6c757d', cls: '' };
+    }
+    return { label: '-', color: '#6c757d', cls: '' };
   }
 
   // batch 종료 시 라이벌 목록 패널 — 각 행 클릭 시 ohSorryWeb 의 그 유저 카드 새 탭 open.
@@ -114,16 +135,32 @@
       'padding:14px 16px;color:#e9ecef;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;' +
       'max-width:380px;max-height:80vh;overflow-y:auto;box-shadow:0 4px 24px rgba(0,0,0,.5);font-size:13px';
     const rowsHtml = rivals.map((r) => {
-      const dpRank = rankToKanji(r.dp_rank);
+      const info = rankInfo(r.dp_rank);
+      // shimmer class (rank-kaiden/chuden) 면 색은 CSS, 그 외는 inline color
+      const classAttr = info.cls ? ` class="${info.cls}"` : '';
+      const colorAttr = info.color ? `color:${info.color};` : '';
       return `<div class="__dp_rival_row" data-id="${r.iidx_id}" `
         + `style="display:flex;gap:10px;padding:6px 8px;border-radius:4px;cursor:pointer;align-items:center">`
         + `<span style="flex:1;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${(r.dj_name || '?').replace(/[<>]/g, '')}</span>`
         + `<span style="font-family:monospace;font-size:11px;opacity:0.7">${r.iidx_id}</span>`
-        + `<span style="color:#ff9bce;font-weight:700;min-width:36px;text-align:right">${dpRank}</span>`
+        + `<span${classAttr} style="${colorAttr}font-weight:700;min-width:36px;text-align:right">${info.label}</span>`
         + `</div>`;
     }).join('');
+    // shimmer CSS — ohsorryRender.js (#__dp_score_panel) 와 동일 키프레임/그라데이션을 #__dp_rival_list 에도 주입.
+    const shimmerCss =
+      `<style>` +
+      `#__dp_rival_list .rank-chuden, #__dp_rival_list .rank-kaiden {` +
+      ` background-clip:text;-webkit-background-clip:text;` +
+      ` -webkit-text-fill-color:transparent;color:transparent;` +
+      ` background-size:200% 100%;animation:__dp_rival_shimmer 6s linear infinite;` +
+      `}` +
+      `#__dp_rival_list .rank-chuden { background-image:linear-gradient(90deg,#8c95a0 0%,#8c95a0 40%,#c7ccd2 50%,#8c95a0 60%,#8c95a0 100%); }` +
+      `#__dp_rival_list .rank-kaiden { background-image:linear-gradient(90deg,#c8a347 0%,#c8a347 40%,#ead78a 50%,#c8a347 60%,#c8a347 100%); }` +
+      `@keyframes __dp_rival_shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }` +
+      `</style>`;
     ov.innerHTML =
-      `<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;gap:8px">`
+      shimmerCss
+      + `<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;gap:8px">`
       + `<div style="font-size:13px;font-weight:700">라이벌 ${rivals.length}명 — 클릭 시 ohSorryWeb 새 탭</div>`
       + `<button id="__dp_rival_close" style="background:transparent;border:0;color:#888;cursor:pointer;font-size:20px;line-height:1;padding:0 4px">×</button>`
       + `</div>`

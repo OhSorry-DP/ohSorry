@@ -308,6 +308,18 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### 2026-05-25 — ohsorryRender v0.0.347 — 프로필 카드 쿠프로 아래 "오소리웹으로 이동" 링크
+- [modules/ohsorryRender.js](modules/ohsorryRender.js) — 프로필 카드의 쿠프로 이미지 아래에 `오소리웹으로 이동` 링크 추가. 클릭 시 새 탭으로 `https://ohsorry.vercel.app/#user@{iidxId}` (해당 유저 카드) 이동.
+- 레이아웃: 기존 `.profile-img` 한 칸을 `.profile-img-col` (flex-direction: column) 으로 감싸 쿠프로 + 링크 세로 배치. qproImg 또는 iidxId 둘 다 없으면 wrapper 자체 생략.
+- 색: 링크 `#666` (회색) / hover `#212529` (어두운 회색). font-size 10px.
+- own 모드 / rival 모드 양쪽 다 동일하게 표시 — rival 모드 시 그 라이벌의 iidxId 로 링크 (rivalOhsorry 의 batch 종료 목록 행 클릭 흐름과 동일 URL).
+
+### 2026-05-25 — rivalOhsorry — 라이벌 목록 단위 색 본체 프로필 카드와 통일
+- [modules/rivalOhsorry.js](modules/rivalOhsorry.js) — `renderRivalList` 의 dp_rank 표시 색을 `ohsorryRender.js` 프로필 카드 `rankStyle` 와 동일 규칙으로 변경. 기존에는 무조건 `#ff9bce` (핑크) 였음.
+  - 皆伝 / 中伝 → 금빛 / 은빛 shimmer 그라데이션 (CSS `rank-kaiden` / `rank-chuden` 키프레임 `#__dp_rival_list` 스코프로 inline 주입)
+  - 9段·10段 (九段·十段) → `#dc3545` (빨강) / 1~8段 → `#1971c2` (파랑) / 一級~九級 / 미지정 → `#6c757d` (회색)
+- `rankToKanji(r)` → `rankInfo(r)` 로 교체. `{ label, color, cls }` 반환. string (이미 한자) 입력도 받음 — 한자 매칭으로 색 분류.
+
 ### 2026-05-25 — ohsorry wrapper v3.3.9 — 라이벌 페이지에서 자동 rival 모드 (레벨 선택 가능)
 - [ohsorry.js](ohsorry.js) — 본체 wrapper 가 URL 의 `?rival=<토큰>` 감지 시 자동으로 `Core.compute({mode:'rival', rivalToken})` 호출. 라이벌 페이지 (`difficulty_rival.html?rival=...`) 띄워둔 상태에서 본체 북마크렛 / 콘솔 한 줄 그대로 실행하면 그 라이벌 데이터를 긁어옴.
 - rivalOhsorry wrapper 와 차이 — 기존 rivalOhsorry 는 시리즈 (전곡) 만 긁었지만, 본체 wrapper 의 rival 모드는 기존 레벨/시리즈 선택 모달을 그대로 유지 → 라이벌 데이터도 LEVEL 11·12 만 빠르게 받기 가능. eagateFetch 가 `isRival`/`rivalToken` 받아서 `difficulty_rival.html` + `&rival=<토큰>` 으로 fetch URL 자동 전환.
