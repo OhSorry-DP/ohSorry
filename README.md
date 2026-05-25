@@ -308,6 +308,12 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### 2026-05-25 — analysisRender v0.0.9 — 막대그래프 잔차 기반으로 복구
+- [modules/analysisRender.js](modules/analysisRender.js) — `buildBarChart` 의 `__absoluteSkill` + `NORMALIZE_ANCHORS` (Q-Q hinge 매핑) 분기 제거. `userVec[f.k]` (잔차 분석 결과) 의 사용자 평균 대비 상대값으로 표시.
+- 헤더 detail score / `normalizeSkill` / `NORMALIZE_ANCHORS` 정의는 그대로 유지 (다른 곳 활용 여지).
+- gist 마스터 (ohSorryWeb + INFOhSorry 양쪽이 fetch) — **INF오소리 분석탭 막대그래프도 같이 영향**.
+- ohSorry repo 에 처음 add (이전엔 gist 만 관리).
+
 ### 2026-05-25 — dbConn v0.0.405 — songs 마스터 자동 등록 (ensure_song RPC)
 - [modules/dbConn.js](modules/dbConn.js) — `upsertUserChartScores` 에서 신곡 (songs 마스터 미등록) 이 eagate 에서 들어오면 `ensure_song` RPC 로 자동 INSERT.
 - `ac` 비트 (1=AC, 2=INF) 자동 결정: playedVersion 0=INF→2, 그 외=AC→1. `LEGGENDARIA` 차트는 `legen` 비트만, 그 외는 `ac` 비트만 set.
