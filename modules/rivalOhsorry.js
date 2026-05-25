@@ -91,8 +91,58 @@
     return m ? decodeURIComponent(m[1]) : null;
   };
 
-  // IIDX ID 리스트 (쉼표/줄바꿈/공백 구분) → 각 ID 마다 토큰 추출 → 순회 __dp_render_rival 호출.
-  // 라이벌마다 패널이 다시 그려지므로 마지막 라이벌만 화면에 남고, supabase 는 모두 upload 됨.
+  // 단위 int → 한자 (setup_users.sql 매핑 — 12=皆伝 / 11=中伝 / 10~1=十段~初段 / 0=一級 / -8~-1=九級~二級).
+  //   string (이미 한자) 으로 들어오면 그대로.
+  function rankToKanji(r) {
+    if (typeof r === 'string') return r || '-';
+    if (typeof r !== 'number') return '-';
+    if (r === 12) return '皆伝';
+    if (r === 11) return '中伝';
+    if (r >= 1 && r <= 10) return ['初','二','三','四','五','六','七','八','九','十'][r-1] + '段';
+    if (r === 0) return '一級';
+    if (r >= -8 && r <= -1) return ['二','三','四','五','六','七','八','九'][-r-1] + '級';
+    return '-';
+  }
+
+  // batch 종료 시 라이벌 목록 패널 — 각 행 클릭 시 ohSorryWeb 의 그 유저 카드 새 탭 open.
+  function renderRivalList(rivals) {
+    document.getElementById('__dp_rival_list')?.remove();
+    const ov = document.createElement('div');
+    ov.id = '__dp_rival_list';
+    ov.style.cssText =
+      'position:fixed;top:60px;right:20px;z-index:10001;background:#1a1a1a;border:1px solid #444;border-radius:8px;' +
+      'padding:14px 16px;color:#e9ecef;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;' +
+      'max-width:380px;max-height:80vh;overflow-y:auto;box-shadow:0 4px 24px rgba(0,0,0,.5);font-size:13px';
+    const rowsHtml = rivals.map((r) => {
+      const dpRank = rankToKanji(r.dp_rank);
+      return `<div class="__dp_rival_row" data-id="${r.iidx_id}" `
+        + `style="display:flex;gap:10px;padding:6px 8px;border-radius:4px;cursor:pointer;align-items:center">`
+        + `<span style="flex:1;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${(r.dj_name || '?').replace(/[<>]/g, '')}</span>`
+        + `<span style="font-family:monospace;font-size:11px;opacity:0.7">${r.iidx_id}</span>`
+        + `<span style="color:#ff9bce;font-weight:700;min-width:36px;text-align:right">${dpRank}</span>`
+        + `</div>`;
+    }).join('');
+    ov.innerHTML =
+      `<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;gap:8px">`
+      + `<div style="font-size:13px;font-weight:700">라이벌 ${rivals.length}명 — 클릭 시 ohSorryWeb 새 탭</div>`
+      + `<button id="__dp_rival_close" style="background:transparent;border:0;color:#888;cursor:pointer;font-size:20px;line-height:1;padding:0 4px">×</button>`
+      + `</div>`
+      + rowsHtml;
+    document.body.appendChild(ov);
+    ov.querySelector('#__dp_rival_close').addEventListener('click', () => ov.remove());
+    ov.querySelectorAll('.__dp_rival_row').forEach((row) => {
+      row.addEventListener('mouseenter', () => { row.style.background = '#232830'; });
+      row.addEventListener('mouseleave', () => { row.style.background = ''; });
+      row.addEventListener('click', () => {
+        const id = row.dataset.id;
+        if (id) window.open(`https://ohsorry.vercel.app/#user@${id}`, '_blank');
+      });
+    });
+  }
+
+  // IIDX ID 리스트 (쉼표/줄바꿈/공백 구분) → 각 ID 마다 토큰 추출 → 순회 Core.compute 호출.
+  //   기존 ohsorryRender (패널) 그리지 않음 — 마지막에 라이벌 목록 패널 (renderRivalList) 만 표시.
+  //   각 라이벌마다 supabase upsert (uploadResult 자동 호출) 는 그대로 동작.
   window.__dp_batch_rival_by_iidx = async (idsRaw) => {
     const ids = String(idsRaw || '').split(/[,\n\s]+/)
       .map(s => s.trim().replace(/-/g, ''))
@@ -101,16 +151,30 @@
       alert('유효한 IIDX ID 가 없습니다 (8자리 숫자 / 하이픈 OK).');
       return;
     }
-    // 여러 명이어도 곡 수집 범위는 맨 처음 한 번만 선택 → 모든 라이벌에 공통 적용
     const fetchOpts = await askFetchOptions();
     console.log(`[라이벌오소리] 일괄 처리 시작 — ${ids.length}명`);
+    const rivals = [];  // 결과 누적 — { iidx_id, dj_name, dp_rank }
+    // ohsorryRender.show 임시 swap — Core.compute 가 자동 호출하는 패널 렌더링 차단.
+    //   ohsorryRender 가 아직 안 load 됐을 수도 있으니 첫 호출 후 swap.
+    let renderShowSwapped = false;
+    const swapRender = () => {
+      if (renderShowSwapped || !window.OhsorryRender || !window.OhsorryRender.show) return;
+      window.OhsorryRender.__origShow = window.OhsorryRender.show;
+      window.OhsorryRender.show = async () => {};  // no-op
+      renderShowSwapped = true;
+    };
+    const restoreRender = () => {
+      if (renderShowSwapped && window.OhsorryRender && window.OhsorryRender.__origShow) {
+        window.OhsorryRender.show = window.OhsorryRender.__origShow;
+        delete window.OhsorryRender.__origShow;
+        renderShowSwapped = false;
+      }
+    };
     try {
       for (let i = 0; i < ids.length; i++) {
         const id = ids[i];
         console.log(`[라이벌오소리] [${i + 1}/${ids.length}] IIDX ID ${id} 토큰 조회...`);
         try {
-          // 토큰 검색 구간에도 로딩 박스 표시 — prompt 확인 직후부터 모듈 로딩까지 끊김 없이 이어짐.
-          // (이게 없으면 모듈 로딩 박스가 토큰 검색 뒤에 잠깐만 떴다 사라져 거의 안 보임.)
           const who = ids.length > 1 ? ` (${i + 1}/${ids.length})` : '';
           showLoadingProgress(`라이벌 검색 중${who}`, 3);
           const token = await window.__dp_fetch_rival_token(id);
@@ -119,17 +183,29 @@
             continue;
           }
           console.log(`[라이벌오소리] IIDX ID ${id} → 토큰 ${token.slice(0, 16)}... 라이벌 오소리 실행`);
-          await window.__dp_render_rival(null, token, fetchOpts);
+          const result = await window.__dp_render_rival(null, token, fetchOpts);
+          // 첫 compute 후 ohsorryRender 가 로드됨 — 그 다음부터 swap.
+          swapRender();
+          // result.dbPayload 에서 정보 추출
+          if (result && result.dbPayload && result.dbPayload.iidx_id) {
+            rivals.push({
+              iidx_id: result.dbPayload.iidx_id,
+              dj_name: result.dbPayload.dj_name,
+              dp_rank: result.dbPayload.dp_rank,
+            });
+          }
         } catch (e) {
           console.error(`[라이벌오소리] IIDX ID ${id} 처리 실패:`, e);
         }
       }
     } finally {
-      // 마지막 라이벌이 검색 실패(토큰 없음)로 끝나면 박스가 남으므로 정리.
-      // 성공 케이스에선 Core 가 이미 자기 진행률 박스를 제거한 뒤라 no-op.
       hideLoadingProgress();
+      restoreRender();
     }
-    console.log(`[라이벌오소리] 일괄 처리 완료 — ${ids.length}명`);
+    console.log(`[라이벌오소리] 일괄 처리 완료 — ${ids.length}명 (수집 ${rivals.length}명)`);
+    // 첫 라이벌은 swap 전 패널이 그려졌을 수 있음 — 정리.
+    document.getElementById('__dp_score_panel')?.remove();
+    if (rivals.length > 0) renderRivalList(rivals);
   };
 
   window.__dp_render_rival = async (dbData, overrideRivalToken, fetchOptsArg) => {

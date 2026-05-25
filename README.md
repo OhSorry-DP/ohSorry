@@ -308,6 +308,11 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### 2026-05-25 — rivalOhsorry — batch 종료 시 라이벌 목록 패널 + ohSorryWeb 새 탭
+- [modules/rivalOhsorry.js](modules/rivalOhsorry.js) — `__dp_batch_rival_by_iidx` 변경. 각 라이벌 처리 후 ohsorryRender 패널 그리지 않음 (첫 compute 후 `OhsorryRender.show` 임시 swap → no-op). supabase upsert (uploadResult) 는 그대로.
+- 모든 라이벌 처리 끝나면 `renderRivalList` — 행 = `djname / iidxid / dp단위 (한자)`. 행 클릭 시 `https://ohsorry.vercel.app/#user@{iidxid}` 새 탭 open.
+- 첫 라이벌의 잔여 패널 (`#__dp_score_panel`) 정리.
+
 ### 2026-05-25 — rivalOhsorry — 레벨 선택 모달 제거 (무조건 시리즈)
 - [modules/rivalOhsorry.js](modules/rivalOhsorry.js) — `askFetchOptions` 의 레벨별/전곡 선택 UI 제거. 무조건 `{ fetchMode: 'series', levels: undefined }` 반환.
 - 호출처 (`__dp_batch_rival_by_iidx` / `__dp_render_rival`) 흐름 그대로 유지 (Promise 시그니처).
