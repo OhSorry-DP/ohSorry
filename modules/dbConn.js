@@ -13,6 +13,14 @@
 //     호출 + DB 모드 skip + 결과 로깅' 흐름을 이 모듈로 이관. render 는 이제 한 줄로 호출.
 //   - 별도 dbUpload 모듈로 뺄까 검토했지만 둘 다 supabase 라 한 모듈에 두는 게 자연스러움.
 //
+// v0.0.405 — songs 마스터 자동 등록 (ensure_song RPC):
+//   - 신곡 (songs 마스터 미등록) 이 eagate 에서 들어오면 ensure_song RPC 로 자동 INSERT.
+//   - ac 비트 (1=AC, 2=INF) 자동 결정: playedVersion 0=INF→2, 그 외=AC→1.
+//   - LEGGENDARIA 차트는 legen 비트만, 그 외는 ac 비트만 set.
+//   - RPC 실패 (SQL 미적용 / 권한 X) 시 graceful — 기존처럼 unmatched skip.
+//   - songs cache 도 즉시 갱신 → 같은 곡의 다른 차트 row 가 재매칭됨.
+//   - 사전 조건: ohSorryAdmin/sql/setup_song_master.sql 의 ensure_song RPC 적용 (anon GRANT 포함).
+//
 // v0.0.402 — LAMP_MAP 에 풀네임 alias 추가:
 //   - calcOhsorryCore.js 의 LAMP_NAMES (NO PLAY / FAILED / EASY / CLEAR / HARD / EX HARD / FULL COMBO) 매칭
 //   - 이전엔 abbreviation (NP/F/EC/...) 만 매핑 → 풀네임 lamp 가 null 처리 → scores.lamp 다 NULL 이슈
@@ -184,6 +192,9 @@ window.OhsorryDb = (function () {
       const errText = await res.text().catch(() => '');
       throw new Error(`HTTP ${res.status} ${errText}`);
     }
+    const txt = await res.text();
+    if (!txt) return null;
+    try { return JSON.parse(txt); } catch { return txt; }
   }
 
   async function callUpsertRadar(iidxId, playStyle, sourceRadar) {
@@ -266,7 +277,9 @@ window.OhsorryDb = (function () {
       let unmatched = 0;
       let invalidDiff = 0;
       let invalidVersion = 0;
+      let autoEnsured = 0;  // ensure_song 으로 마스터에 자동 등록된 신곡 수
       const unmatchedSamples = [];
+      const autoEnsuredSamples = [];
       for (const r of rows) {
         if (!r.title || !r.iidx_id) continue;
         const diffInt = DIFF_MAP[r.diff];
@@ -274,11 +287,39 @@ window.OhsorryDb = (function () {
         const playedVersion = parseInt(r.played_version, 10);
         if (isNaN(playedVersion)) { invalidVersion++; continue; }
         const candidates = songMap.get(normTitle(r.title));
-        const songId = pickSongId(candidates, playedVersion);
+        let songId = pickSongId(candidates, playedVersion);
         if (songId == null) {
-          unmatched++;
-          if (unmatchedSamples.length < 10) unmatchedSamples.push(r.title);
-          continue;
+          // songs 마스터에 미등록 신곡 — ensure_song RPC 로 자동 등록.
+          //   ac 비트 (1=AC, 2=INF) 결정: playedVersion 0=INF, 그 외=AC.
+          //   LEGGENDARIA 차트면 legen 비트만, 그 외는 ac 비트만 set.
+          //   RPC 실패 (SQL 미적용 / 권한 X) 시 graceful — 기존처럼 unmatched skip.
+          const isLeg = r.diff === 'LEGGENDARIA';
+          const acBit = playedVersion === 0 ? 2 : 1;
+          try {
+            const ensured = await callRpc('ensure_song', {
+              p_title: r.title,
+              p_textage_song_id: null,
+              p_ac:    isLeg ? null : acBit,
+              p_legen: isLeg ? acBit : null,
+            });
+            const newId = typeof ensured === 'number' ? ensured : parseInt(ensured, 10);
+            if (!Number.isFinite(newId) || newId <= 0) throw new Error('ensure_song returned non-numeric');
+            songId = newId;
+            // songs cache 갱신 — 같은 row 묶음의 다음 차트가 재매칭 가능하도록.
+            const k = normTitle(r.title);
+            if (!songMap.has(k)) songMap.set(k, []);
+            songMap.get(k).push({
+              song_id: songId, title: r.title,
+              ac:    isLeg ? 0 : acBit,
+              legen: isLeg ? acBit : 0,
+            });
+            autoEnsured++;
+            if (autoEnsuredSamples.length < 10) autoEnsuredSamples.push(r.title);
+          } catch (e) {
+            unmatched++;
+            if (unmatchedSamples.length < 10) unmatchedSamples.push(r.title + ' (' + e.message + ')');
+            continue;
+          }
         }
         const lampInt = r.lamp != null && LAMP_MAP[r.lamp] != null ? LAMP_MAP[r.lamp] : null;
         const exScore = r.ex_score != null ? Number(r.ex_score) : null;
@@ -308,14 +349,17 @@ window.OhsorryDb = (function () {
       if (unmatched > 0) {
         console.warn(`[OhsorryDb] song 매칭 실패 ${unmatched}건 (skip). 샘플:`, unmatchedSamples);
       }
+      if (autoEnsured > 0) {
+        console.log(`[OhsorryDb] songs 마스터 자동 등록 (ensure_song) ${autoEnsured}건:`, autoEnsuredSamples);
+      }
       if (invalidDiff > 0) console.warn(`[OhsorryDb] diff 변환 실패 ${invalidDiff}건 (skip)`);
       if (invalidVersion > 0) console.warn(`[OhsorryDb] played_version 변환 실패 ${invalidVersion}건 (skip)`);
       if (scoreRows.length === 0) {
-        return { ok: true, unmatched, inserted: 0 };
+        return { ok: true, unmatched, inserted: 0, autoEnsured };
       }
       await callRpc('upsert_scores', { p_rows: scoreRows });
       console.log(`[OhsorryDb] scores upsert: ${scoreRows.length}건 (전체 ${rows.length}건 중, dedup 후)`);
-      return { ok: true, unmatched, inserted: scoreRows.length };
+      return { ok: true, unmatched, inserted: scoreRows.length, autoEnsured };
     } catch (e) {
       return { ok: false, error: e.message };
     }
@@ -420,7 +464,7 @@ window.OhsorryDb = (function () {
   }
 
   return {
-    VERSION: '0.0.404',
+    VERSION: '0.0.405',
     upsertUserProfile: upsertUserProfile,
     upsertUserChartScores: upsertUserChartScores,
     uploadResult: uploadResult,

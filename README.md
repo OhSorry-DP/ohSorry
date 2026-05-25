@@ -308,6 +308,13 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### 2026-05-25 — dbConn v0.0.405 — songs 마스터 자동 등록 (ensure_song RPC)
+- [modules/dbConn.js](modules/dbConn.js) — `upsertUserChartScores` 에서 신곡 (songs 마스터 미등록) 이 eagate 에서 들어오면 `ensure_song` RPC 로 자동 INSERT.
+- `ac` 비트 (1=AC, 2=INF) 자동 결정: playedVersion 0=INF→2, 그 외=AC→1. `LEGGENDARIA` 차트는 `legen` 비트만, 그 외는 `ac` 비트만 set.
+- RPC 실패 (SQL 미적용 / 권한 X) 시 graceful — 기존처럼 unmatched skip. songs cache 도 즉시 갱신 → 같은 곡의 다른 차트 row 가 재매칭됨.
+- `callRpc` 헬퍼 — 응답 body parse 추가 (JSON / text / null), `ensure_song` 의 song_id 반환값 받기 위함.
+- 사전 조건: [ohSorryAdmin setup_song_master.sql](../ohSorryAdmin/sql/setup_song_master.sql) 의 `ensure_song` RPC 적용 (anon GRANT 포함).
+
 ### 2026-05-25 — ohsorryRender v0.0.347 — 프로필 카드 쿠프로 아래 "오소리웹으로 이동" 링크
 - [modules/ohsorryRender.js](modules/ohsorryRender.js) — 프로필 카드의 쿠프로 이미지 아래에 `오소리웹으로 이동` 링크 추가. 클릭 시 새 탭으로 `https://ohsorry.vercel.app/#user@{iidxId}` (해당 유저 카드) 이동.
 - 레이아웃: 기존 `.profile-img` 한 칸을 `.profile-img-col` (flex-direction: column) 으로 감싸 쿠프로 + 링크 세로 배치. qproImg 또는 iidxId 둘 다 없으면 wrapper 자체 생략.
