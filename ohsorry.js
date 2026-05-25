@@ -1,4 +1,4 @@
-// 2-calc-score.js — 오소리 본체 wrapper (v3.3.8)
+// 2-calc-score.js — 오소리 본체 wrapper (v3.3.9)
 //
 // 모듈 분리:
 //   - calcOhsorryCore.js (v0.0.346) : 계산 (★ 추정 + 추천곡 + result build) — DB 모드면 ★ lib fetch 도 skip
@@ -6,19 +6,21 @@
 //   - dbConn.js          (v0.0.403) : supabase RPC + uploadResult trigger (DB 모드 자동 skip)
 //   - eagateFetch.js     (v0.0.1)   : p.eagate.573.jp difficulty/series.html fetch (DB 모드면 wrapper 가 안 받음)
 //
-// 이 wrapper 는 위 모듈들을 gist 에서 fetch + eval 한 뒤 Core.compute({mode:'own'}) 만 호출.
+// 이 wrapper 는 위 모듈들을 gist 에서 fetch + eval 한 뒤 Core.compute({mode:'own'|'rival'}) 호출.
 // DB 모드 (dbData 있음 = ohSorryWeb 게스트 페이지 / INFOhSorry 등) 일 때는 eagateFetch 를 fetch 하지 않음 —
 // 그쪽은 supabase 의 charts_json 으로 채우므로 eagate 페이지 fetch 자체가 불필요.
 //
 // 사용법:
-//   1. p.eagate.573.jp 도메인 어느 페이지에서나 자동 실행 (eagate fetch 모드)
+//   1. p.eagate.573.jp 어느 페이지에서나 자동 실행 (eagate fetch 모드)
+//      - URL 에 ?rival=<토큰> 있으면 rival 모드 자동 진입 (라이벌 페이지 띄워둔 채 실행)
+//      - 그 외는 own 모드 (본인 데이터)
 //   2. 다른 사이트에서 window.__dp_render(dbData) 로 supabase row 를 직접 넘겨 호출 (DB 모드)
 //
-// supabase version 컬럼: `${WRAPPER_VERSION}-core${CORE_VERSION_SHORT}` (예: 'v3.3.6-core335')
+// supabase version 컬럼: `${WRAPPER_VERSION}-core${CORE_VERSION_SHORT}` (예: 'v3.3.9-core346')
 // ============================================================
 
 (async function () {
-  const WRAPPER_VERSION = 'v3.3.8';
+  const WRAPPER_VERSION = 'v3.3.9';
   const GIST_BASE = 'https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw';
   const CORE_URL     = GIST_BASE + '/calcOhsorryCore.js';
   const RENDER_URL   = GIST_BASE + '/ohsorryRender.js';
@@ -66,10 +68,10 @@
   }
 
   // eagate fetch 모드에서 곡 데이터 수집 범위를 묻는 모달.
-  //   - 레벨별 : 선택한 LEVEL 폴더만 (difficulty.html). 기본 11·12 체크.
+  //   - 레벨별 : 선택한 LEVEL 폴더만 (difficulty.html / 라이벌은 difficulty_rival.html). 기본 11·12 체크.
   //   - 전곡   : 시리즈 폴더 전체 (series.html, 약 1분).
   // resolve 값 → Core.compute 의 opts.fetchMode / opts.levels 로 전달.
-  function askFetchOptions() {
+  function askFetchOptions(isRival) {
     return new Promise((resolve) => {
       document.getElementById('__dp_fetch_modal')?.remove();
       const ov = document.createElement('div');
@@ -82,9 +84,10 @@
         'min-width:24px;padding:4px 6px;font-size:13px;cursor:pointer;user-select:none">' +
         `<input type="checkbox" class="__dplv" value="${lv}"${lv >= 11 ? ' checked' : ''} style="display:none">${lv}</label>`,
       ).join('');
+      const titleText = isRival ? '라이벌 오소리 — 곡 데이터 불러오기' : '오소리 — 곡 데이터 불러오기';
       ov.innerHTML = `
         <div style="background:#fff;border-radius:12px;padding:22px 24px;width:330px;max-width:calc(100vw - 32px);box-sizing:border-box;box-shadow:0 8px 32px rgba(0,0,0,.25);color:#212529">
-          <div style="font-size:15px;font-weight:700;margin-bottom:3px">오소리 — 곡 데이터 불러오기</div>
+          <div style="font-size:15px;font-weight:700;margin-bottom:3px">${titleText}</div>
           <div style="font-size:12px;color:#888;margin-bottom:16px">어떤 곡을 가져올까요?</div>
           <label style="display:flex;align-items:flex-start;gap:8px;margin-bottom:8px;cursor:pointer">
             <input type="radio" name="__dpfm" value="level" checked style="margin-top:2px">
@@ -135,15 +138,23 @@
   }
 
   window.__dp_render = async (dbData) => {
+    // 라이벌 페이지에서 실행했는지 감지 — URL 의 ?rival=<토큰> 유무로 판단 (rivalOhsorry 와 동일 기준).
+    // dbData 모드 (게스트 페이지 등 외부 호출) 는 무조건 own.
+    const rivalToken = (!dbData && location.hostname.endsWith('p.eagate.573.jp'))
+      ? new URLSearchParams(location.search).get('rival')
+      : null;
+    const isRival = !!rivalToken;
+
     // eagate fetch 모드 (dbData 없음 + eagate 도메인) 면 곡 수집 범위를 먼저 묻는다.
+    // 라이벌 모드도 동일하게 모달 표시 — 라이벌 페이지도 difficulty_rival.html (level) / series.html (series, rival 토큰 포함) 양쪽 다 가능.
     // DB 모드 (dbData 있음) 는 charts_json 을 그대로 쓰므로 모달 생략.
     let fetchOpts = null;
     if (!dbData && location.hostname.endsWith('p.eagate.573.jp')) {
-      fetchOpts = await askFetchOptions();
+      fetchOpts = await askFetchOptions(isRival);
     }
     // 모듈 모두 load (이미 로드돼 있으면 즉시 반환)
     // normTitle 먼저 — dbConn / Core / RenderingShelf 등이 의존
-    showLoadingProgress('normTitle 로드 중', 5);
+    showLoadingProgress(isRival ? '라이벌 오소리 시작' : 'normTitle 로드 중', 5);
     try {
       await loadModule(NORM_URL,   'OhsorryNorm');
       showLoadingProgress('dbConn 로드 중', 25);
@@ -160,7 +171,8 @@
       }
       showLoadingProgress('계산 시작', 100);
       return Core.compute({
-        mode: 'own',
+        mode: isRival ? 'rival' : 'own',
+        rivalToken: rivalToken || undefined,
         dbData: dbData || null,
         wrapperVersion: WRAPPER_VERSION,
         fetchMode: fetchOpts ? fetchOpts.fetchMode : undefined,
@@ -178,7 +190,7 @@
   if (location.hostname.endsWith('p.eagate.573.jp')) {
     window.__dp_render(null);
   } else {
-    console.log('[오소리 v3.3.6] eagate 외 도메인 — window.__dp_render(dbData) 로 DB 데이터를 넘겨 호출하세요.');
+    console.log(`[오소리 ${WRAPPER_VERSION}] eagate 외 도메인 — window.__dp_render(dbData) 로 DB 데이터를 넘겨 호출하세요.`);
   }
 })();
 

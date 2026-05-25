@@ -270,7 +270,7 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 | 파일 | 버전 | 줄수 | 역할 |
 |---|---|---|---|
-| `ohsorry.js` | v3.3.6 | ~54 | **본체 wrapper** — eagate 도메인 자동 실행. core/render/db 셋 다 fetch+eval 한 뒤 `Core.compute({mode:'own'})` 호출. `window.__dp_render(dbData)` 노출 (DB 모드). |
+| `ohsorry.js` | v3.3.9 | ~70 | **본체 wrapper** — eagate 도메인 자동 실행. core/render/db/eagateFetch 모듈 fetch+eval 한 뒤 `Core.compute({mode:'own'\|'rival'})` 호출. URL `?rival=<토큰>` 있으면 rival 모드 자동 진입 (라이벌 페이지에서도 레벨/시리즈 선택 가능). `window.__dp_render(dbData)` 노출 (DB 모드). |
 | `rivalOhsorry.js` | v3.3.8 | ~118 | **라이벌 wrapper** — 라이벌 페이지 (difficulty_rival.html?rival=&lt;토큰&gt;) 자동 실행. `__dp_fetch_rival_token` / `__dp_batch_rival_by_iidx` 헬퍼 + `Core.compute({mode:'rival'})`. IIDX ID prompt → 토큰 검색 → batch 흐름. |
 | `calcOhsorryCore.js` | v0.0.335 | ~1366 | **계산 core** — ereter / zasa / textage / ohSorryRating + 외부 lib (oldOSR / OSR / OSR135) fetch + 캐시, difficulty.html 페이지 순회 fetch, parseDoc, ★ 추정 (v335E 채택 분기), 추천곡 계산, 프로필 fetch. 결과 객체 (`result`) 를 반환하고 `Render.show(result)` 호출. DOM 안 만짐 (UI 는 render). |
 | `ohsorryRender.js` | v0.0.335 | ~854 | **UI render** — 진행률 UI (`showProgress`/`hideProgress`), 결과 패널 (프로필 / ★ / 노트레이더 / 추천곡 sortable / 상세통계), `__dp_rerun` / `__dp_confirmRerun` / `__dp_toggleRadar` 등. core 의 `result` 객체 받아서 표시 + `OhsorryDb.upsertUserProfile` 호출. |
@@ -307,6 +307,12 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 ---
 
 ## 변경 이력
+
+### 2026-05-25 — ohsorry wrapper v3.3.9 — 라이벌 페이지에서 자동 rival 모드 (레벨 선택 가능)
+- [ohsorry.js](ohsorry.js) — 본체 wrapper 가 URL 의 `?rival=<토큰>` 감지 시 자동으로 `Core.compute({mode:'rival', rivalToken})` 호출. 라이벌 페이지 (`difficulty_rival.html?rival=...`) 띄워둔 상태에서 본체 북마크렛 / 콘솔 한 줄 그대로 실행하면 그 라이벌 데이터를 긁어옴.
+- rivalOhsorry wrapper 와 차이 — 기존 rivalOhsorry 는 시리즈 (전곡) 만 긁었지만, 본체 wrapper 의 rival 모드는 기존 레벨/시리즈 선택 모달을 그대로 유지 → 라이벌 데이터도 LEVEL 11·12 만 빠르게 받기 가능. eagateFetch 가 `isRival`/`rivalToken` 받아서 `difficulty_rival.html` + `&rival=<토큰>` 으로 fetch URL 자동 전환.
+- 모달 title 만 라이벌 모드면 "라이벌 오소리 — 곡 데이터 불러오기" 로 분기, 그 외 동작/UI 동일. IIDX prompt / batch / 라이벌 목록 패널 은 rivalOhsorry 전용 (본체는 단일 라이벌만).
+- dbData 모드 (ohSorryWeb 게스트 페이지 등) 는 영향 없음 — URL 체크 자체를 건너뜀.
 
 ### 2026-05-25 — rivalOhsorry — batch 종료 시 라이벌 목록 패널 + ohSorryWeb 새 탭
 - [modules/rivalOhsorry.js](modules/rivalOhsorry.js) — `__dp_batch_rival_by_iidx` 변경. 각 라이벌 처리 후 ohsorryRender 패널 그리지 않음 (첫 compute 후 `OhsorryRender.show` 임시 swap → no-op). supabase upsert (uploadResult) 는 그대로.
