@@ -47,7 +47,9 @@
   //           헤더 detail score / normalizeSkill / NORMALIZE_ANCHORS 정의는 그대로 유지.
   //   0.0.10 — 배율 전부 제거. 헤더 detail score 도 잔차 (vec + 80) 기준으로 통일.
   //            NORMALIZE_ANCHORS / normalizeSkill 함수 정의 통째 제거 (dead code).
-  var VERSION = '0.0.10';
+  //   0.0.11 — 기여곡 표 Top 3 + 정렬 c.pt desc (그 feature 가 가장 강한 차트) + 표시 c.pt (곡 점수).
+  //            강점/약점 동일 형식 (라벨 색만 다름).
+  var VERSION = '0.0.11';
 
   var FEATS = [
     { k: 'NOTES',   ko: '노트수',     desc: '곡의 전체 노트 양과 밀도' },
@@ -209,13 +211,10 @@
         vRel: chartContribToVRel(cid, k),
       };
     });
-    var sortedContribs = allChartsVRel.slice().sort(isPos
-      ? function (a, b) { return b.vRel - a.vRel; }
-      : function (a, b) { return a.vRel - b.vRel; }
-    );
-    var topContributors = sortedContribs.slice(0, 5);
+    var sortedContribs = allChartsVRel.slice().sort(function (a, b) { return b.pt - a.pt; });  // c.pt desc (그 feature 가 가장 강한 차트)
+    var topContributors = sortedContribs.slice(0, 3);
 
-    var cTitle = isPos ? '강점 기여 Top 5' : '약점 기여 Top 5';
+    var cTitle = isPos ? '강점 기여 Top 3' : '약점 기여 Top 3';
     html += '<div style="font-size:13px;font-weight:600;margin-bottom:4px">' + cTitle + '</div>';
     if (topContributors.length === 0) {
       html += '<div style="opacity:0.6;font-size:13px;margin-bottom:8px">데이터 없음</div>';
@@ -226,12 +225,11 @@
         + '<span style="width:16px;flex-shrink:0">diff</span>'
         + '<span style="flex:1;min-width:0">곡명</span>'
         + (!isPos ? '<span style="width:140px;text-align:right;flex-shrink:0">현재 → 목표 EXSCORE</span>' : '')
-        + '<span style="width:64px;text-align:right;flex-shrink:0">' + (isPos ? '득점' : '감점') + '</span>'
+        + '<span style="width:64px;text-align:right;flex-shrink:0">곡 점수</span>'
         + '</div>';
       topContributors.forEach(function (c) {
         var dl = DIFF_SHORT_LBL[c.diff] || '?';
-        var hideContrib = !isPos && c.vRel >= 0;
-        var contribStr = hideContrib ? '' : (c.vRel >= 0 ? '+' : '') + c.vRel.toFixed(2) + 'pt';
+        var contribStr = c.pt.toFixed(1) + 'pt';
         var rowAttrs = ' class="__uprofile_pat_row" data-clickable-chart data-title="' + escH(c.title) + '" data-diff="' + escH(c.diff || '') + '"';
         var targetCell = '';
         if (!isPos) {
@@ -258,7 +256,7 @@
           + '<span style="opacity:0.7;width:16px;flex-shrink:0">' + dl + '</span>'
           + '<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + escH(c.title) + '</span>'
           + targetCell
-          + '<span style="width:64px;text-align:right;flex-shrink:0;color:' + (c.vRel >= 0 ? '#28a745' : '#dc3545') + '">' + contribStr + '</span>'
+          + '<span style="width:64px;text-align:right;flex-shrink:0;color:' + (isPos ? '#28a745' : '#dc3545') + '">' + contribStr + '</span>'
           + '</div>';
       });
       html += '</div>';

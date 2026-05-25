@@ -308,6 +308,12 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### 2026-05-25 — analysisRender v0.0.11 — 기여곡 표 Top 3 + 곡 점수 표시
+- [modules/analysisRender.js](modules/analysisRender.js) — 강점/약점 기여곡 표 둘 다 **Top 3** 으로 통일.
+- 정렬: `c.pt` desc (그 feature 가 가장 강한 차트 — `calcWeakness` 의 raw 양손 평균 pt).
+- 표시: 오른쪽 컬럼 `vRel pt` → `곡 점수 (c.pt)` 로 변경. 컬럼 헤더도 "득점/감점" → "곡 점수" 통일.
+- 라벨 색만 강점 (`#28a745` 초록) / 약점 (`#dc3545` 빨강) 구분, 정렬/표시는 동일.
+
 ### 2026-05-25 — analysisRender v0.0.10 — 배율 전부 제거 (헤더 detail score 잔차 기준 통일)
 - [modules/analysisRender.js](modules/analysisRender.js) — `buildDetailHTML` 의 `__absoluteSkill` + `normalizeSkill` 분기 제거. 헤더 score (`피처이름 옆 NN.Npt`) / `vRel` / `isPos` 모두 잔차 기준 (`(userVec[k] || 0) + 80`) 으로 통일.
 - `NORMALIZE_ANCHORS` 정의 + `normalizeSkill` 함수 통째 삭제 (dead code).
