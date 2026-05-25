@@ -308,6 +308,11 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### 2026-05-25 — analysisRender v0.0.10 — 배율 전부 제거 (헤더 detail score 잔차 기준 통일)
+- [modules/analysisRender.js](modules/analysisRender.js) — `buildDetailHTML` 의 `__absoluteSkill` + `normalizeSkill` 분기 제거. 헤더 score (`피처이름 옆 NN.Npt`) / `vRel` / `isPos` 모두 잔차 기준 (`(userVec[k] || 0) + 80`) 으로 통일.
+- `NORMALIZE_ANCHORS` 정의 + `normalizeSkill` 함수 통째 삭제 (dead code).
+- 막대그래프는 v0.0.9 에서 이미 잔차 기반. 이제 분석탭 전체가 같은 단위 (잔차) 로 표시됨.
+
 ### 2026-05-25 — dbConn v0.0.407 — pattern 점수 알고리즘 재설계 (quantile score 평균)
 - [modules/dbConn.js](modules/dbConn.js) — `uploadResult` 5단계 (pattern vec upsert) 가 **차트별 precomputed quantile score** (gist 의 `feature-scores-slim.json`, [ohSorryRating dump-feature-scores.js](../ohSorryRating/scripts/dump-feature-scores.js) 산출) 기반으로 변경.
 - 알고리즘: `make_grid_data` RPC 의 plays 차트마다 (`textage_song_id`, `diff`) → `feature-scores` lookup → feature 별 `sum(score) / count(score>0)` → `upsert_user_pattern_vec` RPC.

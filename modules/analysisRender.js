@@ -45,7 +45,9 @@
   //   0.0.8 — 6 feature Q-Q 5점 piecewise linear interpolation (eamuse 분포 정확 매핑)
   //   0.0.9 — 막대그래프 잔차 (raw userVec) 기반으로 복구. __absoluteSkill + NORMALIZE 분기 제거.
   //           헤더 detail score / normalizeSkill / NORMALIZE_ANCHORS 정의는 그대로 유지.
-  var VERSION = '0.0.9';
+  //   0.0.10 — 배율 전부 제거. 헤더 detail score 도 잔차 (vec + 80) 기준으로 통일.
+  //            NORMALIZE_ANCHORS / normalizeSkill 함수 정의 통째 제거 (dead code).
+  var VERSION = '0.0.10';
 
   var FEATS = [
     { k: 'NOTES',   ko: '노트수',     desc: '곡의 전체 노트 양과 밀도' },
@@ -62,41 +64,6 @@
   var DIFF_SHORT_LBL = { ANOTHER: 'A', HYPER: 'H', NORMAL: 'N', LEGGENDARIA: 'L' };
   var CHART2DIFF = { DP_NOR: 'NORMAL', DP_HYP: 'HYPER', DP_ANO: 'ANOTHER', DP_LEG: 'LEGGENDARIA' };
   var DJ_CUTOFFS = [2/9, 3/9, 4/9, 5/9, 6/9, 7/9, 8/9, 0.93, 0.95, 0.96, 0.97, 0.98, 0.99, 1.0];
-
-  // 정규화 앵커 — 6 feature 는 159명 (eamuse + os 둘 다 있는 유저) 의 Q-Q 매칭 (percentile 0/25/50/75/100).
-  //   같은 percentile 의 (우리값, eamuse값) 5쌍 → piecewise linear interpolation.
-  //   분포 모양 그대로 매핑 → 회귀 (선형 1줄) 보다 분포 끝 (꼬리) 정확도 높음.
-  //   4 feature (PHRASE/JACK/TRILL/RAND) 는 eamuse 매칭 X — p0/25/50/75/100 → 0/50/100/170/200 단순 매핑.
-  var NORMALIZE_ANCHORS = {
-    'NOTES':   [{x:67.24,y:31.48}, {x:81.38,y:100.01}, {x:89.37,y:124.97}, {x:101.21,y:146.06}, {x:109.96,y:180.04}],
-    'CHORD':   [{x:54.68,y:28.91}, {x:69.63,y:103.37}, {x:76.16,y:139.30}, {x:89.17,y:161.78}, {x:95.26,y:191.02}],
-    'PEAK':    [{x:65.38,y:16  }, {x:83.42,y:76.00}, {x:92.55,y:127.00}, {x:112.37,y:150.00}, {x:126.04,y:183.00}],  // y 를 6 feature 평균으로 (이전 29.5/94.8/120.8/141.5/180 — 사용자 체감 낮음)
-    'CHARGE':  [{x:49.33,y:16  }, {x:62.61,y:76.00}, {x:68.62,y:127.00}, {x:80.06,y:150.00}, {x:84.89,y:183.00}],  // y 를 6 feature 평균으로 (이전 0.7/71.7/132.3/152.0/184.7 — 사용자 체감 높음)
-    'SCRATCH': [{x:52.14,y: 5.07}, {x:65.36,y:66.94}, {x:71.09,y:134.16}, {x:83.70,y:152.08}, {x:92.07,y:181.62}],
-    'SOF-LAN': [{x:48.28,y:16  }, {x:62.61,y:76.00}, {x:68.43,y:100.00}, {x:81.31,y:145.00}, {x:87.25,y:180.00}],  // 낮은쪽 올리고 (이전 0/18) 중간 낮춤 (이전 112) 최상위 비슷
-    // 4 feature — eamuse 매칭 X. y 는 6 feature 의 percentile 평균 (16/76/127/150/183),
-    //   x 는 174명 user_radars 의 해당 feature 우리값 p0/25/50/75/100.
-    'PHRASE':  [{x: 7.2,y: 16}, {x:73.7,y: 76}, {x:81.9,y:127}, {x:92.4,y:150}, {x:100.2,y:183}],
-    'JACK':    [{x: 7.7,y: 16}, {x:66.1,y: 76}, {x:72.9,y:127}, {x:87.1,y:150}, {x: 91.6,y:183}],
-    'TRILL':   [{x: 8.8,y: 16}, {x:66.0,y: 76}, {x:73.3,y:127}, {x:85.8,y:150}, {x: 91.1,y:183}],
-    'RAND':    [{x: 7.4,y: 16}, {x:70.5,y: 76}, {x:78.0,y:127}, {x:90.6,y:150}, {x: 95.9,y:183}],
-  };
-  // piecewise linear interpolation — x 가 앵커 사이면 선형 보간, 양 끝 밖이면 가장 가까운 segment 의 slope 로 extrapolation.
-  function normalizeSkill(featKey, rawSkill) {
-    if (typeof rawSkill !== 'number') return null;
-    var anchors = NORMALIZE_ANCHORS[featKey];
-    if (!anchors || anchors.length < 2) return rawSkill;
-    var x = rawSkill;
-    // 앵커 정렬 가정 (x 오름차순). 양 끝 extrapolation 포함.
-    for (var i = 0; i < anchors.length - 1; i++) {
-      var a = anchors[i], b = anchors[i + 1];
-      if (x <= b.x || i === anchors.length - 2) {
-        var t = (b.x - a.x) === 0 ? 0 : (x - a.x) / (b.x - a.x);
-        return a.y + t * (b.y - a.y);
-      }
-    }
-    return anchors[anchors.length - 1].y;
-  }
 
   function escH(s) {
     return String(s == null ? '' : s)
@@ -155,17 +122,8 @@
 
     var f = FEATS.find(function (x) { return x.k === k; });
     if (!f) return '';
-    // __absoluteSkill × NORMALIZE_K[k] (eamuse 단위 ~180) 우선.
-    //   없으면 fallback (vec + 80, 옛 정규화). vRel / isPos / 헤더 score 모두 같은 기준.
-    var skill = userVec.__absoluteSkill;
-    var hasSkill = skill && typeof skill[k] === 'number';
-    var vAbs;
-    if (hasSkill) {
-      var n = normalizeSkill(k, skill[k]);
-      vAbs = typeof n === 'number' ? n : skill[k];
-    } else {
-      vAbs = (userVec[k] || 0) + 80;
-    }
+    // 헤더 score / vRel / isPos 모두 잔차 (userVec[k]) + 80 기준 (NORMALIZE 배율 제거).
+    var vAbs = (userVec[k] || 0) + 80;
     var vRel = vAbs - userMean;
     var isPos = vRel >= 0;
     var absScore = vAbs;
