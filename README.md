@@ -308,6 +308,13 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### 2026-05-25 — dbConn v0.0.407 — pattern 점수 알고리즘 재설계 (quantile score 평균)
+- [modules/dbConn.js](modules/dbConn.js) — `uploadResult` 5단계 (pattern vec upsert) 가 **차트별 precomputed quantile score** (gist 의 `feature-scores-slim.json`, [ohSorryRating dump-feature-scores.js](../ohSorryRating/scripts/dump-feature-scores.js) 산출) 기반으로 변경.
+- 알고리즘: `make_grid_data` RPC 의 plays 차트마다 (`textage_song_id`, `diff`) → `feature-scores` lookup → feature 별 `sum(score) / count(score>0)` → `upsert_user_pattern_vec` RPC.
+- `score=0` 인 곡은 분모 제외 (CHARGE/SOF-LAN/SOF-LAN-ratio 의 baseline 0 곡 + 다른 feature 의 raw=0 곡).
+- 이전 v0.0.406 (절대 실력값 = patterns raw pt × rate%, push 안 됐었음) 제거 — 사용자 의도와 안 맞음. user_radars `os_*` 컬럼이 이제 plays 차트의 quantile score 평균 (0~100, 정규화된 의미).
+- RPC schema (`upsert_user_pattern_vec`) 는 그대로 — 10 feature (NOTES/CHORD/PEAK/CHARGE/SCRATCH/SOF-LAN/PHRASE/JACK/TRILL/RAND). SOF-LAN-ratio 는 별도 컬럼 없어서 미저장.
+
 ### 2026-05-25 — analysisRender v0.0.9 — 막대그래프 잔차 기반으로 복구
 - [modules/analysisRender.js](modules/analysisRender.js) — `buildBarChart` 의 `__absoluteSkill` + `NORMALIZE_ANCHORS` (Q-Q hinge 매핑) 분기 제거. `userVec[f.k]` (잔차 분석 결과) 의 사용자 평균 대비 상대값으로 표시.
 - 헤더 detail score / `normalizeSkill` / `NORMALIZE_ANCHORS` 정의는 그대로 유지 (다른 곳 활용 여지).

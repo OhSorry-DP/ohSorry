@@ -13,6 +13,13 @@
 //     호출 + DB 모드 skip + 결과 로깅' 흐름을 이 모듈로 이관. render 는 이제 한 줄로 호출.
 //   - 별도 dbUpload 모듈로 뺄까 검토했지만 둘 다 supabase 라 한 모듈에 두는 게 자연스러움.
 //
+// v0.0.407 — 패턴 점수 알고리즘 재설계 (quantile score 평균):
+//   - 기존 (v0.0.406, 미사용/제거): patterns raw pt × rate% 의 절대 실력값.
+//   - 신규: feature-scores-slim.json (gist, precomputed quantile score 차트별 0~100) fetch.
+//     make_grid_data RPC → plays 차트마다 score lookup → feature 별 평균
+//       (score=0 인 곡은 분모 제외 — CHARGE/SOF-LAN 의 baseline 0 곡 + 다른 feature 의 raw=0 곡).
+//   - user_radars 의 os_* 컬럼이 plays 차트의 quantile score 평균 (0~100).
+
 // v0.0.405 — songs 마스터 자동 등록 (ensure_song RPC):
 //   - 신곡 (songs 마스터 미등록) 이 eagate 에서 들어오면 ensure_song RPC 로 자동 INSERT.
 //   - ac 비트 (1=AC, 2=INF) 자동 결정: playedVersion 0=INF→2, 그 외=AC→1.
@@ -431,18 +438,83 @@ window.OhsorryDb = (function () {
       }
     }
 
-    // 5. 오소리 패턴 vec (rateRef 잔차) upsert — ohSorryWeb 분석탭의 percentile 비교 분포.
-    //    result.userVec (calcOhsorryCore step2 결과) + iidx_id 있을 때만.
+    // 5. 사용자 패턴 점수 (quantile score 평균) upsert — feature-scores-slim.json (gist) 활용.
+    //    plays 차트 (exScore > 0) 마다 precomputed quantile score (0~100) lookup → feature 별 평균.
+    //    score=0 인 곡은 분모 제외 (CHARGE/SOF-LAN baseline + 다른 feature 의 raw=0 곡).
     const iidxId = result.dbPayload && result.dbPayload.iidx_id;
-    if (iidxId && result.userVec) {
+    if (iidxId) {
       try {
-        await callUpsertPatternVec(iidxId, result.userVec);
-        console.log('[OhsorryDb] pattern vec upsert 성공');
+        const vec = await computePatternScoreVec(iidxId);
+        if (vec) {
+          await callUpsertPatternVec(iidxId, vec);
+          console.log('[OhsorryDb] pattern 점수 upsert 성공 (NOTES=' + vec.NOTES.toFixed(1) + ' charts=' + vec.__count + ')');
+        } else {
+          console.warn('[OhsorryDb] pattern 점수 계산 skip (feature-scores fetch 실패 또는 plays 차트 부족)');
+        }
       } catch (e) {
-        console.warn('[OhsorryDb] pattern vec upsert 예외:', e && e.message);
+        console.warn('[OhsorryDb] pattern 점수 계산/upsert 예외:', e && e.message);
       }
     }
     return out;
+  }
+
+  // feature-scores-slim.json (gist 호스팅) — 차트별 11 feature quantile score (0~100).
+  //   첫 호출 시 fetch + cache (메모리, 페이지 lifetime).
+  const FEATURE_SCORES_URL = 'https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw/feature-scores-slim.json';
+  let featureScoresCache = null;
+  async function getFeatureScores() {
+    if (featureScoresCache) return featureScoresCache;
+    const res = await fetch(FEATURE_SCORES_URL + '?t=' + Date.now(), { cache: 'no-store' });
+    if (!res.ok) throw new Error('feature-scores HTTP ' + res.status);
+    featureScoresCache = await res.json();
+    return featureScoresCache;
+  }
+
+  // make_grid_data 로 유저의 supabase 저장 차트 받아 → feature-scores quantile score 평균.
+  //   각 feature 별 sum(score) / count(score > 0) — score=0 곡은 분모 제외.
+  //   user_radars os_* 컬럼이 있는 10 feature 만 (SOF-LAN-ratio 는 별도 컬럼 없어서 제외).
+  //   반환: { NOTES, CHORD, PEAK, CHARGE, SCRATCH, 'SOF-LAN', PHRASE, JACK, TRILL, RAND, __count } 또는 null.
+  async function computePatternScoreVec(iidxId) {
+    const fsData = await getFeatureScores().catch(() => null);
+    if (!fsData || !fsData.scores) return null;
+    const scores = fsData.scores;
+
+    const res = await fetch(SUPABASE_URL + '/rest/v1/rpc/make_grid_data', {
+      method: 'POST', headers: HEADERS,
+      body: JSON.stringify({ p_iidx_id: iidxId }),
+    });
+    if (!res.ok) throw new Error('make_grid_data HTTP ' + res.status);
+    const rows = await res.json();
+    if (!Array.isArray(rows) || rows.length === 0) return null;
+
+    const DIFF_INT_TO_CHART = { 1: 'DP_NOR', 2: 'DP_HYP', 3: 'DP_ANO', 4: 'DP_LEG' };
+    const FEATS = ['NOTES', 'CHORD', 'PEAK', 'CHARGE', 'SCRATCH', 'SOF-LAN', 'PHRASE', 'JACK', 'TRILL', 'RAND'];
+
+    const sum = {}, cnt = {};
+    for (const f of FEATS) { sum[f] = 0; cnt[f] = 0; }
+    let matched = 0;
+    for (const r of rows) {
+      if (!r || !r.ex_score || r.ex_score <= 0) continue;
+      const sid = r.textage_song_id;
+      if (!sid) continue;
+      const cn = DIFF_INT_TO_CHART[r.diff];
+      if (!cn) continue;
+      const songScores = scores[sid];
+      if (!songScores) continue;
+      const chartScores = songScores[cn];
+      if (!chartScores) continue;
+      matched++;
+      for (const f of FEATS) {
+        const s = chartScores[f];
+        if (typeof s !== 'number' || s <= 0) continue;  // score=0 곡은 분모 제외
+        sum[f] += s;
+        cnt[f] += 1;
+      }
+    }
+    if (matched === 0) return null;
+    const vec = { __count: matched };
+    for (const f of FEATS) vec[f] = cnt[f] > 0 ? sum[f] / cnt[f] : 0;
+    return vec;
   }
 
   // 오소리 패턴 vec upsert — user_radars 의 os_* 컬럼 (play_style=1, DP).
@@ -464,7 +536,7 @@ window.OhsorryDb = (function () {
   }
 
   return {
-    VERSION: '0.0.405',
+    VERSION: '0.0.407',
     upsertUserProfile: upsertUserProfile,
     upsertUserChartScores: upsertUserChartScores,
     uploadResult: uploadResult,
