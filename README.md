@@ -309,6 +309,19 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### 2026-05-27 — 약점보완 토글 확장 + ★ 상한 정책 교체 (calcOhsorryCore v0.0.363 / ohsorryRender v0.0.360 / calcWeakness)
+- **calcWeakness** ([modules/calcWeakness.js](modules/calcWeakness.js)) — `chartStrengthMatchByHand` / `chartWeaknessMatchByHand` 에 `opts.flipOn` (default true) + `opts.handMode` (`'both'`/`'left'`/`'right'`, default `'both'`) 추가. `best`/`bestTotal` 만 영향 (L/R/total/flipL/flipR/flipTotal raw 는 항상 그대로). `flipOn: false` 면 flip 비교 안 함 (normal 강제). `handMode: 'left'` 면 매치 합계가 왼손 (`sL` / `sFlipL`) 만, `'right'` 면 오른손만.
+- **calcOhsorryCore v0.0.363** ([modules/calcOhsorryCore.js](modules/calcOhsorryCore.js)) — `buildWeaknessRecs` 정책 교체:
+  - **★ 상한 정책 변경** — `baseStar + 0.5` → 사용자가 EC 이상 (`lampNum >= 4`) 클리어한 차트의 `zasaLevel` 최댓값 (`topClearZasa`) 이하만 통과. "지금 칠 수 있는 최고 난이도" 안에서 약점보완. 클리어 없으면 `topClearZasa = 0` → 상한 없음.
+  - **flipOn / handMode opts 실제 동작** — `chartWeaknessMatchByHand` 호출에 전달, 매치 점수가 옵션에 맞춰 산출.
+  - **연습 강도 (`strength` opts)** — offset 단계. `offset = (strength - 1) × topN`, `slice(offset, offset + topN)`. 강도 1 = top N, 강도 2 = N+1 ~ 2N, 강도 3 = 2N+1 ~ 3N.
+  - `WEAKNESS_REC_RANGE` 제거, `WEAKNESS_CLEAR_LAMP = 4` 추가.
+- **ohsorryRender v0.0.360** ([modules/ohsorryRender.js](modules/ohsorryRender.js)) — 약점보완 토글 UI 3종 추가:
+  - **FLIP** : on | off — `window.__dp_weakness_setFlip(true/false)`
+  - **손** : 양손 | 왼손 | 오른손 — `window.__dp_weakness_setHand('both'/'left'/'right')`
+  - **강도** : 1 | 2 | 3 — `window.__dp_weakness_setStrength(N)`
+  - 모든 토글이 `weaknessOpts` 갱신 후 `window.__dp_rerollWeakness` 부분 재렌더.
+
 ### 2026-05-27 — 약점보완 추천 stage 추가 (calcOhsorryCore v0.0.362 / ohsorryRender v0.0.359 / calcWeakness)
 - **calcWeakness** ([modules/calcWeakness.js](modules/calcWeakness.js)) — `chartStrengthMatchByHand` / `chartWeaknessMatchByHand` 에 `opts.feats` 추가. feature subset 으로 매치 점수 계산 가능 (단일 mode 약점보완에서 활용).
 - **calcOhsorryCore v0.0.362** ([modules/calcOhsorryCore.js](modules/calcOhsorryCore.js)) — `buildWeaknessRecs` 추가. `chartWeaknessMatchByHand.bestTotal` (= -strength) 기반, bestTotal 양수 차트만 채택 후 asc 정렬 (점진학습 — 약점 살짝 드러나는 곡부터).

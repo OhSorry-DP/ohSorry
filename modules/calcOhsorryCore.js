@@ -34,7 +34,7 @@
 //   wrapperVersion: wrapper 자기 버전 (예: 'v3.3.6') — supabase version 컬럼은
 //                   `${wrapperVersion}-core${CORE_VERSION_SHORT}` 조합 (예: 'v3.3.6-core335')
 window.OhsorryCore = {
-  VERSION: '0.0.362',
+  VERSION: '0.0.363',
   compute: async (opts) => {
   opts = opts || {};
   const mode = opts.mode || 'own';
@@ -42,7 +42,7 @@ window.OhsorryCore = {
   let dbData = opts.dbData || null;
   const rivalToken = opts.rivalToken || null;
   const wrapperVersion = opts.wrapperVersion || 'unknown';
-  const CORE_VERSION_SHORT = '0.0.362'.replace(/^0\.0\./, '');  // '346'
+  const CORE_VERSION_SHORT = '0.0.363'.replace(/^0\.0\./, '');  // '346'
   const dbVersionString = `${wrapperVersion}-core${CORE_VERSION_SHORT}`;
   dbData = dbData || null;
   // -------- 0. ereter 데이터 로드 (Gist 에서 자동 fetch) --------
@@ -1461,16 +1461,18 @@ window.OhsorryCore = {
   // 약점보완 추천 (2026-05-27~) — chartWeaknessMatchByHand 의 bestTotal (= -strength) 기반.
   //   bestTotal 양수면 약점 차트 (FLIP best 까지 고려) — 값 클수록 약점 정도 큼.
   //   정렬은 asc (점진학습 — 약점 살짝 드러나는 곡부터).
-  //   ★ 상한 — estEc/estHc/estExh 중 어느 하나라도 baseStar + WEAKNESS_REC_RANGE 이하인 곡만 통과 (유저 실력 기준).
+  //   ★ 상한 — 사용자가 EC 이상 (lampNum >= 4) 클리어한 차트의 zasaLevel max 이하 (= topClearZasa).
+  //            "지금 칠 수 있는 최고 난이도" 안에서만 약점보완 곡 추천 → 절벽 없음.
   //   대상 feature subset (mode 옵션):
   //     'all' (default): NOTES/CHORD/PEAK/PHRASE/JACK/TRILL/RAND (7개, SOF-LAN/SCRATCH/CHARGE 제외)
   //     'CHARGE' / 'SCRATCH' / 'SOF-LAN': 단일 feature 전용
-  //   후보: 모든 차트 (lv/lampNum 무관) 중 bestTotal < 0 (약점)
-  //   정렬: bestTotal asc (음수 작은 부터 = 약점 큰 부터)
-  //   handMode: 'both' (default) | 'left' | 'right' — 추후 토글
-  //   flipOn: true (default) — true 면 chartWeaknessMatchByHand 의 best (normal/flip max abs)
+  //   기타 opts:
+  //     flipOn   : true (default) / false — false 면 chartWeaknessMatchByHand 가 normal 강제.
+  //     handMode : 'both' (default) / 'left' / 'right' — 매치 점수 합계의 손 범위.
+  //     strength : 1 (default) / 2 / 3 ... — offset 단계. offset = (strength - 1) × topN, slice(offset, offset+topN).
+  //     topN     : 5 (default) / 10 / 20
   const WEAKNESS_FEATS = ['NOTES', 'CHORD', 'PEAK', 'PHRASE', 'JACK', 'TRILL', 'RAND'];
-  const WEAKNESS_REC_RANGE = 0.5;   // 약점보완 ★ 상한 — baseStar + 0.5 이하 곡만 (점진학습)
+  const WEAKNESS_CLEAR_LAMP = 4;   // EC 이상 (lampNum >= 4) 을 "클리어" 로 봄 — topClearZasa 산정 기준
   const WEAKNESS_MODE_FEATS = {
     all:       WEAKNESS_FEATS,
     CHARGE:    ['CHARGE'],
@@ -1489,8 +1491,28 @@ window.OhsorryCore = {
     if (baseStar == null) baseStar = 11;
     const mode = (opts && opts.mode) || 'all';
     const feats = WEAKNESS_MODE_FEATS[mode] || WEAKNESS_FEATS;
+    const flipOn = !(opts && opts.flipOn === false);
+    const handMode = (opts && opts.handMode) || 'both';
+    const topN = (opts && typeof opts.topN === 'number') ? opts.topN : 5;
+    const strength = (opts && typeof opts.strength === 'number' && opts.strength >= 1) ? opts.strength : 1;
+    const offset = (strength - 1) * topN;
     const vecL = userVec.__vecL;
     const vecR = userVec.__vecR;
+    // ★ 상한 — 사용자가 EC 이상 클리어한 차트의 zasaLevel 최댓값 (= "지금 칠 수 있는 최고 난이도").
+    //   ereterMap 우선 (level), 없으면 ratingMap.zasaLevel. 클리어 안 한 사용자는 0 → 상한 없음 (모두 통과).
+    let topClearZasa = 0;
+    for (const c of allCharts) {
+      if (typeof c.lampNum !== 'number' || c.lampNum < WEAKNESS_CLEAR_LAMP) continue;
+      const k0 = norm(c.title || '') + '|' + c.diff;
+      const e0 = ereterMap.get(k0);
+      let zasa = null;
+      if (e0 && typeof e0.level === 'number') zasa = e0.level;
+      else {
+        const r0 = ratingMap.get(k0);
+        if (r0 && typeof r0.zasaLevel === 'number') zasa = r0.zasaLevel;
+      }
+      if (zasa != null && zasa > topClearZasa) topClearZasa = zasa;
+    }
     // user charts (eagate / dbData) lookup map — lamp / djLevel / exScore 가져오기용
     const userChartByKey = new Map();
     for (const c of allCharts) userChartByKey.set(norm(c.title || '') + '|' + c.diff, c);
@@ -1525,8 +1547,8 @@ window.OhsorryCore = {
           else if (mode === 'SCRATCH')    { if (scratchAvg < 6.35) continue; }
           else if (mode === 'SOF-LAN')    { if (soflanAvg <= 0) continue; }
         }
-        // 약점 매치
-        const w = weaknessLib.chartWeaknessMatchByHand(chartPt, vecL, vecR, { feats });
+        // 약점 매치 — flipOn / handMode 옵션 전달 (best/bestTotal 가 그에 맞춰 결정).
+        const w = weaknessLib.chartWeaknessMatchByHand(chartPt, vecL, vecR, { feats, flipOn, handMode });
         if (!w || w.bestTotal <= 0) continue;
         // 차트 메타 (★, est) — ereterMap 우선, 없으면 ratingMap zasa 추정
         let e = ereterMap.get(norm(title) + '|' + diff);
@@ -1541,16 +1563,9 @@ window.OhsorryCore = {
             ec_n: r.nEcCleared || 0, hc_n: r.nHcCleared || 0, exh_n: r.nExhCleared || 0,
           };
         }
-        // ★ 상한 — estEc/Hc/Exh 중 어느 하나라도 baseStar + WEAKNESS_REC_RANGE 이하인 차트만 통과 (점진학습).
-        {
-          const ests = [e.ec, e.hc, e.exh];
-          let inRange = false;
-          for (let i = 0; i < ests.length; i++) {
-            const ev = ests[i];
-            if (typeof ev === 'number' && ev <= baseStar + WEAKNESS_REC_RANGE) { inRange = true; break; }
-          }
-          if (!inRange) continue;
-        }
+        // ★ 상한 — 차트 zasaLevel (e.level) 이 topClearZasa 이하인 곡만 통과.
+        //   topClearZasa = 0 (= 클리어 차트 없음) 이면 상한 없음 (모두 통과).
+        if (topClearZasa > 0 && typeof e.level === 'number' && e.level > topClearZasa) continue;
         const dv = typeof e.exh === 'number' ? e.exh : (typeof e.hc === 'number' ? e.hc : e.level);
         // user 가 친 곡이면 lamp / djLevel / exScore 채움 (안 친 곡은 null)
         const uc = userChartByKey.get(norm(title) + '|' + diff);
@@ -1568,10 +1583,10 @@ window.OhsorryCore = {
         });
       }
     }
-    // 정렬: bestTotal asc (양수 작은 부터 = 약점 조금씩 드러나는 곡부터, 점진 학습)
+    // 정렬: bestTotal asc (양수 작은 부터 = 약점 조금씩 드러나는 곡부터, 점진학습).
+    // 강도 offset = (strength-1) × topN — slice(offset, offset+topN) 로 다음 단계 곡 노출.
     items.sort((a, b) => a._weaknessScore - b._weaknessScore);
-    const topN = (opts && typeof opts.topN === 'number') ? opts.topN : 5;
-    const top = items.slice(0, topN);
+    const top = items.slice(offset, offset + topN);
     for (const r of top) {
       if (r._tags === undefined) r._tags = computeChartTags(r);
       if (r._hashtags === undefined) r._hashtags = computeRecHashtags(r);
@@ -1592,7 +1607,7 @@ window.OhsorryCore = {
     recsEXH.push(...buildExhRecs(recBaseStar, REC_LEVEL_MODE_DEFAULT, REC_DJ_MODE_DEFAULT));
   }
   // 약점보완 — userVec.__vecL/__vecR 있어야 동작. default (FLIP on + 양손 통합, 합산 mode, top 5). UI 토글로 변경 가능.
-  recsWeakness.push(...buildWeaknessRecs(recBaseStar, REC_LEVEL_MODE_DEFAULT, { flipOn: true, handMode: 'both', mode: 'all', topN: 5 }));
+  recsWeakness.push(...buildWeaknessRecs(recBaseStar, REC_LEVEL_MODE_DEFAULT, { flipOn: true, handMode: 'both', mode: 'all', topN: 5, strength: 1 }));
   // window.__dp_rerollWeakness(opts) — ohsorryRender UI 토글에서 호출. opts: { flipOn, handMode, mode, topN, recLevelMode }
   window.__dp_rerollWeakness = (opts) => {
     const lvMode = (opts && opts.recLevelMode) || REC_LEVEL_MODE_DEFAULT;

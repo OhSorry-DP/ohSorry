@@ -1,4 +1,4 @@
-// ohsorryRender.js — 오소리 결과 렌더 모듈 (v0.0.359)
+// ohsorryRender.js — 오소리 결과 렌더 모듈 (v0.0.360)
 //
 // calcOhsorryCore.compute() 가 반환한 result 객체를 받아 화면 패널 + 추천곡 + supabase upload.
 // 본체 / 라이벌 wrapper 가 fetch + eval 해서 사용.
@@ -30,7 +30,7 @@
 // ============================================================
 
 window.OhsorryRender = {
-  VERSION: '0.0.359',
+  VERSION: '0.0.360',
 
   // 진행률 UI — core 의 onProgress 콜백에서 호출
   showProgress: function (msg, pct) {
@@ -530,8 +530,8 @@ window.OhsorryRender = {
         };
         window.__dp_rerollAndRender = rerenderRecStage;
 
-        // 약점보완 (weakness) UI 옵션 상태 — 모드 라디오 + 곡수 라디오. 토글 변경 시 window.__dp_rerollWeakness(opts) 호출.
-        const weaknessOpts = { mode: 'all', topN: 5, flipOn: true, handMode: 'both' };
+        // 약점보완 (weakness) UI 옵션 상태 — 모드/곡수/FLIP/손/강도 토글. 변경 시 window.__dp_rerollWeakness(opts) 호출.
+        const weaknessOpts = { mode: 'all', topN: 5, flipOn: true, handMode: 'both', strength: 1 };
         const rerenderWeakness = () => {
           if (typeof window.__dp_rerollWeakness !== 'function') return;
           const newRecs = window.__dp_rerollWeakness({ ...weaknessOpts, recLevelMode });
@@ -550,10 +550,25 @@ window.OhsorryRender = {
           rerenderWeakness();
           document.querySelectorAll('.wk-topn-opt').forEach(b => b.classList.toggle('active', String(b.dataset.n) === String(n)));
         };
+        window.__dp_weakness_setFlip = (on) => {
+          weaknessOpts.flipOn = !!on;
+          rerenderWeakness();
+          document.querySelectorAll('.wk-flip-opt').forEach(b => b.classList.toggle('active', (b.dataset.v === 'on') === !!on));
+        };
+        window.__dp_weakness_setHand = (h) => {
+          weaknessOpts.handMode = h;
+          rerenderWeakness();
+          document.querySelectorAll('.wk-hand-opt').forEach(b => b.classList.toggle('active', b.dataset.h === h));
+        };
+        window.__dp_weakness_setStrength = (s) => {
+          weaknessOpts.strength = s;
+          rerenderWeakness();
+          document.querySelectorAll('.wk-strength-opt').forEach(b => b.classList.toggle('active', String(b.dataset.s) === String(s)));
+        };
 
         const renderRec = (label, recs, color, stage) => {
           const openAttr = stage === 'ec' ? ' open' : '';
-          // 약점보완 stage 만 토글 UI 추가 — 모드 (합산/차지/스크/소프란) + 곡수 (5/10/20).
+          // 약점보완 stage 만 토글 UI 추가 — 모드/곡수/FLIP/손/강도.
           //   active 클래스 + ohsorryRender 의 .rec-mode-opt 스타일 재사용.
           const weaknessControls = stage === 'weakness' ? `
             <div class="rec-mode-toggle" style="margin-top:4px">
@@ -576,6 +591,34 @@ window.OhsorryRender = {
                 <span class="rec-mode-opt wk-topn-opt" data-n="10" onclick="event.preventDefault();event.stopPropagation();window.__dp_weakness_setTopN(10);">10</span>
                 <span class="rec-mode-sep">|</span>
                 <span class="rec-mode-opt wk-topn-opt" data-n="20" onclick="event.preventDefault();event.stopPropagation();window.__dp_weakness_setTopN(20);">20</span>
+              </div>
+            </div>
+            <div class="rec-mode-toggle" style="margin-top:2px">
+              <span class="rec-mode-label">FLIP :</span>
+              <div class="rec-mode-options">
+                <span class="rec-mode-opt wk-flip-opt active" data-v="on"  onclick="event.preventDefault();event.stopPropagation();window.__dp_weakness_setFlip(true);">on</span>
+                <span class="rec-mode-sep">|</span>
+                <span class="rec-mode-opt wk-flip-opt" data-v="off" onclick="event.preventDefault();event.stopPropagation();window.__dp_weakness_setFlip(false);">off</span>
+              </div>
+            </div>
+            <div class="rec-mode-toggle" style="margin-top:2px">
+              <span class="rec-mode-label">손 :</span>
+              <div class="rec-mode-options">
+                <span class="rec-mode-opt wk-hand-opt active" data-h="both"  onclick="event.preventDefault();event.stopPropagation();window.__dp_weakness_setHand('both');">양손</span>
+                <span class="rec-mode-sep">|</span>
+                <span class="rec-mode-opt wk-hand-opt" data-h="left"  onclick="event.preventDefault();event.stopPropagation();window.__dp_weakness_setHand('left');">왼손</span>
+                <span class="rec-mode-sep">|</span>
+                <span class="rec-mode-opt wk-hand-opt" data-h="right" onclick="event.preventDefault();event.stopPropagation();window.__dp_weakness_setHand('right');">오른손</span>
+              </div>
+            </div>
+            <div class="rec-mode-toggle" style="margin-top:2px">
+              <span class="rec-mode-label">강도 :</span>
+              <div class="rec-mode-options">
+                <span class="rec-mode-opt wk-strength-opt active" data-s="1" onclick="event.preventDefault();event.stopPropagation();window.__dp_weakness_setStrength(1);">1</span>
+                <span class="rec-mode-sep">|</span>
+                <span class="rec-mode-opt wk-strength-opt" data-s="2" onclick="event.preventDefault();event.stopPropagation();window.__dp_weakness_setStrength(2);">2</span>
+                <span class="rec-mode-sep">|</span>
+                <span class="rec-mode-opt wk-strength-opt" data-s="3" onclick="event.preventDefault();event.stopPropagation();window.__dp_weakness_setStrength(3);">3</span>
               </div>
             </div>
           ` : '';

@@ -322,8 +322,13 @@
   function chartStrengthMatchByHand(chartPt, vecL, vecR, opts) {
     var zero = { L: 0, R: 0, total: 0, max: 0, flipL: 0, flipR: 0, flipTotal: 0, flipMax: 0, best: 'normal', bestTotal: 0 };
     if (!chartPt || !vecL || !vecR) return zero;
-    // opts.feats — feature subset (예: 약점 보완 추천에서 SOF-LAN/SCRATCH/CHARGE 제외)
+    // opts.feats     — feature subset (예: 약점 보완 추천에서 SOF-LAN/SCRATCH/CHARGE 제외)
+    // opts.handMode  — 'both'(default) / 'left' / 'right'. best/bestTotal 결정 시 어느 손 합계로 비교할지.
+    // opts.flipOn    — true(default) / false. false 면 flip 비교 안 함 (normal 강제).
+    // L/R/total/flipL/flipR/flipTotal 등 raw 값은 항상 그대로 노출 (호환).
     var feats = (opts && Array.isArray(opts.feats)) ? opts.feats : FEATS;
+    var handMode = (opts && opts.handMode) || 'both';
+    var flipOn = !(opts && opts.flipOn === false);
     var ptL = chartPt.p1 || {};
     var ptR = chartPt.p2 || {};
     var sL = 0, sR = 0, sFlipL = 0, sFlipR = 0;
@@ -340,12 +345,17 @@
     }
     var total = sL + sR;
     var flipTotal = sFlipL + sFlipR;
-    var bestFlip = flipTotal > total;
+    // handMode 별 normal/flip 합계 (best/bestTotal 결정용)
+    var nT, fT;
+    if (handMode === 'left')       { nT = sL; fT = sFlipL; }
+    else if (handMode === 'right') { nT = sR; fT = sFlipR; }
+    else                            { nT = total; fT = flipTotal; }
+    var bestFlip = flipOn && fT > nT;
     return {
       L: sL, R: sR, total: total, max: sL > sR ? sL : sR,
       flipL: sFlipL, flipR: sFlipR, flipTotal: flipTotal, flipMax: sFlipL > sFlipR ? sFlipL : sFlipR,
       best: bestFlip ? 'flip' : 'normal',
-      bestTotal: bestFlip ? flipTotal : total,
+      bestTotal: bestFlip ? fT : nT,
     };
   }
 
@@ -432,12 +442,19 @@
   //   return: chartStrengthMatchByHand 결과의 부호만 반대 (L/R/total/max/flipL/flipR/flipTotal/flipMax + best='flip' 일 때 절댓값 큰 쪽 = flip 약점).
   function chartWeaknessMatchByHand(chartPt, vecL, vecR, opts) {
     var s = chartStrengthMatchByHand(chartPt, vecL, vecR, opts);
-    var weakBest = s.flipTotal < s.total ? 'flip' : 'normal';   // 더 작은 쪽 = 약점이 더 드러나는 배치
+    // handMode 별 normal/flip 합계 — strength 와 같은 산식 (best 의 방향만 반대).
+    var handMode = (opts && opts.handMode) || 'both';
+    var flipOn = !(opts && opts.flipOn === false);
+    var nT, fT;
+    if (handMode === 'left')       { nT = s.L; fT = s.flipL; }
+    else if (handMode === 'right') { nT = s.R; fT = s.flipR; }
+    else                            { nT = s.total; fT = s.flipTotal; }
+    var weakBest = (flipOn && fT < nT) ? 'flip' : 'normal';   // 더 작은 (= 약점이 더 드러나는) 쪽
     return {
       L: -s.L, R: -s.R, total: -s.total, max: -s.max,
       flipL: -s.flipL, flipR: -s.flipR, flipTotal: -s.flipTotal, flipMax: -s.flipMax,
       best: weakBest,
-      bestTotal: weakBest === 'flip' ? -s.flipTotal : -s.total,
+      bestTotal: weakBest === 'flip' ? -fT : -nT,
     };
   }
 
