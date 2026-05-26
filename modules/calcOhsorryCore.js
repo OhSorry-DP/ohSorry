@@ -34,7 +34,7 @@
 //   wrapperVersion: wrapper 자기 버전 (예: 'v3.3.6') — supabase version 컬럼은
 //                   `${wrapperVersion}-core${CORE_VERSION_SHORT}` 조합 (예: 'v3.3.6-core335')
 window.OhsorryCore = {
-  VERSION: '0.0.347',
+  VERSION: '0.0.348',
   compute: async (opts) => {
   opts = opts || {};
   const mode = opts.mode || 'own';
@@ -42,7 +42,7 @@ window.OhsorryCore = {
   let dbData = opts.dbData || null;
   const rivalToken = opts.rivalToken || null;
   const wrapperVersion = opts.wrapperVersion || 'unknown';
-  const CORE_VERSION_SHORT = '0.0.347'.replace(/^0\.0\./, '');  // '346'
+  const CORE_VERSION_SHORT = '0.0.348'.replace(/^0\.0\./, '');  // '346'
   const dbVersionString = `${wrapperVersion}-core${CORE_VERSION_SHORT}`;
   dbData = dbData || null;
   // -------- 0. ereter 데이터 로드 (Gist 에서 자동 fetch) --------
@@ -1134,6 +1134,54 @@ window.OhsorryCore = {
     return weaknessLib.chartStrengthMatchByHand(patternsMap[sid].c[cn], userVec.__vecL, userVec.__vecR);
   };
 
+  // 차트 패턴 hashtag — 그 곡의 강한 top 3 feature (양손 평균 pt 큰 순) → 한국어 약어.
+  //   추천 row hover / 토스트에 "#동치 #계단 #밀도" 식으로 표시.
+  const FEAT_TAG_MAP = {
+    NOTES: '밀도', CHORD: '동치', PEAK: '순간밀도', CHARGE: '롱잡',
+    SCRATCH: '스크', 'SOF-LAN': '변속', PHRASE: '계단',
+    JACK: '축연타', TRILL: '트릴', RAND: '난타',
+  };
+  const FEAT_TAG_KEYS = Object.keys(FEAT_TAG_MAP);
+  const computeChartTags = (r) => {
+    if (!weaknessLib || !weaknessLib.avgPt) return [];
+    const sid = patternsTitleMap[norm(r.title || '')];
+    if (!sid) return [];
+    const cn = weaknessLib.DIFF2CHART[r.chart];
+    if (!cn || !patternsMap[sid] || !patternsMap[sid].c[cn]) return [];
+    const pt = weaknessLib.avgPt(patternsMap[sid].c[cn]);
+    const arr = FEAT_TAG_KEYS.map(f => ({ f, v: pt[f] || 0 }));
+    arr.sort((a, b) => b.v - a.v);
+    return arr.slice(0, 3).filter(x => x.v > 0).map(x => FEAT_TAG_MAP[x.f]);
+  };
+
+  // 추천 row 전용 hashtag 배열 계산 — ohsorryRender 가 hover/toast 에 그대로 표시.
+  //   순서: [카테고리(필수), FLIP+N(있을 때), 한손위주(편차 30%+), pattern feature top 3]
+  const CATEGORY_TAG_MAP = { hard: '강도전', easy: '약도전', cleanup: '정리곡' };
+  const HAND_BIAS_THRESHOLD = 0.3;
+  const computeRecHashtags = (r) => {
+    const tags = [];
+    if (r._category && CATEGORY_TAG_MAP[r._category]) tags.push('#' + CATEGORY_TAG_MAP[r._category]);
+    const m = r._matchByHand;
+    if (m) {
+      // FLIP+N — flipTotal > total 일 때 (best === 'flip' 과 같은 조건)
+      if (m.best === 'flip') {
+        const diff = m.flipTotal - m.total;
+        if (diff > 0) tags.push('#FLIP+' + diff.toFixed(0));
+      }
+      // 한 손 위주 — best 배치의 |L−R| / max(L,R) ≥ 30%
+      const l = m.best === 'flip' ? m.flipL : m.L;
+      const rh = m.best === 'flip' ? m.flipR : m.R;
+      const mxLR = l > rh ? l : rh;
+      if (mxLR > 0 && Math.abs(l - rh) / mxLR >= HAND_BIAS_THRESHOLD) {
+        tags.push(l > rh ? '#왼손위주' : '#오른손위주');
+      }
+    }
+    // pattern feature top 3
+    const pt = r._tags || computeChartTags(r);
+    if (pt && pt.length > 0) for (const t of pt) tags.push('#' + t);
+    return tags;
+  };
+
   const recsEC = [], recsHC = [], recsEXH = [];
 
   // Fisher-Yates shuffle
@@ -1234,6 +1282,7 @@ window.OhsorryCore = {
         if (isEC && typeof e.hc === 'number' && e.hc < baseStar - 3) continue;  // 너무 쉬운 곡 제외
         cls = 'cleanup';
       } else continue;
+      item._category = cls;
       (reachedForDj ? reached : underLamp)[cls].push(item);
     }
     return { underLamp, reached };
@@ -1256,6 +1305,8 @@ window.OhsorryCore = {
       if (canUseByHand) {
         for (const r of pool) {
           if (r._matchByHand === undefined) r._matchByHand = chartStrengthMatchByHand(r);
+          if (r._tags === undefined) r._tags = computeChartTags(r);
+          if (r._hashtags === undefined) r._hashtags = computeRecHashtags(r);
         }
         sorted = [...pool].sort((a, b) => {
           const sa = a._matchByHand ? a._matchByHand.bestTotal : 0;

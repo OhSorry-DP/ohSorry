@@ -1,4 +1,4 @@
-// ohsorryRender.js — 오소리 결과 렌더 모듈 (v0.0.347)
+// ohsorryRender.js — 오소리 결과 렌더 모듈 (v0.0.348)
 //
 // calcOhsorryCore.compute() 가 반환한 result 객체를 받아 화면 패널 + 추천곡 + supabase upload.
 // 본체 / 라이벌 wrapper 가 fetch + eval 해서 사용.
@@ -488,8 +488,13 @@ window.OhsorryRender = {
             const flipBadge = r._matchByHand && r._matchByHand.best === 'flip'
               ? ` <span class="rec-flip" title="FLIP 배치 (양손 바꿈) 가 더 잘 맞아요" style="color:#ff6b9d;font-size:9px;font-weight:700;margin-left:3px;padding:0 3px;border:1px solid #ff6b9d;border-radius:2px;line-height:1.2">FLIP</span>`
               : '';
+            // 추천 이유 hashtag — calcOhsorryCore 의 computeRecHashtags 결과 (#강도전 #FLIP+N #왼손위주 #동치 #계단 #밀도 등).
+            //   hover title + data-tags (곡명 클릭 토스트 안에서 표시).
+            const hashtags = Array.isArray(r._hashtags) ? r._hashtags : [];
+            const tagsJoined = hashtags.join(' ');
+            const hashtagsAttr = hashtags.length > 0 ? ` title="${escHtml(tagsJoined)}" data-tags="${escHtml(tagsJoined)}"` : '';
             return `
-              <div class="rec-item">
+              <div class="rec-item"${hashtagsAttr}>
                 <span class="rec-chart" style="color:${cColor}" title="${r.chart || ''}">${chartLetter}</span>
                 <div class="rec-title rec-title-clickable" data-t="${escHtml(r.title)}" data-c="${escHtml(r.chart || '')}"${titleTooltip}><span${titleStyle}>${escHtml(r.title)}</span><span style="color:#aaa;font-weight:400;margin-left:4px;font-size:10.5px">${r.currentLamp || ''}</span>${flipBadge}</div>
                 <span class="rec-diff" style="color:${color}" title="실력 ★">★${r.diffValue.toFixed(2)}</span>
@@ -882,13 +887,16 @@ window.OhsorryRender = {
     `;
     document.body.appendChild(panel);
 
-    // 추천곡 곡명 클릭 → 차트 row 토스트 (ohsorryShelf renderChartRow)
-    const showRowToast = (chartObj, x, y) => {
+    // 추천곡 곡명 클릭 → 차트 row 토스트 (ohsorryShelf renderChartRow) + 추천 이유 hashtag 한 줄
+    const showRowToast = (chartObj, x, y, hashtags) => {
       if (!shelfLib || !shelfLib.renderChartRow) return;
       document.getElementById('__dp_row_toast')?.remove();
       const t = document.createElement('div');
       t.id = '__dp_row_toast';
-      t.innerHTML = shelfLib.renderChartRow(chartObj);
+      const tagsHtml = hashtags
+        ? `<div style="padding:6px 10px;background:rgba(255,107,157,0.08);border-top:1px solid rgba(255,107,157,0.2);font-size:11px;color:#ff6b9d;font-weight:600;line-height:1.4">${escHtml(hashtags)}</div>`
+        : '';
+      t.innerHTML = shelfLib.renderChartRow(chartObj) + tagsHtml;
       t.style.cssText = 'position:fixed;left:0;top:0;width:320px;max-width:calc(100vw - 16px);z-index:9999999;box-shadow:0 6px 24px rgba(0,0,0,.5);border-radius:4px;cursor:pointer';
       document.body.appendChild(t);
       const rect = t.getBoundingClientRect();
@@ -907,7 +915,12 @@ window.OhsorryRender = {
       const el = e.target.closest('.rec-title-clickable');
       if (!el) return;
       const found = allCharts.find((c) => c.title === el.dataset.t && c.diff === el.dataset.c);
-      if (found) showRowToast(found, e.clientX, e.clientY);
+      if (found) {
+        // 추천 이유 hashtag (rec-item div 의 data-tags 에 저장) — 토스트 하단에 한 줄.
+        const recItemEl = el.closest('.rec-item');
+        const tags = recItemEl && recItemEl.dataset ? recItemEl.dataset.tags : '';
+        showRowToast(found, e.clientX, e.clientY, tags);
+      }
     });
 
     // 상세통계 토글

@@ -309,6 +309,10 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### 2026-05-26 — 추천곡 row 추천 이유 hashtag (calcOhsorryCore v0.0.348 / ohsorryRender v0.0.348)
+- **calcOhsorryCore v0.0.348** — `_hashtags` 캐시. 순서: `#강도전/약도전/정리곡` (sample15 분류) + `#FLIP+N` (best === 'flip' 일 때 flipTotal − total 차이) + `#왼손위주/오른손위주` (best 배치의 L/R 편차 ≥ 30%) + pattern feature top 3 (`#동치 #계단 #밀도 #순간밀도 #축연타 #트릴 #스크 #변속 #롱잡 #난타`).
+- **ohsorryRender v0.0.348** — 추천 row hover 시 title 속성으로 hashtag 한 줄 표시. 곡명 클릭 시 토스트 (renderChartRow) 하단에 같은 hashtag 가 핑크 (#ff6b9d) row 로 한 줄 추가.
+
 ### 2026-05-26 — 추천곡 정렬 손 분리 + FLIP 매치 (calcOhsorryCore v0.0.347 / ohsorryRender v0.0.347 / calcWeakness)
 - **calcWeakness** ([modules/calcWeakness.js](modules/calcWeakness.js) / [calcWeakness.md](modules/calcWeakness.md)) — 양손 분리 vec (`__vecL` / `__vecR`) + 신규 함수 `chartStrengthMatchByHand` / `chartWeaknessMatchByHand` / `computePatternScoreVec`.
   - `chartStrengthMatchByHand(chartPt, vecL, vecR)` → `{L, R, total, max, flipL, flipR, flipTotal, flipMax, best, bestTotal}` — 정규 배치 (왼손=p1 / 오른손=p2) + FLIP 배치 (양손 바꿈) 둘 다 평가. `bestTotal` = 더 잘 맞는 배치의 total.
