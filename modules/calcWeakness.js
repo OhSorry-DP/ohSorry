@@ -319,14 +319,16 @@
   //     best: 'normal'|'flip',                  // total 큰 쪽
   //     bestTotal,                              // 큰 쪽의 total
   //   }
-  function chartStrengthMatchByHand(chartPt, vecL, vecR) {
+  function chartStrengthMatchByHand(chartPt, vecL, vecR, opts) {
     var zero = { L: 0, R: 0, total: 0, max: 0, flipL: 0, flipR: 0, flipTotal: 0, flipMax: 0, best: 'normal', bestTotal: 0 };
     if (!chartPt || !vecL || !vecR) return zero;
+    // opts.feats — feature subset (예: 약점 보완 추천에서 SOF-LAN/SCRATCH/CHARGE 제외)
+    var feats = (opts && Array.isArray(opts.feats)) ? opts.feats : FEATS;
     var ptL = chartPt.p1 || {};
     var ptR = chartPt.p2 || {};
     var sL = 0, sR = 0, sFlipL = 0, sFlipR = 0;
-    for (var i = 0; i < FEATS.length; i++) {
-      var f = FEATS[i];
+    for (var i = 0; i < feats.length; i++) {
+      var f = feats[i];
       var pl = ptL[f] || 0;
       var pr = ptR[f] || 0;
       var vl = vecL[f] || 0;
@@ -428,8 +430,8 @@
   //   약점 정렬은 일반적으로 total 작은 (= 가장 매치 안 되는) 차트가 약점 후보지만,
   //   FLIP 옵션 비교 시에는 "어느 배치로도 매치 안 되는" 차트 (flipTotal 도 작음) 가 진짜 약점.
   //   return: chartStrengthMatchByHand 결과의 부호만 반대 (L/R/total/max/flipL/flipR/flipTotal/flipMax + best='flip' 일 때 절댓값 큰 쪽 = flip 약점).
-  function chartWeaknessMatchByHand(chartPt, vecL, vecR) {
-    var s = chartStrengthMatchByHand(chartPt, vecL, vecR);
+  function chartWeaknessMatchByHand(chartPt, vecL, vecR, opts) {
+    var s = chartStrengthMatchByHand(chartPt, vecL, vecR, opts);
     var weakBest = s.flipTotal < s.total ? 'flip' : 'normal';   // 더 작은 쪽 = 약점이 더 드러나는 배치
     return {
       L: -s.L, R: -s.R, total: -s.total, max: -s.max,

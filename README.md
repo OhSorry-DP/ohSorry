@@ -309,6 +309,19 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### 2026-05-27 — 약점보완 추천 stage 추가 (calcOhsorryCore v0.0.362 / ohsorryRender v0.0.359 / calcWeakness)
+- **calcWeakness** ([modules/calcWeakness.js](modules/calcWeakness.js)) — `chartStrengthMatchByHand` / `chartWeaknessMatchByHand` 에 `opts.feats` 추가. feature subset 으로 매치 점수 계산 가능 (단일 mode 약점보완에서 활용).
+- **calcOhsorryCore v0.0.362** ([modules/calcOhsorryCore.js](modules/calcOhsorryCore.js)) — `buildWeaknessRecs` 추가. `chartWeaknessMatchByHand.bestTotal` (= -strength) 기반, bestTotal 양수 차트만 채택 후 asc 정렬 (점진학습 — 약점 살짝 드러나는 곡부터).
+  - 모드: `all` (NOTES/CHORD/PEAK/PHRASE/JACK/TRILL/RAND 7개, SOF-LAN/SCRATCH/CHARGE 제외) / `CHARGE` / `SCRATCH` / `SOF-LAN` 단일.
+  - mode 별 raw pt 필터로 풀 구성 (합산 모드는 SOF-LAN raw>0 / CHARGE raw>0 / SCRATCH raw≥6.35(p70) 제외).
+  - **★ 상한 `WEAKNESS_REC_RANGE = 0.5`** — `estEc/Hc/Exh` 중 어느 하나라도 `baseStar + 0.5` 이하인 차트만 통과 (유저 실력 기준 점진학습).
+  - 별개로 EXH 추천 (`buildExhRecs`) 도 `buildRecs` 재사용에서 분리 — `baseStar + 1` 이하 단순 풀 + 손 분리 + FLIP 매치 desc top 10.
+  - `CATEGORY_TAG_MAP` 에서 `cleanup` (정리곡) hashtag 표기 생략.
+- **ohsorryRender v0.0.359** ([modules/ohsorryRender.js](modules/ohsorryRender.js)) — `약점보완` stage 렌더 추가 (`#ff6b9d` 핑크).
+  - 모드 토글 (합산/차지/스크/소프란) + 곡수 토글 (5/10/20). `window.__dp_rerollWeakness(opts)` 로 부분 재렌더.
+  - 약점보완 row 는 ★ 안 보임 (실력값 비교 무관) → chart letter 앞에 게임 lv prefix (예: `11H`) 로 lv 정보 보충.
+  - 추천 row tooltip 통합 — hashtag + 게임 lv 11/12 추정 ★ 안내를 한 `title` 속성에 합침 (자식 element title 우선 회피).
+
 ### 2026-05-26 — 추천곡 row 추천 이유 hashtag (calcOhsorryCore v0.0.348 / ohsorryRender v0.0.348)
 - **calcOhsorryCore v0.0.348** — `_hashtags` 캐시. 순서: `#강도전/약도전/정리곡` (sample15 분류) + `#FLIP+N` (best === 'flip' 일 때 flipTotal − total 차이) + `#왼손위주/오른손위주` (best 배치의 L/R 편차 ≥ 30%) + pattern feature top 3 (`#동치 #계단 #밀도 #순간밀도 #축연타 #트릴 #스크 #변속 #롱잡 #난타`).
 - **ohsorryRender v0.0.348** — 추천 row hover 시 title 속성으로 hashtag 한 줄 표시. 곡명 클릭 시 토스트 (renderChartRow) 하단에 같은 hashtag 가 핑크 (#ff6b9d) row 로 한 줄 추가.

@@ -1,4 +1,4 @@
-// ohsorryRender.js — 오소리 결과 렌더 모듈 (v0.0.348)
+// ohsorryRender.js — 오소리 결과 렌더 모듈 (v0.0.359)
 //
 // calcOhsorryCore.compute() 가 반환한 result 객체를 받아 화면 패널 + 추천곡 + supabase upload.
 // 본체 / 라이벌 wrapper 가 fetch + eval 해서 사용.
@@ -30,7 +30,7 @@
 // ============================================================
 
 window.OhsorryRender = {
-  VERSION: '0.0.347',
+  VERSION: '0.0.359',
 
   // 진행률 UI — core 의 onProgress 콜백에서 호출
   showProgress: function (msg, pct) {
@@ -101,9 +101,9 @@ window.OhsorryRender = {
       allCharts,
       ereterData, zasaSupplemental, ereterMap, zasaMap, ratingMap, ereterExtractedAt,
       ohsorryRecBase,
-      topEC, topHC, topEXH,
+      topEC, topHC, topEXH, topWeakness = [],
       pageCount, useOnlyLv12, matched, unmatched, details, perLevel, perLamp,
-      recsEC, recsHC, recsEXH,
+      recsEC, recsHC, recsEXH, recsWeakness = [],
       total,
       norm, SERIES, shelfLib,
     } = result;
@@ -476,28 +476,39 @@ window.OhsorryRender = {
           }
           return recs.map(r => {
             const chartLetter = (r.chart || '?')[0];
+            // 약점보완 row 는 chart letter 앞에 게임 레벨 prefix (예: "11H") — 클리어 추천과 달리 ★ 안 보이니 lv 정보 필요.
+            const chartDisplay = (r._category === 'weakness' && typeof r.gameLevel === 'number')
+              ? String(r.gameLevel) + chartLetter
+              : chartLetter;
             const cColor = chartColor(r.chart);
-            const titleStyle =
+            // 약점보완 row 는 lv 색 적용 X (기본색) — 어차피 chart letter 앞에 게임 lv prefix 로 표시.
+            const titleStyle = (r._category === 'weakness') ? '' :
               r.gameLevel === 11 ? ' style="color:#9ccc65"' :
               r.gameLevel === 12 ? ' style="color:#87ceeb"' : '';
-            const titleTooltip =
-              r.gameLevel === 11 ? ' title="ohSorry 추정 ★ (게임 LEVEL 11, ereter 미등록)"' :
-              r.gameLevel === 12 ? ' title="ohSorry 추정 ★ (게임 LEVEL 12, ereter 미등록)"' : '';
             // FLIP 권장 마크 — calcOhsorryCore 가 sample15 정렬 시 _matchByHand 캐시 저장.
             //   best === 'flip' 이면 FLIP 배치 (양손 바꿈) 가 더 잘 맞는 곡이라 작은 핑크 배지 표시.
             const flipBadge = r._matchByHand && r._matchByHand.best === 'flip'
-              ? ` <span class="rec-flip" title="FLIP 배치 (양손 바꿈) 가 더 잘 맞아요" style="color:#ff6b9d;font-size:9px;font-weight:700;margin-left:3px;padding:0 3px;border:1px solid #ff6b9d;border-radius:2px;line-height:1.2">FLIP</span>`
+              ? ` <span class="rec-flip" style="color:#ff6b9d;font-size:9px;font-weight:700;margin-left:3px;padding:0 3px;border:1px solid #ff6b9d;border-radius:2px;line-height:1.2">FLIP</span>`
               : '';
             // 추천 이유 hashtag — calcOhsorryCore 의 computeRecHashtags 결과 (#강도전 #FLIP+N #왼손위주 #동치 #계단 #밀도 등).
-            //   hover title + data-tags (곡명 클릭 토스트 안에서 표시).
+            //   hover title (rec-title-clickable 의 title 에 합침 — 자식 element title 이 부모 title 보다 우선이라 직접 통합) + data-tags (곡명 클릭 토스트 안에서 표시).
             const hashtags = Array.isArray(r._hashtags) ? r._hashtags : [];
             const tagsJoined = hashtags.join(' ');
-            const hashtagsAttr = hashtags.length > 0 ? ` title="${escHtml(tagsJoined)}" data-tags="${escHtml(tagsJoined)}"` : '';
+            const tooltipParts = [];
+            if (tagsJoined) tooltipParts.push(tagsJoined);
+            if (r.gameLevel === 11) tooltipParts.push('ohSorry 추정 ★ (게임 LEVEL 11, ereter 미등록)');
+            else if (r.gameLevel === 12) tooltipParts.push('ohSorry 추정 ★ (게임 LEVEL 12, ereter 미등록)');
+            const titleAttr = tooltipParts.length > 0 ? ` title="${escHtml(tooltipParts.join('\n\n'))}"` : '';
+            const dataTagsAttr = tagsJoined ? ` data-tags="${escHtml(tagsJoined)}"` : '';
+            // 약점보완 (_category='weakness') 은 클리어 도전 무관 → rec-diff (★ 실력값) 안 표시. ☆ (zasa) 만 유지.
+            const diffSpan = r._category === 'weakness'
+              ? ''
+              : `<span class="rec-diff" style="color:${color}" title="실력 ★">★${r.diffValue.toFixed(2)}</span>`;
             return `
-              <div class="rec-item"${hashtagsAttr}>
-                <span class="rec-chart" style="color:${cColor}" title="${r.chart || ''}">${chartLetter}</span>
-                <div class="rec-title rec-title-clickable" data-t="${escHtml(r.title)}" data-c="${escHtml(r.chart || '')}"${titleTooltip}><span${titleStyle}>${escHtml(r.title)}</span><span style="color:#aaa;font-weight:400;margin-left:4px;font-size:10.5px">${r.currentLamp || ''}</span>${flipBadge}</div>
-                <span class="rec-diff" style="color:${color}" title="실력 ★">★${r.diffValue.toFixed(2)}</span>
+              <div class="rec-item"${dataTagsAttr}>
+                <span class="rec-chart" style="color:${cColor}" title="${r.chart || ''}">${chartDisplay}</span>
+                <div class="rec-title rec-title-clickable" data-t="${escHtml(r.title)}" data-c="${escHtml(r.chart || '')}"${titleAttr}><span${titleStyle}>${escHtml(r.title)}</span><span style="color:#aaa;font-weight:400;margin-left:4px;font-size:10.5px">${r.currentLamp || ''}</span>${flipBadge}</div>
+                ${diffSpan}
                 <span class="rec-level" title="서열표 ☆">☆${r.level.toFixed(1)}</span>
               </div>
             `;
@@ -519,22 +530,78 @@ window.OhsorryRender = {
         };
         window.__dp_rerollAndRender = rerenderRecStage;
 
+        // 약점보완 (weakness) UI 옵션 상태 — 모드 라디오 + 곡수 라디오. 토글 변경 시 window.__dp_rerollWeakness(opts) 호출.
+        const weaknessOpts = { mode: 'all', topN: 5, flipOn: true, handMode: 'both' };
+        const rerenderWeakness = () => {
+          if (typeof window.__dp_rerollWeakness !== 'function') return;
+          const newRecs = window.__dp_rerollWeakness({ ...weaknessOpts, recLevelMode });
+          const container = document.getElementById('__dp_recs_weakness');
+          if (container) container.innerHTML = window.__dp_renderRecItems(newRecs, '#ff6b9d');
+          const counter = document.getElementById('__dp_recs_count_weakness');
+          if (counter) counter.textContent = newRecs.length;
+        };
+        window.__dp_weakness_setMode = (m) => {
+          weaknessOpts.mode = m;
+          rerenderWeakness();
+          document.querySelectorAll('.wk-mode-opt').forEach(b => b.classList.toggle('active', b.dataset.m === m));
+        };
+        window.__dp_weakness_setTopN = (n) => {
+          weaknessOpts.topN = n;
+          rerenderWeakness();
+          document.querySelectorAll('.wk-topn-opt').forEach(b => b.classList.toggle('active', String(b.dataset.n) === String(n)));
+        };
+
         const renderRec = (label, recs, color, stage) => {
           const openAttr = stage === 'ec' ? ' open' : '';
+          // 약점보완 stage 만 토글 UI 추가 — 모드 (합산/차지/스크/소프란) + 곡수 (5/10/20).
+          //   active 클래스 + ohsorryRender 의 .rec-mode-opt 스타일 재사용.
+          const weaknessControls = stage === 'weakness' ? `
+            <div class="rec-mode-toggle" style="margin-top:4px">
+              <span class="rec-mode-label">모드 :</span>
+              <div class="rec-mode-options">
+                <span class="rec-mode-opt wk-mode-opt active" data-m="all"     onclick="event.preventDefault();event.stopPropagation();window.__dp_weakness_setMode('all');">합산</span>
+                <span class="rec-mode-sep">|</span>
+                <span class="rec-mode-opt wk-mode-opt" data-m="CHARGE"  onclick="event.preventDefault();event.stopPropagation();window.__dp_weakness_setMode('CHARGE');">차지</span>
+                <span class="rec-mode-sep">|</span>
+                <span class="rec-mode-opt wk-mode-opt" data-m="SCRATCH" onclick="event.preventDefault();event.stopPropagation();window.__dp_weakness_setMode('SCRATCH');">스크</span>
+                <span class="rec-mode-sep">|</span>
+                <span class="rec-mode-opt wk-mode-opt" data-m="SOF-LAN" onclick="event.preventDefault();event.stopPropagation();window.__dp_weakness_setMode('SOF-LAN');">소프란</span>
+              </div>
+            </div>
+            <div class="rec-mode-toggle" style="margin-top:2px">
+              <span class="rec-mode-label">곡 수 :</span>
+              <div class="rec-mode-options">
+                <span class="rec-mode-opt wk-topn-opt active" data-n="5"  onclick="event.preventDefault();event.stopPropagation();window.__dp_weakness_setTopN(5);">5</span>
+                <span class="rec-mode-sep">|</span>
+                <span class="rec-mode-opt wk-topn-opt" data-n="10" onclick="event.preventDefault();event.stopPropagation();window.__dp_weakness_setTopN(10);">10</span>
+                <span class="rec-mode-sep">|</span>
+                <span class="rec-mode-opt wk-topn-opt" data-n="20" onclick="event.preventDefault();event.stopPropagation();window.__dp_weakness_setTopN(20);">20</span>
+              </div>
+            </div>
+          ` : '';
+          const summaryLabel = stage === 'weakness'
+            ? `<span style="color:${color}">${label}</span> 추천`
+            : `<span style="color:${color}">${label}</span> 클리어 추천`;
+          const rerollBtn = stage === 'weakness'
+            ? `<button type="button" class="rec-reroll"
+                  onclick="event.preventDefault();event.stopPropagation();window.__dp_weakness_setMode(window.__dp_weakness_mode||'all');return false;"
+                  onmousedown="event.stopPropagation();" ontouchstart="event.stopPropagation();"
+                  title="다시 뽑기">↻</button>`
+            : `<button type="button" class="rec-reroll"
+                  onclick="event.preventDefault();event.stopPropagation();window.__dp_rerollAndRender('${stage}','${color}');return false;"
+                  onmousedown="event.stopPropagation();" ontouchstart="event.stopPropagation();"
+                  title="추천곡 다시 뽑기">↻</button>`;
           return `
             <details class="toggle-rec"${openAttr} style="margin-top:10px">
               <summary style="color:#212529;font-weight:600">
                 <span class="rec-summary-text">
-                  <span style="color:${color}">${label}</span> 클리어 추천
+                  ${summaryLabel}
                   (<span id="__dp_recs_count_${stage}">${recs.length}</span>곡)
                 </span>
                 <span class="rec-summary-marker"></span>
-                <button type="button" class="rec-reroll"
-                  onclick="event.preventDefault();event.stopPropagation();window.__dp_rerollAndRender('${stage}','${color}');return false;"
-                  onmousedown="event.stopPropagation();"
-                  ontouchstart="event.stopPropagation();"
-                  title="추천곡 다시 뽑기">↻</button>
+                ${rerollBtn}
               </summary>
+              ${weaknessControls}
               <div id="__dp_recs_${stage}" class="recs" style="margin-top:6px">
                 ${renderRecItems(recs, color)}
               </div>
@@ -632,6 +699,7 @@ window.OhsorryRender = {
           renderRec('EASY',    topEC,  '#52a447', 'ec'),
           renderRec('HARD',    topHC,  '#dc3545', 'hc'),
           renderRec('EX-HARD', topEXH, '#d4a017', 'exh'),
+          renderRec('약점보완', topWeakness, '#ff6b9d', 'weakness'),
         ].join('');
       })()}
       </div>
@@ -887,41 +955,32 @@ window.OhsorryRender = {
     `;
     document.body.appendChild(panel);
 
-    // 추천곡 곡명 클릭 → 차트 row 토스트 (ohsorryShelf renderChartRow) + 추천 이유 hashtag 한 줄
-    const showRowToast = (chartObj, x, y, hashtags) => {
-      if (!shelfLib || !shelfLib.renderChartRow) return;
-      document.getElementById('__dp_row_toast')?.remove();
-      const t = document.createElement('div');
-      t.id = '__dp_row_toast';
-      const tagsHtml = hashtags
-        ? `<div style="padding:6px 10px;background:rgba(255,107,157,0.08);border-top:1px solid rgba(255,107,157,0.2);font-size:11px;color:#ff6b9d;font-weight:600;line-height:1.4">${escHtml(hashtags)}</div>`
-        : '';
-      t.innerHTML = shelfLib.renderChartRow(chartObj) + tagsHtml;
-      t.style.cssText = 'position:fixed;left:0;top:0;width:320px;max-width:calc(100vw - 16px);z-index:9999999;box-shadow:0 6px 24px rgba(0,0,0,.5);border-radius:4px;cursor:pointer';
-      document.body.appendChild(t);
-      const rect = t.getBoundingClientRect();
-      const m = 8;
-      let left = x - rect.width / 2, top = y + 14;
-      left = Math.max(m, Math.min(left, window.innerWidth - rect.width - m));
-      if (top + rect.height + m > window.innerHeight) top = y - rect.height - 14;
-      top = Math.max(m, top);
-      t.style.left = left + 'px';
-      t.style.top = top + 'px';
-      t.addEventListener('click', () => t.remove());
-      clearTimeout(showRowToast.__timer);
-      showRowToast.__timer = setTimeout(() => t.remove(), 4000);
-    };
-    panel.addEventListener('click', (e) => {
-      const el = e.target.closest('.rec-title-clickable');
-      if (!el) return;
-      const found = allCharts.find((c) => c.title === el.dataset.t && c.diff === el.dataset.c);
-      if (found) {
-        // 추천 이유 hashtag (rec-item div 의 data-tags 에 저장) — 토스트 하단에 한 줄.
+    // 추천곡 클릭 → row 바로 아래에 hashtag row 한 줄 표시 (토글).
+    //   다른 row 클릭 시 기존 hashtag row 제거 후 새로 표시. 같은 row 재클릭 시 닫기만.
+    //   document 전역 listener 한 번만 부착 — cloneNode 복제된 panel 에서도 동작.
+    if (!window.__dp_recClickAttached) {
+      window.__dp_recClickAttached = true;
+      document.addEventListener('click', (e) => {
+        const el = e.target.closest && e.target.closest('.rec-title-clickable');
+        if (!el) return;
         const recItemEl = el.closest('.rec-item');
-        const tags = recItemEl && recItemEl.dataset ? recItemEl.dataset.tags : '';
-        showRowToast(found, e.clientX, e.clientY, tags);
-      }
-    });
+        if (!recItemEl) return;
+        // 기존 열린 hashtag row 가 클릭한 row 의 바로 다음이면 = 같은 row 재클릭 → 모두 제거 (닫기만)
+        const sameOpen = recItemEl.nextElementSibling
+          && recItemEl.nextElementSibling.classList
+          && recItemEl.nextElementSibling.classList.contains('__dp_rec_tags_row');
+        document.querySelectorAll('.__dp_rec_tags_row').forEach((r) => r.remove());
+        if (sameOpen) return;
+        const tags = (recItemEl.dataset && recItemEl.dataset.tags) || '';
+        if (!tags) return;
+        const tagsRow = document.createElement('div');
+        tagsRow.className = '__dp_rec_tags_row';
+        // !important — 호스트 페이지의 외부 CSS 가 text-decoration / color override 하는 것 방지.
+        tagsRow.setAttribute('style', 'padding:3px 8px!important;background:#2a2a2a!important;color:#ff6b9d!important;font-size:10.5px!important;font-weight:600!important;line-height:1.3!important;text-decoration:none!important');
+        tagsRow.textContent = tags;
+        recItemEl.insertAdjacentElement('afterend', tagsRow);
+      });
+    }
 
     // 상세통계 토글
     if (panel.querySelector('#__detail_stats')) {
@@ -956,7 +1015,7 @@ window.OhsorryRender = {
     }
 
     // window.__dp_result 노출 (개발용)
-    window.__dp_result = { total, matched, unmatched, details, perLevel, perLamp, allCharts, pageCount, ereterExtractedAt, starEstimate, starRaw, profile, recsEC, recsHC, recsEXH };
+    window.__dp_result = { total, matched, unmatched, details, perLevel, perLamp, allCharts, pageCount, ereterExtractedAt, starEstimate, starRaw, profile, recsEC, recsHC, recsEXH, recsWeakness };
     console.log('💾 결과 데이터: window.__dp_result');
 
     // ===== supabase upload — OhsorryDb.uploadResult 위임 (DB 모드는 자동 skip) =====
