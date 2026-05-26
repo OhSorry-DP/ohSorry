@@ -1,4 +1,4 @@
-// ohsorryRender.js — 오소리 결과 렌더 모듈 (v0.0.360)
+// ohsorryRender.js — 오소리 결과 렌더 모듈 (v0.0.361)
 //
 // calcOhsorryCore.compute() 가 반환한 result 객체를 받아 화면 패널 + 추천곡 + supabase upload.
 // 본체 / 라이벌 wrapper 가 fetch + eval 해서 사용.
@@ -30,7 +30,7 @@
 // ============================================================
 
 window.OhsorryRender = {
-  VERSION: '0.0.360',
+  VERSION: '0.0.361',
 
   // 진행률 UI — core 의 onProgress 콜백에서 호출
   showProgress: function (msg, pct) {
@@ -553,7 +553,15 @@ window.OhsorryRender = {
         window.__dp_weakness_setFlip = (on) => {
           weaknessOpts.flipOn = !!on;
           rerenderWeakness();
-          document.querySelectorAll('.wk-flip-opt').forEach(b => b.classList.toggle('active', (b.dataset.v === 'on') === !!on));
+          // 새 한 줄 UI 의 FLIP 토글 버튼 + (옛 5라인 UI 의 on/off 두 칸) 둘 다 같은 .wk-flip-opt 셀렉터.
+          // inline style 도 같이 갱신 — active 면 핑크 fill, 비활성 면 회색 outline.
+          document.querySelectorAll('.wk-flip-opt').forEach(b => {
+            const isActive = (b.dataset.v === 'on') === !!on;
+            b.classList.toggle('active', isActive);
+            b.style.background = isActive ? '#ff6b9d' : '#fff';
+            b.style.color = isActive ? '#fff' : '#aaa';
+            b.style.borderColor = isActive ? '#ff6b9d' : '#ced4da';
+          });
         };
         window.__dp_weakness_setHand = (h) => {
           weaknessOpts.handMode = h;
@@ -568,8 +576,8 @@ window.OhsorryRender = {
 
         const renderRec = (label, recs, color, stage) => {
           const openAttr = stage === 'ec' ? ' open' : '';
-          // 약점보완 stage 만 토글 UI 추가 — 모드/곡수/FLIP/손/강도.
-          //   active 클래스 + ohsorryRender 의 .rec-mode-opt 스타일 재사용.
+          /* 옛 weaknessControls (5라인 라디오 — 모드/곡수/FLIP/손/강도) — 2026-05-27 한 줄 dropdown + FLIP 토글 버튼 UI 로 교체.
+             세로로 너무 길어져서 압축. 필요 시 아래 블록 주석 해제하고 새 정의는 주석 처리.
           const weaknessControls = stage === 'weakness' ? `
             <div class="rec-mode-toggle" style="margin-top:4px">
               <span class="rec-mode-label">모드 :</span>
@@ -620,6 +628,44 @@ window.OhsorryRender = {
                 <span class="rec-mode-sep">|</span>
                 <span class="rec-mode-opt wk-strength-opt" data-s="3" onclick="event.preventDefault();event.stopPropagation();window.__dp_weakness_setStrength(3);">3</span>
               </div>
+            </div>
+          ` : '';
+          */
+          // 새 한 줄 UI — 모드/곡수/손/강도 dropdown + FLIP 토글 버튼 한 줄. select 의 background 는 #f8f9fa,
+          // 글씨는 회색 (#555), FLIP 토글 active 는 .wk-flip-opt active 스타일 (핑크 #ff6b9d) 재사용.
+          const weaknessControls = stage === 'weakness' ? `
+            <div class="rec-mode-toggle" style="margin-top:4px;display:flex;flex-wrap:wrap;align-items:center;gap:4px">
+              <select class="wk-select" style="padding:1px 4px;font-size:11px;border:1px solid #ced4da;border-radius:3px;background:#fff;color:#555;cursor:pointer"
+                onclick="event.stopPropagation();" onmousedown="event.stopPropagation();"
+                onchange="event.stopPropagation();window.__dp_weakness_setMode(this.value);">
+                <option value="all" selected>합산</option>
+                <option value="CHARGE">차지</option>
+                <option value="SCRATCH">스크</option>
+                <option value="SOF-LAN">소프란</option>
+              </select>
+              <select class="wk-select" style="padding:1px 4px;font-size:11px;border:1px solid #ced4da;border-radius:3px;background:#fff;color:#555;cursor:pointer"
+                onclick="event.stopPropagation();" onmousedown="event.stopPropagation();"
+                onchange="event.stopPropagation();window.__dp_weakness_setTopN(Number(this.value));">
+                <option value="5" selected>5곡</option>
+                <option value="10">10곡</option>
+                <option value="20">20곡</option>
+              </select>
+              <span class="rec-mode-opt wk-flip-opt active" data-v="on" style="padding:1px 6px;border:1px solid #ff6b9d;border-radius:3px;font-size:11px;font-weight:600;cursor:pointer;background:#ff6b9d;color:#fff"
+                onclick="event.preventDefault();event.stopPropagation();window.__dp_weakness_setFlip(!this.classList.contains('active'));">FLIP</span>
+              <select class="wk-select" style="padding:1px 4px;font-size:11px;border:1px solid #ced4da;border-radius:3px;background:#fff;color:#555;cursor:pointer"
+                onclick="event.stopPropagation();" onmousedown="event.stopPropagation();"
+                onchange="event.stopPropagation();window.__dp_weakness_setHand(this.value);">
+                <option value="both" selected>양손</option>
+                <option value="left">왼손</option>
+                <option value="right">오른손</option>
+              </select>
+              <select class="wk-select" style="padding:1px 4px;font-size:11px;border:1px solid #ced4da;border-radius:3px;background:#fff;color:#555;cursor:pointer"
+                onclick="event.stopPropagation();" onmousedown="event.stopPropagation();"
+                onchange="event.stopPropagation();window.__dp_weakness_setStrength(Number(this.value));">
+                <option value="1" selected>강도 1</option>
+                <option value="2">강도 2</option>
+                <option value="3">강도 3</option>
+              </select>
             </div>
           ` : '';
           const summaryLabel = stage === 'weakness'

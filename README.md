@@ -309,6 +309,12 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### 2026-05-27 — 약점보완 토글 UI 한 줄 압축 (ohsorryRender v0.0.361)
+- 5라인 라디오 → 한 줄 dropdown (모드/곡수/손/강도) + FLIP 토글 버튼.
+- 옛 5라인 정의는 코드 안에 JS 블록 주석으로 보존 (필요 시 복구).
+- FLIP 토글 버튼 — 클릭 시 active 반전, active 면 핑크 fill / 비활성 면 회색 outline. `__dp_weakness_setFlip` 이 inline style 도 같이 갱신.
+- 동작/setter 변경 없음 — `__dp_weakness_setMode/setTopN/setFlip/setHand/setStrength` 그대로 호출.
+
 ### 2026-05-27 — 약점보완 토글 확장 + ★ 상한 정책 교체 (calcOhsorryCore v0.0.363 / ohsorryRender v0.0.360 / calcWeakness)
 - **calcWeakness** ([modules/calcWeakness.js](modules/calcWeakness.js)) — `chartStrengthMatchByHand` / `chartWeaknessMatchByHand` 에 `opts.flipOn` (default true) + `opts.handMode` (`'both'`/`'left'`/`'right'`, default `'both'`) 추가. `best`/`bestTotal` 만 영향 (L/R/total/flipL/flipR/flipTotal raw 는 항상 그대로). `flipOn: false` 면 flip 비교 안 함 (normal 강제). `handMode: 'left'` 면 매치 합계가 왼손 (`sL` / `sFlipL`) 만, `'right'` 면 오른손만.
 - **calcOhsorryCore v0.0.363** ([modules/calcOhsorryCore.js](modules/calcOhsorryCore.js)) — `buildWeaknessRecs` 정책 교체:
