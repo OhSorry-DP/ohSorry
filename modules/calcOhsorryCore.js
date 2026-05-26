@@ -34,7 +34,7 @@
 //   wrapperVersion: wrapper 자기 버전 (예: 'v3.3.6') — supabase version 컬럼은
 //                   `${wrapperVersion}-core${CORE_VERSION_SHORT}` 조합 (예: 'v3.3.6-core335')
 window.OhsorryCore = {
-  VERSION: '0.0.346',
+  VERSION: '0.0.347',
   compute: async (opts) => {
   opts = opts || {};
   const mode = opts.mode || 'own';
@@ -42,7 +42,7 @@ window.OhsorryCore = {
   let dbData = opts.dbData || null;
   const rivalToken = opts.rivalToken || null;
   const wrapperVersion = opts.wrapperVersion || 'unknown';
-  const CORE_VERSION_SHORT = '0.0.346'.replace(/^0\.0\./, '');  // '346'
+  const CORE_VERSION_SHORT = '0.0.347'.replace(/^0\.0\./, '');  // '346'
   const dbVersionString = `${wrapperVersion}-core${CORE_VERSION_SHORT}`;
   dbData = dbData || null;
   // -------- 0. ereter 데이터 로드 (Gist 에서 자동 fetch) --------
@@ -1121,6 +1121,19 @@ window.OhsorryCore = {
     return weaknessLib.chartStrengthMatch(patternsMap[sid].c[cn], userVec);
   };
 
+  // 손 분리 + FLIP 매치 — chart 의 p1/p2 와 vecL/vecR 각각 dot product, FLIP 배치도 같이 비교.
+  //   return: { L, R, total, max, flipL, flipR, flipTotal, flipMax, best:'normal'|'flip', bestTotal }
+  //   추천 정렬은 bestTotal desc — FLIP 으로 더 잘 맞는 곡도 같이 우선순위 결정.
+  //   weaknessLib 신규 함수 / __vecL / __vecR 모두 있어야 동작 (옛 gist 호환 위해 null 반환 fallback).
+  const chartStrengthMatchByHand = (r) => {
+    if (!userVec || !userVec.__vecL || !userVec.__vecR || !weaknessLib || !weaknessLib.chartStrengthMatchByHand) return null;
+    const sid = patternsTitleMap[norm(r.title || '')];
+    if (!sid) return null;
+    const cn = weaknessLib.DIFF2CHART[r.chart];
+    if (!cn || !patternsMap[sid] || !patternsMap[sid].c[cn]) return null;
+    return weaknessLib.chartStrengthMatchByHand(patternsMap[sid].c[cn], userVec.__vecL, userVec.__vecR);
+  };
+
   const recsEC = [], recsHC = [], recsEXH = [];
 
   // Fisher-Yates shuffle
@@ -1232,15 +1245,31 @@ window.OhsorryCore = {
     const keyOf = r => (r.title || '') + '|' + r.chart;
 
     // 카테고리 내 모든 분류 합쳐서 sample 15 (top 10 + random 5).
-    // userVec 있으면 강점 매치 desc (동점 시 count desc tiebreak), 없으면 기존 count desc.
+    //   1순위: 손 분리 + FLIP 매치 (chartStrengthMatchByHand 의 bestTotal desc) — vecL/vecR + 신규 gist 있을 때
+    //   2순위: 양손 평균 매치 (chartStrengthMatch) — 옛 fallback
+    //   3순위: count desc — userVec 자체 없을 때 (patterns/weaknessLib 로드 실패 등)
+    // 동점 시 count desc tiebreak. 차트 객체에 _matchByHand 캐시 (UI 에서 FLIP 권장 표시 등 활용).
+    const canUseByHand = !!(userVec && userVec.__vecL && userVec.__vecR && weaknessLib && weaknessLib.chartStrengthMatchByHand);
     const sample15 = (cat) => {
       const pool = [...cat.hard, ...cat.easy, ...cat.cleanup];
-      const sorted = userVec
-        ? [...pool].sort((a, b) => {
-            const sa = chartStrengthMatch(a), sb = chartStrengthMatch(b);
-            return (sb - sa) || ((b[countField] || 0) - (a[countField] || 0));
-          })
-        : [...pool].sort((a, b) => (b[countField] || 0) - (a[countField] || 0));
+      let sorted;
+      if (canUseByHand) {
+        for (const r of pool) {
+          if (r._matchByHand === undefined) r._matchByHand = chartStrengthMatchByHand(r);
+        }
+        sorted = [...pool].sort((a, b) => {
+          const sa = a._matchByHand ? a._matchByHand.bestTotal : 0;
+          const sb = b._matchByHand ? b._matchByHand.bestTotal : 0;
+          return (sb - sa) || ((b[countField] || 0) - (a[countField] || 0));
+        });
+      } else if (userVec) {
+        sorted = [...pool].sort((a, b) => {
+          const sa = chartStrengthMatch(a), sb = chartStrengthMatch(b);
+          return (sb - sa) || ((b[countField] || 0) - (a[countField] || 0));
+        });
+      } else {
+        sorted = [...pool].sort((a, b) => (b[countField] || 0) - (a[countField] || 0));
+      }
       const top10 = sorted.slice(0, 10);
       const usedKeys = new Set(top10.map(keyOf));
       const rest = pool.filter(r => !usedKeys.has(keyOf(r)));

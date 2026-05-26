@@ -276,6 +276,7 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 | `ohsorryRender.js` | v0.0.335 | ~854 | **UI render** — 진행률 UI (`showProgress`/`hideProgress`), 결과 패널 (프로필 / ★ / 노트레이더 / 추천곡 sortable / 상세통계), `__dp_rerun` / `__dp_confirmRerun` / `__dp_toggleRadar` 등. core 의 `result` 객체 받아서 표시 + `OhsorryDb.upsertUserProfile` 호출. |
 | `dbConn.js` | v0.0.335 | ~73 | **supabase 통신** — `upsertUserProfile(payload)` / `fetchUserProfile(iidxId)` 두 RPC 호출만 담당. SUPABASE_URL / SUPABASE_KEY 캡슐화. |
 | `ohsorryShelf.js` | v0.0.26 | ~565 | **서열표 렌더 lib** — charts 배열 → 격자 HTML (`renderShelf` / `renderChartRow` / `renderStackbar` / `injectStyle`). `calcOhsorryCore` 가 추천곡 토스트용으로, ohSorryWeb 게스트 페이지가 서열표 탭용으로 gist fetch. ohSorryRating 에서 이관. |
+| `calcWeakness.js` | — | ~600 | **유저 약점/강점 분석 lib** — 잔차 가중평균으로 10 feature userVec 계산 + chartStrengthMatch / chartWeaknessMatch / analyzeFeature. calcOhsorryCore 가 sample15 정렬 가중치 + 분석탭 entries 용도로 호출. [📄 상세 문서](modules/calcWeakness.md) |
 | `2-calc-score.js` | (legacy) | ~9 | **호환용 redirect** — 기존 사용자가 콘솔에 붙여넣던 URL 그대로 유지. 내부에서 `ohsorry.js` 를 fetch + eval 만 함. |
 
 **의존 흐름**:
@@ -307,6 +308,18 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 ---
 
 ## 변경 이력
+
+### 2026-05-26 — 추천곡 정렬 손 분리 + FLIP 매치 (calcOhsorryCore v0.0.347 / ohsorryRender v0.0.347 / calcWeakness)
+- **calcWeakness** ([modules/calcWeakness.js](modules/calcWeakness.js) / [calcWeakness.md](modules/calcWeakness.md)) — 양손 분리 vec (`__vecL` / `__vecR`) + 신규 함수 `chartStrengthMatchByHand` / `chartWeaknessMatchByHand` / `computePatternScoreVec`.
+  - `chartStrengthMatchByHand(chartPt, vecL, vecR)` → `{L, R, total, max, flipL, flipR, flipTotal, flipMax, best, bestTotal}` — 정규 배치 (왼손=p1 / 오른손=p2) + FLIP 배치 (양손 바꿈) 둘 다 평가. `bestTotal` = 더 잘 맞는 배치의 total.
+  - `computePatternScoreVec` — chart_score × score_rate top 30 가중합 통합 (ohSorryRating backfill / ohSorry dbConn / INFOhSorry 가 같은 알고리즘 공유).
+- **calcOhsorryCore v0.0.347** ([modules/calcOhsorryCore.js](modules/calcOhsorryCore.js)) — `sample15` 정렬 (EC/HC/EXH) 을 `chartStrengthMatch` 양손 평균 → `chartStrengthMatchByHand` 의 `bestTotal` desc 로 교체. 차트 객체에 `_matchByHand` 캐시 (UI 가 FLIP 권장 표시 등에 활용). 옛 gist (vecL/vecR 미보유) 면 양손 평균 fallback.
+- **ohsorryRender v0.0.347** ([modules/ohsorryRender.js](modules/ohsorryRender.js)) — 추천곡 row 의 곡명 옆에 `_matchByHand.best === 'flip'` 일 때 작은 핑크 `FLIP` 배지 표시 (FLIP 배치 권장 마크, `#ff6b9d` 액센트).
+
+### 2026-05-25 — analysisRender v0.0.12 — 기여곡 표 곡 점수 = quantile score (featureScores opts)
+- [modules/analysisRender.js](modules/analysisRender.js) — `opts.featureScores` 옵션 추가. 있으면 차트별 quantile score (`feature-scores-slim.json`, dbConn v0.0.407 백필과 동일 데이터) lookup → 정렬/표시. 없으면 `c.pt` (calcWeakness raw 양손 평균) fallback.
+- 기여곡 표 제목 "강점 기여 Top 3" / "약점 기여 Top 3" → **"Top 3"** 으로 통일 (라벨 색만 강점/약점 구분).
+- 호출자 (ohSorryWeb users.js, INFOhSorry Analysis.tsx) 가 `feature-scores-slim.json` fetch → opts 로 전달.
 
 ### 2026-05-25 — analysisRender v0.0.11 — 기여곡 표 Top 3 + 곡 점수 표시
 - [modules/analysisRender.js](modules/analysisRender.js) — 강점/약점 기여곡 표 둘 다 **Top 3** 으로 통일.
@@ -368,7 +381,7 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ### 2026-05-25 — dbConn v0.0.404 — pattern vec supabase upsert
 - [modules/dbConn.js](modules/dbConn.js) — `uploadResult` 의 5단계로 `callUpsertPatternVec` 추가. `result.userVec` (calcOhsorryCore step2 의 rateRef 기준 vec) 을 supabase `user_radars` 의 `os_*` 10 컬럼에 upsert (DP row 만).
-- 사전 조건: [ohSorryAdmin migrate_add_os_vec_columns.sql](../ohSorryAdmin/sql/migrate_add_os_vec_columns.sql) + [setup_pattern_vec_rpc.sql](../ohSorryAdmin/sql/setup_pattern_vec_rpc.sql) 적용.
+- 사전 조건: [ohSorryAdmin setup_users.sql](../ohSorryAdmin/sql/setup_users.sql) (user_radars os_* 10컬럼 포함) + [setup_pattern_vec_rpc.sql](../ohSorryAdmin/sql/setup_pattern_vec_rpc.sql) 적용.
 - 용도: ohSorryWeb 분석탭의 사용자 percentile (`get_pattern_vec_percentiles` RPC) 비교 분포 누적.
 
 ### 2026-05-25 — calcWeakness analyzeFeature default topN 5 → 30

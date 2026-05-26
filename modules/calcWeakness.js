@@ -11,8 +11,13 @@
 // PoC 검증 (ohSorryRating/scripts/analyze-user-weakness.js) — 4명 유저 다른 프로파일 확인 OK.
 //
 // 추천 정렬용 helper:
-//   chartStrengthMatch(chartPt, userVec) — Σ userVec_f × chartPt_f  (강점 차트 우선)
+//   chartStrengthMatch(chartPt, userVec) — Σ userVec_f × chartPt_f  (강점 차트 우선, 양손 평균)
 //   chartWeaknessMatch                   — -chartStrengthMatch     (약점 차트 우선, 약점 보완 탭용)
+//   chartStrengthMatchByHand(chartPt, vecL, vecR) — 손 분리 매치 → { L, R, total, max }
+//
+// 양손 분리:
+//   calcUserWeakness 결과에 vec.__vecL / vec.__vecR (왼손/오른손 별 잔차 가중평균) 추가 노출.
+//   기존 vec (양손 평균) 호환 그대로 유지. 손 분리는 chartStrengthMatchByHand 로 활용.
 //
 // UMD — 브라우저 (window.OhsorryWeakness) / Node (module.exports) 양쪽 지원.
 
@@ -162,6 +167,8 @@
       if (!sp || !sp.c || !sp.c[cn]) continue;
       var lv = sp.c[cn].lv;
       var pt = avgPt(sp.c[cn]);
+      var ptP1 = sp.c[cn].p1 || {};
+      var ptP2 = sp.c[cn].p2 || {};
       var rate;
       if (typeof c.scorePercent === 'number') rate = c.scorePercent;
       else if (typeof c.exScore === 'number' && typeof c.noteCount === 'number' && c.noteCount > 0) {
@@ -185,7 +192,7 @@
           entries.push({
             chartId: sid + '|' + cn, title: c.title, diff: c.diff, lv: lv,
             stage: stage, star: star, bucket: bucket,
-            rate: rate, pt: pt, lampNum: c.lampNum,
+            rate: rate, pt: pt, ptP1: ptP1, ptP2: ptP2, lampNum: c.lampNum,
             referenceRate: refRate,
             residual: refRate != null ? rate - refRate : null,  // self-relative 모드는 뒤에서 계산
           });
@@ -201,7 +208,7 @@
         matched++;
         var entry = {
           chartId: sid + '|' + cn, title: c.title, diff: c.diff, lv: lv,
-          rate: rate, pt: pt, lampNum: c.lampNum,
+          rate: rate, pt: pt, ptP1: ptP1, ptP2: ptP2, lampNum: c.lampNum,
         };
         if (!byLv[lv]) byLv[lv] = [];
         byLv[lv].push(entry);
@@ -226,17 +233,31 @@
       }
     }
 
-    // feature 별 가중평균
-    var vec = {};
+    // feature 별 가중평균 — 양손 평균(vec) + 왼손(vecL) + 오른손(vecR) 3종 동시 계산.
+    //   vec  = residual × ptAvg[f] / Σptavg  (기존 호환 — chartStrengthMatch 가 그대로 활용)
+    //   vecL = residual × ptP1[f] / ΣptP1    (왼손 강점/약점)
+    //   vecR = residual × ptP2[f] / ΣptP2    (오른손 강점/약점)
+    var vec = {}, vecL = {}, vecR = {};
     for (var fi = 0; fi < FEATS.length; fi++) {
       var f = FEATS[fi];
       var sumRP = 0, sumP = 0;
+      var sumRPL = 0, sumPL = 0;
+      var sumRPR = 0, sumPR = 0;
       for (var k2 = 0; k2 < entries.length; k2++) {
-        var ptF = entries[k2].pt[f] || 0;
-        sumRP += entries[k2].residual * ptF;
+        var e2 = entries[k2];
+        var ptF = e2.pt[f] || 0;
+        var ptFL = (e2.ptP1 && e2.ptP1[f]) || 0;
+        var ptFR = (e2.ptP2 && e2.ptP2[f]) || 0;
+        sumRP += e2.residual * ptF;
         sumP += ptF;
+        sumRPL += e2.residual * ptFL;
+        sumPL += ptFL;
+        sumRPR += e2.residual * ptFR;
+        sumPR += ptFR;
       }
       vec[f] = sumP > 0 ? sumRP / sumP : 0;
+      vecL[f] = sumPL > 0 ? sumRPL / sumPL : 0;
+      vecR[f] = sumPR > 0 ? sumRPR / sumPR : 0;
     }
     vec.__meta = {
       matched: matched,
@@ -250,6 +271,9 @@
     vec.__bucketAgg = bucketAgg;
     vec.__refCache = refCache;
     vec.__byLv = byLv;
+    // 양손 분리 vec — 손별 강점/약점 분석용. chartStrengthMatchByHand 가 활용.
+    vec.__vecL = vecL;
+    vec.__vecR = vecR;
     return vec;
   }
 
@@ -281,6 +305,138 @@
 
   function chartWeaknessMatch(chartPt, userVec) {
     return -chartStrengthMatch(chartPt, userVec);
+  }
+
+  // 차트 강점 매치 (손 분리 + FLIP 배치 평가).
+  //   normal 배치: 왼손=p1, 오른손=p2 → L = vecL·p1, R = vecR·p2
+  //   flip 배치:   왼손=p2, 오른손=p1 → flipL = vecL·p2, flipR = vecR·p1
+  //   user 가 FLIP 옵션 쓰면 손 ↔ 패턴 매핑이 swap. flip total > normal total 이면 FLIP 추천.
+  //
+  //   vecL/vecR 은 calcUserWeakness 결과의 __vecL / __vecR.
+  //   return: {
+  //     L, R, total, max,                       // normal 배치 (기존 호환)
+  //     flipL, flipR, flipTotal, flipMax,       // flip 배치
+  //     best: 'normal'|'flip',                  // total 큰 쪽
+  //     bestTotal,                              // 큰 쪽의 total
+  //   }
+  function chartStrengthMatchByHand(chartPt, vecL, vecR) {
+    var zero = { L: 0, R: 0, total: 0, max: 0, flipL: 0, flipR: 0, flipTotal: 0, flipMax: 0, best: 'normal', bestTotal: 0 };
+    if (!chartPt || !vecL || !vecR) return zero;
+    var ptL = chartPt.p1 || {};
+    var ptR = chartPt.p2 || {};
+    var sL = 0, sR = 0, sFlipL = 0, sFlipR = 0;
+    for (var i = 0; i < FEATS.length; i++) {
+      var f = FEATS[i];
+      var pl = ptL[f] || 0;
+      var pr = ptR[f] || 0;
+      var vl = vecL[f] || 0;
+      var vr = vecR[f] || 0;
+      sL += vl * pl;
+      sR += vr * pr;
+      sFlipL += vl * pr;   // 왼손이 p2 패턴 받음
+      sFlipR += vr * pl;   // 오른손이 p1 패턴 받음
+    }
+    var total = sL + sR;
+    var flipTotal = sFlipL + sFlipR;
+    var bestFlip = flipTotal > total;
+    return {
+      L: sL, R: sR, total: total, max: sL > sR ? sL : sR,
+      flipL: sFlipL, flipR: sFlipR, flipTotal: flipTotal, flipMax: sFlipL > sFlipR ? sFlipL : sFlipR,
+      best: bestFlip ? 'flip' : 'normal',
+      bestTotal: bestFlip ? flipTotal : total,
+    };
+  }
+
+  // chart_score × score_rate 의 top N 가중합 → supabase user_ohsorry_radars 컬럼 upsert 용.
+  //   backfill-pattern-score.js (ohSorryRating) / ohSorry dbConn / INFOhSorry Analysis 모두 같은 알고리즘 — 한 곳에 통합.
+  //
+  // opts:
+  //   charts         [{ title, diff, exScore, noteCount }] (diff = NORMAL/HYPER/ANOTHER/LEGGENDARIA)
+  //   featureScores  feature-scores-slim.json 전체 객체 ({ _meta, scores })
+  //   patternsMap    patterns-all-slim.json (title → songId 매핑용)
+  //   normFn         title 정규화
+  //   topN           (optional, default 30)
+  //
+  // 알고리즘:
+  //   1. 각 chart 마다 featureScores.scores[songId][DP_xxx] 의 feature score lookup
+  //   2. score_rate = exScore / (noteCount × 2)  (0~1)
+  //   3. points = score × score_rate  (feature 별)
+  //   4. score=0 인 (feature, chart) 쌍은 제외
+  //   5. feature 별 points desc 정렬 → top N → 가중치 (1~5위=1.0, 6~30위=0.90~0.05 선형 감소) 가중합
+  //
+  // return: { NOTES, CHORD, PEAK, CHARGE, SCRATCH, 'SOF-LAN', PHRASE, JACK, TRILL, RAND }
+  //   값 범위 ~0~1500 (이론 max = maxScoreByFeat). null 입력 시 null 반환.
+  var SKILL_WEIGHTS = (function () {
+    var ws = [];
+    for (var i = 0; i < 5; i++) ws.push(1.0);
+    for (var i2 = 0; i2 < 25; i2++) {
+      var pct = 90 - i2 * (90 - 5) / 24;  // i=0 → 90, i=24 → 5
+      ws.push(pct / 100);
+    }
+    return ws;
+  })();
+  function computePatternScoreVec(opts) {
+    opts = opts || {};
+    if (!opts.charts || !opts.featureScores || !opts.patternsMap) return null;
+    var scoresMap = opts.featureScores.scores;
+    if (!scoresMap) return null;
+    var normFn = opts.normFn || function (s) { return s; };
+    var topN = typeof opts.topN === 'number' ? opts.topN : 30;
+    // title norm → songId 매핑
+    var titleToSid = {};
+    for (var sid in opts.patternsMap) {
+      if (!Object.prototype.hasOwnProperty.call(opts.patternsMap, sid)) continue;
+      var t = opts.patternsMap[sid] && opts.patternsMap[sid].t;
+      if (t) titleToSid[normFn(t)] = sid;
+    }
+    // 각 feature 별 points 수집
+    var pointsByFeat = {};
+    for (var fi = 0; fi < FEATS.length; fi++) pointsByFeat[FEATS[fi]] = [];
+    for (var ci = 0; ci < opts.charts.length; ci++) {
+      var c = opts.charts[ci];
+      if (!c || typeof c.exScore !== 'number' || c.exScore <= 0) continue;
+      if (typeof c.noteCount !== 'number' || c.noteCount <= 0) continue;
+      var sid2 = titleToSid[normFn(c.title || '')];
+      if (!sid2) continue;
+      var cn = DIFF2CHART[c.diff];
+      if (!cn) continue;
+      var songScores = scoresMap[sid2];
+      if (!songScores) continue;
+      var chartScores = songScores[cn];
+      if (!chartScores) continue;
+      var scoreRate = c.exScore / (c.noteCount * 2);
+      for (var fi2 = 0; fi2 < FEATS.length; fi2++) {
+        var f = FEATS[fi2];
+        var s = chartScores[f];
+        if (typeof s !== 'number' || s <= 0) continue;
+        pointsByFeat[f].push(s * scoreRate);
+      }
+    }
+    // feature 별 top N 가중합
+    var vec = {};
+    for (var fi3 = 0; fi3 < FEATS.length; fi3++) {
+      var f3 = FEATS[fi3];
+      var top = pointsByFeat[f3].sort(function (a, b) { return b - a; }).slice(0, topN);
+      var acc = 0;
+      for (var ti = 0; ti < top.length; ti++) acc += top[ti] * SKILL_WEIGHTS[ti];
+      vec[f3] = acc;
+    }
+    return vec;
+  }
+
+  // 약점 매치 (손 분리 + FLIP). strengthByHand 결과를 그대로 음수로 뒤집어서 약점 보완 정렬에 사용.
+  //   약점 정렬은 일반적으로 total 작은 (= 가장 매치 안 되는) 차트가 약점 후보지만,
+  //   FLIP 옵션 비교 시에는 "어느 배치로도 매치 안 되는" 차트 (flipTotal 도 작음) 가 진짜 약점.
+  //   return: chartStrengthMatchByHand 결과의 부호만 반대 (L/R/total/max/flipL/flipR/flipTotal/flipMax + best='flip' 일 때 절댓값 큰 쪽 = flip 약점).
+  function chartWeaknessMatchByHand(chartPt, vecL, vecR) {
+    var s = chartStrengthMatchByHand(chartPt, vecL, vecR);
+    var weakBest = s.flipTotal < s.total ? 'flip' : 'normal';   // 더 작은 쪽 = 약점이 더 드러나는 배치
+    return {
+      L: -s.L, R: -s.R, total: -s.total, max: -s.max,
+      flipL: -s.flipL, flipR: -s.flipR, flipTotal: -s.flipTotal, flipMax: -s.flipMax,
+      best: weakBest,
+      bestTotal: weakBest === 'flip' ? -s.flipTotal : -s.total,
+    };
   }
 
   // browser 전용 high-level helper — patterns gist fetch + cache + userVec 계산.
@@ -592,6 +748,9 @@
     calcUserWeakness: calcUserWeakness,
     chartStrengthMatch: chartStrengthMatch,
     chartWeaknessMatch: chartWeaknessMatch,
+    chartStrengthMatchByHand: chartStrengthMatchByHand,
+    chartWeaknessMatchByHand: chartWeaknessMatchByHand,
+    computePatternScoreVec: computePatternScoreVec,
     fetchPatternsMap: fetchPatternsMap,
     fetchAndCalcWeakness: fetchAndCalcWeakness,
     analyzeFeature: analyzeFeature,

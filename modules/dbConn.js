@@ -446,8 +446,8 @@ window.OhsorryDb = (function () {
       try {
         const vec = await computePatternScoreVec(iidxId);
         if (vec) {
-          await callUpsertPatternVec(iidxId, vec);
-          console.log('[OhsorryDb] pattern 점수 upsert 성공 (NOTES=' + vec.NOTES.toFixed(1) + ' charts=' + vec.__count + ')');
+          await callUpsertFeatureScore(iidxId, vec);
+          console.log('[OhsorryDb] feature score upsert 성공 (NOTES=' + vec.NOTES.toFixed(1) + ' charts=' + vec.__count + ')');
         } else {
           console.warn('[OhsorryDb] pattern 점수 계산 skip (feature-scores fetch 실패 또는 plays 차트 부족)');
         }
@@ -458,10 +458,14 @@ window.OhsorryDb = (function () {
     return out;
   }
 
-  // feature-scores-slim.json (gist 호스팅) — 차트별 11 feature quantile score (0~100).
+  // feature-scores-slim.json + textage-meta.json (둘 다 같은 gist 호스팅).
+  //   feature-scores: 차트별 10 feature quantile score (0~100).
+  //   textage-meta: 차트별 notes 수 (score rate = ex_score / (notes×2) 계산용).
   //   첫 호출 시 fetch + cache (메모리, 페이지 lifetime).
   const FEATURE_SCORES_URL = 'https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw/feature-scores-slim.json';
+  const TEXTAGE_META_URL   = 'https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw/textage-meta.json';
   let featureScoresCache = null;
+  let textageMetaCache = null;
   async function getFeatureScores() {
     if (featureScoresCache) return featureScoresCache;
     const res = await fetch(FEATURE_SCORES_URL + '?t=' + Date.now(), { cache: 'no-store' });
@@ -469,15 +473,42 @@ window.OhsorryDb = (function () {
     featureScoresCache = await res.json();
     return featureScoresCache;
   }
+  async function getTextageMeta() {
+    if (textageMetaCache) return textageMetaCache;
+    const res = await fetch(TEXTAGE_META_URL + '?t=' + Date.now(), { cache: 'no-store' });
+    if (!res.ok) throw new Error('textage-meta HTTP ' + res.status);
+    textageMetaCache = await res.json();
+    return textageMetaCache;
+  }
 
-  // make_grid_data 로 유저의 supabase 저장 차트 받아 → feature-scores quantile score 평균.
-  //   각 feature 별 sum(score) / count(score > 0) — score=0 곡은 분모 제외.
-  //   user_radars os_* 컬럼이 있는 10 feature 만 (SOF-LAN-ratio 는 별도 컬럼 없어서 제외).
+  // make_grid_data 로 유저의 supabase 저장 차트 받아 → feature 별 top 30 가중합.
+  //   1. chart 의 10 feature quantile score (0~100) lookup
+  //   2. score rate = ex_score / (notes × 2)  (IIDX 표준 EX rate, 0~1)
+  //   3. feature 별로 points = chart_score × score_rate 모은 뒤 내림차순 정렬
+  //   4. top 30 만 선택, 가중치 5곡씩 [1, 0.5, 0.25, 0.125, 0.0625, 0.03125] 적용
+  //   5. feature_score = Σ(w_i × points_i)  (분모 없음. 30곡 미만이면 자리 비워짐 → 점수 ↓)
+  //   user_ohsorry_radars 10 feature (SOF-LAN 은 dump 단계에서 changes/ratio 융합됨).
   //   반환: { NOTES, CHORD, PEAK, CHARGE, SCRATCH, 'SOF-LAN', PHRASE, JACK, TRILL, RAND, __count } 또는 null.
+  const TOP_N = 30;
+  // 가중치: 1~5위 = 1.0, 6~30위 = 0.90 → 0.05 선형 감소.
+  const WEIGHTS = (() => {
+    const ws = [];
+    for (let i = 0; i < 5; i++) ws.push(1.0);
+    for (let i = 0; i < 25; i++) {
+      const pct = 90 - i * (90 - 5) / 24;
+      ws.push(pct / 100);
+    }
+    return ws;
+  })();
   async function computePatternScoreVec(iidxId) {
-    const fsData = await getFeatureScores().catch(() => null);
+    const [fsData, textageMeta] = await Promise.all([
+      getFeatureScores().catch(() => null),
+      getTextageMeta().catch(() => null),
+    ]);
     if (!fsData || !fsData.scores) return null;
+    if (!textageMeta || !textageMeta.songs) return null;
     const scores = fsData.scores;
+    const songsMeta = textageMeta.songs;
 
     const res = await fetch(SUPABASE_URL + '/rest/v1/rpc/make_grid_data', {
       method: 'POST', headers: HEADERS,
@@ -487,40 +518,52 @@ window.OhsorryDb = (function () {
     const rows = await res.json();
     if (!Array.isArray(rows) || rows.length === 0) return null;
 
-    const DIFF_INT_TO_CHART = { 1: 'DP_NOR', 2: 'DP_HYP', 3: 'DP_ANO', 4: 'DP_LEG' };
+    const DIFF_INT_TO_FEATURE_KEY = { 1: 'DP_NOR', 2: 'DP_HYP', 3: 'DP_ANO', 4: 'DP_LEG' };
+    const DIFF_INT_TO_NOTES_KEY   = { 1: 'DN', 2: 'DH', 3: 'DA', 4: 'DX' };
     const FEATS = ['NOTES', 'CHORD', 'PEAK', 'CHARGE', 'SCRATCH', 'SOF-LAN', 'PHRASE', 'JACK', 'TRILL', 'RAND'];
 
-    const sum = {}, cnt = {};
-    for (const f of FEATS) { sum[f] = 0; cnt[f] = 0; }
+    const pointsByFeat = {};
+    for (const f of FEATS) pointsByFeat[f] = [];
     let matched = 0;
     for (const r of rows) {
       if (!r || !r.ex_score || r.ex_score <= 0) continue;
       const sid = r.textage_song_id;
       if (!sid) continue;
-      const cn = DIFF_INT_TO_CHART[r.diff];
-      if (!cn) continue;
+      const featureKey = DIFF_INT_TO_FEATURE_KEY[r.diff];
+      const notesKey   = DIFF_INT_TO_NOTES_KEY[r.diff];
+      if (!featureKey || !notesKey) continue;
       const songScores = scores[sid];
       if (!songScores) continue;
-      const chartScores = songScores[cn];
+      const chartScores = songScores[featureKey];
       if (!chartScores) continue;
+      const songMeta = songsMeta[sid];
+      if (!songMeta || !songMeta.notes) continue;
+      const noteCount = songMeta.notes[notesKey];
+      if (!noteCount || noteCount <= 0) continue;
+      const scoreRate = r.ex_score / (noteCount * 2);
       matched++;
       for (const f of FEATS) {
         const s = chartScores[f];
-        if (typeof s !== 'number' || s <= 0) continue;  // score=0 곡은 분모 제외
-        sum[f] += s;
-        cnt[f] += 1;
+        if (typeof s !== 'number' || s <= 0) continue;
+        pointsByFeat[f].push(s * scoreRate);
       }
     }
     if (matched === 0) return null;
     const vec = { __count: matched };
-    for (const f of FEATS) vec[f] = cnt[f] > 0 ? sum[f] / cnt[f] : 0;
+    for (const f of FEATS) {
+      const top = pointsByFeat[f].sort((a, b) => b - a).slice(0, TOP_N);
+      let acc = 0;
+      for (let i = 0; i < top.length; i++) acc += top[i] * WEIGHTS[i];
+      vec[f] = acc;
+    }
     return vec;
   }
 
-  // 오소리 패턴 vec upsert — user_radars 의 os_* 컬럼 (play_style=1, DP).
-  async function callUpsertPatternVec(iidxId, vec) {
+  // 오소리 피쳐 스코어 upsert — user_ohsorry_radars (play_style=1, DP).
+  // RPC 인자명 (p_os_*) 은 옛 시그니처 유지 (DB RPC 내부에서 컬럼 매핑).
+  async function callUpsertFeatureScore(iidxId, vec) {
     const numOrNull = (v) => typeof v === 'number' && isFinite(v) ? v : null;
-    await callRpc('upsert_user_pattern_vec', {
+    await callRpc('upsert_user_feature_score', {
       p_iidx_id:    iidxId,
       p_os_notes:   numOrNull(vec.NOTES),
       p_os_chord:   numOrNull(vec.CHORD),

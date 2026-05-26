@@ -1,4 +1,4 @@
-// ohsorryRender.js — 오소리 결과 렌더 모듈 (v0.0.346)
+// ohsorryRender.js — 오소리 결과 렌더 모듈 (v0.0.347)
 //
 // calcOhsorryCore.compute() 가 반환한 result 객체를 받아 화면 패널 + 추천곡 + supabase upload.
 // 본체 / 라이벌 wrapper 가 fetch + eval 해서 사용.
@@ -483,10 +483,15 @@ window.OhsorryRender = {
             const titleTooltip =
               r.gameLevel === 11 ? ' title="ohSorry 추정 ★ (게임 LEVEL 11, ereter 미등록)"' :
               r.gameLevel === 12 ? ' title="ohSorry 추정 ★ (게임 LEVEL 12, ereter 미등록)"' : '';
+            // FLIP 권장 마크 — calcOhsorryCore 가 sample15 정렬 시 _matchByHand 캐시 저장.
+            //   best === 'flip' 이면 FLIP 배치 (양손 바꿈) 가 더 잘 맞는 곡이라 작은 핑크 배지 표시.
+            const flipBadge = r._matchByHand && r._matchByHand.best === 'flip'
+              ? ` <span class="rec-flip" title="FLIP 배치 (양손 바꿈) 가 더 잘 맞아요" style="color:#ff6b9d;font-size:9px;font-weight:700;margin-left:3px;padding:0 3px;border:1px solid #ff6b9d;border-radius:2px;line-height:1.2">FLIP</span>`
+              : '';
             return `
               <div class="rec-item">
                 <span class="rec-chart" style="color:${cColor}" title="${r.chart || ''}">${chartLetter}</span>
-                <div class="rec-title rec-title-clickable" data-t="${escHtml(r.title)}" data-c="${escHtml(r.chart || '')}"${titleTooltip}><span${titleStyle}>${escHtml(r.title)}</span><span style="color:#aaa;font-weight:400;margin-left:4px;font-size:10.5px">${r.currentLamp || ''}</span></div>
+                <div class="rec-title rec-title-clickable" data-t="${escHtml(r.title)}" data-c="${escHtml(r.chart || '')}"${titleTooltip}><span${titleStyle}>${escHtml(r.title)}</span><span style="color:#aaa;font-weight:400;margin-left:4px;font-size:10.5px">${r.currentLamp || ''}</span>${flipBadge}</div>
                 <span class="rec-diff" style="color:${color}" title="실력 ★">★${r.diffValue.toFixed(2)}</span>
                 <span class="rec-level" title="서열표 ☆">☆${r.level.toFixed(1)}</span>
               </div>
