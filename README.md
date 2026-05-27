@@ -309,6 +309,15 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### 2026-05-28 — 연습곡 목표 점수 + 쌍미러 표기 — calcOhsorryCore v0.0.376
+- **`_targetRate` / `_targetExScore` 신규** — 연습곡 row 에 강도별 목표 EX rate / EX 점수 산출.
+  - 강도별 step: 가볍게 +2 / 적당히 +3 / 빡세게 +4 (현재 rate 대비)
+  - 하한: `binMean - 1.5` (zasa bin 평균 근처 보장)
+  - 상한: 98% clamp
+  - `_targetExScore = noteCount × 2 × _targetRate / 100`
+  - 안 친 곡 (rate=null) 은 `binMean` 만으로 target 산출
+- **hashtag `#양미러` → `#쌍미러`** — 표기 통일.
+
 ### 2026-05-28 — low 모드 토글 라벨 "DP11-" — ohsorryRender v0.0.372
 - 저레벨 유저 (`recBaseStar < 0.5` low 모드) 클리어 범위 토글 라벨 `DP8~10` → `DP11-` (DP11+ 와 짝). tooltip 도 "게임 LEVEL 11 미만 중심 추천".
 

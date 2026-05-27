@@ -42,7 +42,7 @@ window.OhsorryCore = {
   let dbData = opts.dbData || null;
   const rivalToken = opts.rivalToken || null;
   const wrapperVersion = opts.wrapperVersion || 'unknown';
-  const CORE_VERSION_SHORT = '0.0.375'.replace(/^0\.0\./, '');  // '346'
+  const CORE_VERSION_SHORT = '0.0.376'.replace(/^0\.0\./, '');  // '346'
   const dbVersionString = `${wrapperVersion}-core${CORE_VERSION_SHORT}`;
   dbData = dbData || null;
   // -------- 0. ereter 데이터 로드 (Gist 에서 자동 fetch) --------
@@ -1247,7 +1247,7 @@ window.OhsorryCore = {
     if (m) {
       if (m.bestLabel) {
         if (m.flip) tags.push('#FLIP');
-        if (m.mL && m.mR) tags.push('#양미러');
+        if (m.mL && m.mR) tags.push('#쌍미러');
         else if (m.mL) tags.push('#좌미러');
         else if (m.mR) tags.push('#우미러');
       }
@@ -1909,6 +1909,15 @@ window.OhsorryCore = {
     // 5단계 — items 변환 + _matchByHand (8 way best 라벨) + tags/hashtags
     const items = [];
     for (const c of slice) {
+      const targetRate = (() => {
+        if (typeof c.rate === 'number' && typeof c.binMean === 'number') {
+          const step = strength >= 3 ? 4 : strength === 2 ? 3 : 2;
+          return clamp(Math.max(c.rate + step, c.binMean - 1.5), 0, 98);
+        }
+        if (typeof c.rate === 'number') return clamp(c.rate + (strength >= 3 ? 4 : strength === 2 ? 3 : 2), 0, 98);
+        if (typeof c.binMean === 'number') return clamp(c.binMean, 0, 98);
+        return null;
+      })();
       const r = {
         title: c.title, chart: c.diff, level: c.zasa,
         ec: c.e.ec, hc: c.e.hc, exh: c.e.exh,
@@ -1926,6 +1935,10 @@ window.OhsorryCore = {
         _weaknessWeakFeats: weakFeats,
         _practiceScore: c.practiceScore,
         _practiceType: c.practiceType,
+        _targetRate: targetRate,
+        _targetExScore: (targetRate != null && c.uc && typeof c.uc.noteCount === 'number' && c.uc.noteCount > 0)
+          ? Math.round(c.uc.noteCount * 2 * targetRate / 100)
+          : null,
         _layoutGain: c.layoutGain,
         _layoutBaseTotal: c.layoutBaseTotal,
         _category: 'weakness',
