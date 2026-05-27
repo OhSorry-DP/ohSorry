@@ -309,6 +309,9 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### 2026-05-28 — 연습곡 ☆ 범위 라벨 가독성 — ohsorryRender v0.0.369
+- 연습곡 zasa 범위 입력 옆 "☆ ~" 라벨 색 `#555 → #212529` + `font-weight:600`. 흐릿해서 안 보이던 문제 수정.
+
 ### 2026-05-27 — 클리어 추천 row 에도 game level prefix — ohsorryRender v0.0.368
 - chart letter 앞 game level prefix (예: "11H", "12A") 표시 조건을 `_category === 'weakness'` 한정에서 **모든 row** 로 확장 (`typeof r.gameLevel === 'number'`).
 - 효과: 클리어 추천 (EC/HC/EXH) 에서도 게임 레벨 한눈에 — DP12 / DP11+ / low 모드 결과 구분 쉬워짐.

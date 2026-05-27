@@ -1,4 +1,4 @@
-// ohsorryRender.js — 오소리 결과 렌더 모듈 (v0.0.368)
+// ohsorryRender.js — 오소리 결과 렌더 모듈 (v0.0.369)
 //
 // calcOhsorryCore.compute() 가 반환한 result 객체를 받아 화면 패널 + 추천곡 + supabase upload.
 // 본체 / 라이벌 wrapper 가 fetch + eval 해서 사용.
@@ -507,11 +507,14 @@ window.OhsorryRender = {
               : r._hideDiffValue
                 ? '<span class="rec-diff" style="color:#aaa" title="EC/HC/EXH 지표 없음">★--</span>'
               : `<span class="rec-diff" style="color:${color}" title="실력 ★">★${r.diffValue.toFixed(2)}</span>`;
+            const goalSpan = r._category === 'weakness' && typeof r._targetRate === 'number'
+              ? `<span class="rec-diff" style="color:${color}" title="${r._targetExScore ? '목표 EX SCORE ' + r._targetExScore : '목표 EX rate'}">목표${r._targetRate.toFixed(1)}%</span>`
+              : diffSpan;
             return `
               <div class="rec-item"${dataTagsAttr}>
                 <span class="rec-chart" style="color:${cColor}" title="${r.chart || ''}">${chartDisplay}</span>
                 <div class="rec-title rec-title-clickable" data-t="${escHtml(r.title)}" data-c="${escHtml(r.chart || '')}"${titleAttr}><span${titleStyle}>${escHtml(r.title)}</span><span style="color:#aaa;font-weight:400;margin-left:4px;font-size:10.5px">${r.currentLamp || ''}</span>${flipBadge}</div>
-                ${diffSpan}
+                ${goalSpan}
                 <span class="rec-level" title="서열표 ☆">☆${r.level.toFixed(1)}</span>
               </div>
             `;
@@ -655,7 +658,7 @@ window.OhsorryRender = {
           const wkInput = `${wkCtl};width:54px`;
           const wkSelect = `${wkCtl};cursor:pointer`;
           const wkFlipOn = 'height:22px;box-sizing:border-box;font-size:11px;font-weight:600;border:1px solid #ff6b9d;border-radius:3px;background:#ff6b9d;color:#fff;padding:0 8px;line-height:20px;vertical-align:middle;cursor:pointer';
-          const wkLabel = 'font-size:11px;color:#555;line-height:22px';
+          const wkLabel = 'font-size:11px;color:#212529;font-weight:600;line-height:22px';
           const weaknessControls = stage === 'weakness' ? `
             <div class="rec-mode-toggle" style="margin-top:4px;display:flex;flex-wrap:wrap;align-items:center;gap:4px">
               <span style="${wkLabel}">☆</span>
