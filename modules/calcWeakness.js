@@ -409,22 +409,43 @@
     };
   }
 
+  // 8배치 misfinger penalty 가중치 — 강도 순서 k12/k67 > rand (사용자 정의).
+  //   왼손 키보드 (1P, 스크 왼쪽) → 정규시 K6/K7 가 손가락 멀리 (무리 = k67), mirror 시 K1/K2 위치가 멀리 (무리 = k12).
+  //   오른손 키보드 (2P, 스크 오른쪽) → 정규시 K1/K2 멀리 (무리 = k12), mirror 시 K6/K7 위치가 멀리 (무리 = k67).
+  //   flip 영향 없음 (flip 은 m1/m2 데이터 swap 일 뿐, 손가락 매핑은 키보드 기준 고정).
+  //   rand 는 mirror invariant. 각 result.total 에서 (strong*0.5 + rand*0.15) 차감 → best 가 자연스럽게 무리 적은 쪽.
+  var MISFINGER_WEIGHT_STRONG = 0.5;
+  var MISFINGER_WEIGHT_RAND = 0.15;
+  function misfingerPenalty(m, mirrored, isLeftHand) {
+    if (!m || !m.MISFINGER) return 0;
+    var mf = m.MISFINGER;
+    var strongCount;
+    if (isLeftHand) strongCount = mirrored ? ((mf.k12 && mf.k12.count) || 0) : ((mf.k67 && mf.k67.count) || 0);
+    else            strongCount = mirrored ? ((mf.k67 && mf.k67.count) || 0) : ((mf.k12 && mf.k12.count) || 0);
+    var randCount = (mf.rand && mf.rand.count) || 0;
+    return strongCount * MISFINGER_WEIGHT_STRONG + randCount * MISFINGER_WEIGHT_RAND;
+  }
+
   // 차트 8 배치 매치 — chartStrengthMatchByHand 의 mirror 확장.
   //   8 배치: N/N, M/-, -/M, M/M, F, F M/-, F -/M, F M/M
   //   mirror-invariant 10 feature (FEATS) dot product + mirror 9 feature (MIRROR_STEMS) × 손별 dot product.
   //   user vec 의 새 18 dim (STAIR_UP_L/R, ..., K7_L/R) 가 chart 의 m1/m2 (mirror applyMirror 거친) 와 매칭.
+  //   misfinger penalty — 각 배치 total 에서 차감 (m1/m2 의 MISFINGER 컬럼). opts.misfingerOn=false 면 skip.
   //
   // chart: { p1, p2, m1, m2 } (patterns-all-slim 의 차트 row, lv 제외)
   // userVec: calcUserWeakness 결과. __vecL/__vecR + 새 18 dim 포함.
   // opts:
-  //   flipOn   true(default) — false 면 4 배치 (정규 mirror 만), flip 안 비교
-  //   mirrorOn true(default) — false 면 mirror 안 비교 (정규 + flip 만)
-  //   handMode 'both'(default) / 'left' / 'right' — best 결정 시 합계 기준
+  //   flipOn       true(default) — false 면 4 배치 (정규 mirror 만), flip 안 비교
+  //   mirrorOn     true(default) — false 면 mirror 안 비교 (정규 + flip 만)
+  //   misfingerOn  true(default) — false 면 misfinger penalty 안 차감 (디버그/비교용)
+  //   handMode     'both'(default) / 'left' / 'right' — best 결정 시 합계 기준
   // return: { results: [...8 배치...], best: {label, total, flip, mL, mR}, bestLabel, bestTotal }
+  //   results[i] — { flip, mL, mR, label, L, R, total, penalty } (total 은 이미 penalty 차감 후)
   function chartStrengthMatch8Way(chart, userVec, opts) {
     var feats = (opts && Array.isArray(opts.feats)) ? opts.feats : FEATS;
     var flipOn = !(opts && opts.flipOn === false);
     var mirrorOn = !(opts && opts.mirrorOn === false);
+    var misfingerOn = !(opts && opts.misfingerOn === false);
     var handMode = (opts && opts.handMode) || 'both';
     var vecL = userVec.__vecL || userVec;
     var vecR = userVec.__vecR || userVec;
@@ -466,21 +487,35 @@
           var RmCur = mirR ? applyMirror(Rm) : Rm;
           var sL = invariantScore(vecL, Lpt) + mirrorScore(userVec, 'L', LmCur);
           var sR = invariantScore(vecR, Rpt) + mirrorScore(userVec, 'R', RmCur);
+          // misfinger penalty — 왼손은 항상 isLeftHand=true (1P 키보드, 스크 왼쪽), 오른손은 false.
+          //   flip 영향 없음 (flip 은 어느 m 데이터를 왼손/오른손이 잡는지만 바꿀 뿐, 손가락 매핑 고정).
+          var penL = misfingerOn ? misfingerPenalty(Lm, mirL, true) : 0;
+          var penR = misfingerOn ? misfingerPenalty(Rm, mirR, false) : 0;
+          var scoreL = sL - penL;
+          var scoreR = sR - penR;
+          var penalty = penL + penR;
           var label;
           if (!flipped && !mirL && !mirR) label = '';
           else {
             var mirPart = (mirL || mirR) ? ((mirL ? 'M' : '-') + '/' + (mirR ? 'M' : '-')) : '';
             label = (flipped ? 'F' : '') + (flipped && mirPart ? ' ' : '') + mirPart;
           }
-          results.push({ flip: flipped, mL: mirL, mR: mirR, label: label, L: sL, R: sR, total: sL + sR });
+          results.push({
+            flip: flipped, mL: mirL, mR: mirR, label: label,
+            L: sL, R: sR,
+            scoreL: scoreL, scoreR: scoreR,
+            strengthRaw: sL + sR,        // penalty 차감 전 (weakness 계산용)
+            total: scoreL + scoreR,      // penalty 차감 후 (misfingerOn=false 면 penalty=0)
+            penaltyL: penL, penaltyR: penR, penalty: penalty,
+          });
         }
       }
     }
     // best 결정 — handMode 별 합계 기준
     var best = results[0];
     var bestKey = function (r) {
-      if (handMode === 'left') return r.L;
-      if (handMode === 'right') return r.R;
+      if (handMode === 'left') return (typeof r.scoreL === 'number') ? r.scoreL : r.L;
+      if (handMode === 'right') return (typeof r.scoreR === 'number') ? r.scoreR : r.R;
       return r.total;
     };
     for (var ri = 1; ri < results.length; ri++) {
@@ -491,16 +526,19 @@
 
   // 약점 8 배치 매치 — chartStrengthMatch8Way 의 부호 반대.
   //   strength 작은 (= 어느 배치로도 매치 안 되는) 차트가 약점.
-  //   chartStrengthMatch8Way 의 bestTotal (= max 8 배치) 의 부호만 뒤집어 반환.
-  //   약점 정렬에서 bestTotal desc → 진짜 약점 (어느 배치로도 매치 안 됨) 우선.
+  //   bestTotal = -strengthRaw - penalty (penalty 양수면 weakness 점수도 같이 깎음).
+  //   penalty 가 weakness 에 더해지지 않도록 strengthRaw 기준으로 계산 (= 무리배치 차트 약점 보완 후순위).
+  //   best 배치 자체는 strength 기준 (= 가장 잘 매칭되는 배치로 약점 보완 추천).
   function chartWeaknessMatch8Way(chart, userVec, opts) {
     var s = chartStrengthMatch8Way(chart, userVec, opts);
-    var out = {
+    var misfingerOn = !(opts && opts.misfingerOn === false);
+    var bestPen = misfingerOn ? (s.best.penalty || 0) : 0;
+    var bestStrengthRaw = (typeof s.best.strengthRaw === 'number') ? s.best.strengthRaw : s.best.total;
+    return {
       results: s.results, best: s.best,
       bestLabel: s.bestLabel,
-      bestTotal: -s.bestTotal,
+      bestTotal: -bestStrengthRaw - bestPen,
     };
-    return out;
   }
 
   // chart_score × score_rate 의 top N 가중합 → supabase user_ohsorry_radars 컬럼 upsert 용.

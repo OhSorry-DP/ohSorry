@@ -309,6 +309,14 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### 2026-05-28 — 8 배치 misfinger penalty — calcWeakness 무리배치 차트 후순위 자연 강등
+- **`chartStrengthMatch8Way` 의 각 배치 result.total 에서 misfinger penalty 차감** — patterns-all-slim 의 m1/m2 `MISFINGER` 컬럼 활용 (ohSorryRating 새 metric).
+  - 가중치 — strong (k12/k67) × 0.5 + rand × 0.15 (강도 순서 k12/k67 > rand).
+  - 손/mirror 조합 별 키셋 자동 선택: 왼손 mirror=no → k67 / mirror=yes → k12 (오른손 반대). flip 영향 없음 (손가락 매핑은 키보드 기준 고정).
+- **`strengthRaw` / `penalty` 별도 노출** — best 결정은 strength − penalty 기준 (= 무리 적은 배치가 자동 best). 디버그/비교는 `opts.misfingerOn=false`.
+- **`chartWeaknessMatch8Way` bestTotal = −strengthRaw − penalty** — penalty 가 strength / weakness 양쪽 score 다 깎음 (= 무리배치 차트는 약점 보완 정렬에서도 후순위).
+- 효과: lv12 평균 무리 62회 × 0.5 ≈ −31 penalty. WHA / CODE:Ø / Like+it! 같은 무리배치 끝판왕 차트는 추천 정렬에서 강등. WHA 의 best 배치는 "−/M" (오른손만 mirror, k12=231 → k67=172) 자연 선택.
+
 ### 2026-05-28 — 연습곡 목표 점수 DJ LEVEL 보장 — calcOhsorryCore v0.0.377 / ohsorryRender v0.0.373
 - **`nextDjTarget()` 신규** — 현재 EX score 의 다음 DJ LEVEL (E/D/C/B/A/AA/AAA) 도달 점수 산출. `targetRate / targetExScore` 가 적어도 다음 DJ 랭크는 보장하도록 강화.
 - **`_targetExScore` / `_targetDjLevel` / `_currentExScore`** 노출 — render 가 "현재 EX → 목표 EX (djLevel)" 형식 표시 가능.
