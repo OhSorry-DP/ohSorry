@@ -309,6 +309,17 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### 2026-05-27 — 클리어 추천 풀 / 정렬 재정의 — calcOhsorryCore v0.0.370
+- **풀 분류 (`buildPools`)** — stage 별 `effectiveBase` + `d = max(0, topClearStar - effectiveBase)` 기반.
+  - effectiveBase: EC=`baseStar - 0.5` / HC=`baseStar` / EXH=`baseStar + 2`
+  - **EC/HC**: 정리곡 `[0, effectiveBase)` / 약도전 `[effectiveBase, effectiveBase + 0.7d)` / 강도전 `[effectiveBase + 0.7d, topClearStar + 0.3d]`. `dv > topClearStar + 0.3d` 풀 제외.
+  - **EXH**: 정리곡만 `[0, effectiveBase)`. 약/강도전 분류 없음, `dv ≥ effectiveBase` 풀 제외.
+  - d=0 (사용자가 effectiveBase 이상 클리어 없음) → 약/강도전 한 점 → 대부분 정리곡으로 채워짐.
+- **정렬 (`sample15`)** — `bestTotal` desc 단순. `_starWeight` 감쇠 제거 (풀 자체가 좁아져 불필요). top 10 + random 5 → **top 15** (재현 가능, 랜덤 의존 없음).
+- **buildExhRecs 제거** — EXH 도 `buildRecs(6, 'exh')` 로 통일. EXH 전용 별도 로직 (★ 거리 감쇠 fallback 등) 모두 제거.
+- **useCutoff opts 제거** — EC fallback 케이스도 새 룰의 effectiveBase=baseStar-0.5 가 자동 처리. 풀 cutoff 자체가 사라짐.
+- 효과: 추천 풀이 stage 별 의미에 맞게 좁혀짐. EC 는 사용자 ★ 보다 약간 쉬운 영역 (-0.5), HC 는 자기 ★, EXH 는 더 어려운 영역 (+2 미만의 정리곡만). 결과가 deterministic 해서 비교 / 디버그 편함.
+
 ### 2026-05-27 — 약점보완 알고리즘 zasa bin 기반 재설계 — calcOhsorryCore v0.0.369
 - **알고리즘 교체** — 기존 (calcWeakness 잔차 × FEATS dot product 매치) → **zasa 0.1 단위 bin 안 사용자 평균 rate 대비 deficit 기반**.
   - 사용자가 친 곡 (rate>0) 만 풀 — 안 친 곡은 bin 평균 + 추천 풀 둘 다 제외.

@@ -42,7 +42,7 @@ window.OhsorryCore = {
   let dbData = opts.dbData || null;
   const rivalToken = opts.rivalToken || null;
   const wrapperVersion = opts.wrapperVersion || 'unknown';
-  const CORE_VERSION_SHORT = '0.0.369'.replace(/^0\.0\./, '');  // '346'
+  const CORE_VERSION_SHORT = '0.0.370'.replace(/^0\.0\./, '');  // '346'
   const dbVersionString = `${wrapperVersion}-core${CORE_VERSION_SHORT}`;
   dbData = dbData || null;
   // -------- 0. ereter 데이터 로드 (Gist 에서 자동 fetch) --------
@@ -463,15 +463,9 @@ window.OhsorryCore = {
     for (const lv in sum) out[lv] = sum[lv] / cnt[lv];
     return out;
   })();
-  // 차트의 ★ — level (zasa) 있으면 그대로, 없으면 gameLevel 평균. 둘 다 없으면 null.
-  const getEffectiveStar = (level, gameLevel) => {
-    if (typeof level === 'number') return level;
-    if (typeof gameLevel === 'number' && zasaAvgByGameLv[gameLevel] != null) return zasaAvgByGameLv[gameLevel];
-    return null;
-  };
-  // ★ 거리 감쇠 weight — bestTotal × max(0, 1 - |chart★ - baseStar| / W).
+  // ★ 거리 감쇠 weight — 약점보완 (buildWeaknessRecs) cutoff 용. EC/HC/EXH 클리어 추천은 풀 자체가 좁아져 미사용.
   //   W = STAR_DISTANCE_W (3). chart★ 가 baseStar±W 안이면 1→0 선형, 밖이면 0 (정렬에서 제외).
-  //   baseStar 또는 chart★ 정보 없으면 1 (감쇠 없음, 옛 동작 유지).
+  //   baseStar 또는 chart★ 정보 없으면 1 (감쇠 없음).
   const STAR_DISTANCE_W = 3;
   const starDistanceWeight = (star, baseStar) => {
     if (star == null || baseStar == null) return 1;
@@ -1266,13 +1260,21 @@ window.OhsorryCore = {
   };
 
   // 추천 풀 — 카테고리 (미도달 / 도달DJ미도달) × 분류 (hard / easy / cleanup).
-  // 새 룰 (2026-05-24~):
-  //   topClearStar = 그 stage 를 클리어 한 차트의 ★ 최댓값 (e[ec/hc])
-  //   hi = max(topClearStar, baseStar), lo = min(topClearStar, baseStar)
-  //   강도전 (hard)   = [hi, hi+1.0]
-  //   약도전 (easy)   = [lo, hi)
-  //   정리곡 (cleanup) = [0, lo)
-  //   topClearStar < baseStar (초보·자사★ 미도달 케이스) 시 → 강도전 기준이 baseStar 로 자동 fallback
+  // 새 룰 (2026-05-27~) — stage 별 effectiveBase + d 기반:
+  //   topClearStar  = 그 stage 클리어 한 차트의 ★ 최댓값 (e[ec/hc/exh])
+  //   effectiveBase = EC: baseStar - 0.5  /  HC: baseStar  /  EXH: baseStar + 2
+  //   d             = max(0, topClearStar - effectiveBase)
+  //
+  //   EC / HC:
+  //     정리곡 (cleanup) = [0, effectiveBase)
+  //     약도전 (easy)    = [effectiveBase, effectiveBase + 0.7d)
+  //     강도전 (hard)    = [effectiveBase + 0.7d, topClearStar + 0.3d]
+  //     dv > topClearStar + 0.3d → 풀 제외
+  //
+  //   EXH:
+  //     정리곡만 (cleanup) = [0, effectiveBase). dv ≥ effectiveBase → 풀 제외 (약/강도전 분류 없음)
+  //
+  //   d=0 (사용자가 effectiveBase 이상 클리어 없음) → 약/강도전 한 점으로 수렴 → 대부분 정리곡
   const buildPools = (threshold, getDiffField, baseStar, recLevelMode, djMode) => {
     const empty = { hard: [], easy: [], cleanup: [] };
     const underLamp = { hard: [], easy: [], cleanup: [] };       // lampNum < threshold
@@ -1289,11 +1291,16 @@ window.OhsorryCore = {
       if (!e0 || typeof e0[getDiffField] !== 'number') continue;
       if (e0[getDiffField] > topClearStar) topClearStar = e0[getDiffField];
     }
-    const hi = Math.max(topClearStar, baseStar);
-    const lo = Math.min(topClearStar, baseStar);
-    const hardMin = hi;
-    // hardMax 제거 (2026-05-27~) — ★ 거리 감쇠로 상한 대체. hard 카테고리는 [hardMin, +∞).
-    const easyMin = lo;
+    // stage 별 effectiveBase + d 산정
+    const effectiveBase = isEC  ? (baseStar - 0.5)
+                        : isEXH ? (baseStar + 2)
+                        : baseStar;  // HC
+    const d = Math.max(0, topClearStar - effectiveBase);
+    // EC/HC: 정리곡 [0, effectiveBase) / 약도전 [effectiveBase, effectiveBase+0.7d) / 강도전 [effectiveBase+0.7d, topClearStar+0.3d]
+    // EXH:   정리곡만 [0, effectiveBase). dv ≥ effectiveBase → 풀 제외
+    const hardMin = effectiveBase + 0.7 * d;
+    const hardMax = topClearStar + 0.3 * d;
+    const easyMin = effectiveBase;
     // stage 별 정확도 임계치 — EC: A 이상이면 OK / HC: AA 이상 / EXH: AAA 만
     const accuracyOK = (djLv) => {
       if (isEXH) return djLv === 'AAA';
@@ -1343,14 +1350,21 @@ window.OhsorryCore = {
         margin: baseStar - dv,
         gameLevel,
       };
-      // dv 기반 분류 (2026-05-27~) — baseStar 상한 제거. ★ 거리 감쇠 (STAR_DISTANCE_W) 로 자연 좁힘.
-      //   강도전 [hardMin = hi, +∞)  /  약도전 [easyMin = lo, hardMin)  /  정리곡 [0, easyMin)
+      // dv 기반 분류 (2026-05-27~) — stage 별 effectiveBase + hardMax 상한.
+      //   EC/HC: 정리곡 [0, easyMin) / 약도전 [easyMin, hardMin) / 강도전 [hardMin, hardMax]. dv > hardMax 풀 제외.
+      //   EXH:   정리곡만 [0, effectiveBase). dv ≥ effectiveBase 풀 제외.
       let cls;
-      if (dv >= hardMin) cls = 'hard';
-      else if (dv >= easyMin && dv < hardMin) cls = 'easy';
-      else {
-        if (isEC && typeof e.hc === 'number' && e.hc < baseStar - 3) continue;  // 너무 쉬운 곡 제외
+      if (isEXH) {
+        if (dv >= effectiveBase) continue;  // 약/강도전 분류 없음 — 풀 제외
         cls = 'cleanup';
+      } else {
+        if (dv > hardMax) continue;  // 강도전 상한 초과 풀 제외
+        if (dv >= hardMin) cls = 'hard';
+        else if (dv >= easyMin) cls = 'easy';
+        else {
+          if (isEC && typeof e.hc === 'number' && e.hc < baseStar - 3) continue;  // 너무 쉬운 곡 제외
+          cls = 'cleanup';
+        }
       }
       item._category = cls;
       (reachedForDj ? reached : underLamp)[cls].push(item);
@@ -1358,54 +1372,41 @@ window.OhsorryCore = {
     return { underLamp, reached };
   };
 
-  const buildRecs = (threshold, getDiffField, baseStar, recLevelMode, djMode, opts) => {
+  const buildRecs = (threshold, getDiffField, baseStar, recLevelMode, djMode) => {
     const { underLamp, reached } = buildPools(threshold, getDiffField, baseStar, recLevelMode, djMode);
     const countField = getDiffField + '_n';
-    const keyOf = r => (r.title || '') + '|' + r.chart;
-    // ★ 거리 cutoff 옵션 — EC fallback (baseStar=0.3) 처럼 baseStar 가 비현실적으로 작은 경우 false 권장.
-    const useCutoff = !(opts && opts.useCutoff === false);
 
-    // 카테고리 내 모든 분류 합쳐서 sample 15 (top 10 + random 5).
-    //   1순위: 손 분리 + FLIP 매치 (chartStrengthMatchByHand 의 bestTotal desc) — vecL/vecR + 신규 gist 있을 때
-    //   2순위: 양손 평균 매치 (chartStrengthMatch) — 옛 fallback
-    //   3순위: count desc — userVec 자체 없을 때 (patterns/weaknessLib 로드 실패 등)
-    // 동점 시 count desc tiebreak. 차트 객체에 _matchByHand 캐시 (UI 에서 FLIP 권장 표시 등 활용).
+    // 카테고리 내 모든 분류 합쳐서 sample 15 — bestTotal desc top 15 (2026-05-27~).
+    //   풀 자체가 stage 별 effectiveBase 기준으로 ★ 범위 좁혀짐 → 추가 ★ 거리 감쇠 불필요.
+    //   정렬: bestTotal desc (사용자 강점 dot product). 동점 시 그 stage 클리어 count desc tiebreak.
+    //   1순위: 8 way / by-hand 매치 — vecL/vecR + 신규 gist
+    //   2순위: 양손 평균 매치 — 옛 fallback
+    //   3순위: count desc — userVec 자체 없을 때
     const canUseByHand = !!(userVec && userVec.__vecL && userVec.__vecR && weaknessLib && (weaknessLib.chartStrengthMatch8Way || weaknessLib.chartStrengthMatchByHand));
     const sample15 = (cat) => {
       const pool = [...cat.hard, ...cat.easy, ...cat.cleanup];
-      // 모든 차트에 hashtag 캐시 (canUseByHand 무관). vecL/vecR 없으면 _matchByHand=null, FLIP/한손위주 hashtag 만 빠짐.
-      // ★ 거리 weight 도 같이 캐시 — chart ★ (r.level) 없으면 gameLevel 평균 fallback.
       for (const r of pool) {
         if (r._matchByHand === undefined) r._matchByHand = canUseByHand ? chartStrengthMatchByHand(r) : null;
         if (r._tags === undefined) r._tags = computeChartTags(r);
         if (r._hashtags === undefined) r._hashtags = computeRecHashtags(r);
-        if (r._starWeight === undefined) r._starWeight = starDistanceWeight(getEffectiveStar(r.level, r.gameLevel), baseStar);
       }
-      // ★ 거리 weight 0 곡은 정렬 제외 (baseStar 와 너무 멀어 추천 가치 없음).
-      //   단 useCutoff=false 또는 cutoff 후 풀 비면 pool 그대로 사용 (안전망 — 추천이 통째로 비는 것 방지).
-      let filtered = useCutoff ? pool.filter(r => r._starWeight > 0) : pool;
-      if (filtered.length === 0) filtered = pool;
       let sorted;
       if (canUseByHand) {
-        sorted = [...filtered].sort((a, b) => {
-          const sa = (a._matchByHand ? a._matchByHand.bestTotal : 0) * a._starWeight;
-          const sb = (b._matchByHand ? b._matchByHand.bestTotal : 0) * b._starWeight;
+        sorted = [...pool].sort((a, b) => {
+          const sa = a._matchByHand ? a._matchByHand.bestTotal : 0;
+          const sb = b._matchByHand ? b._matchByHand.bestTotal : 0;
           return (sb - sa) || ((b[countField] || 0) - (a[countField] || 0));
         });
       } else if (userVec) {
-        sorted = [...filtered].sort((a, b) => {
-          const sa = chartStrengthMatch(a) * a._starWeight;
-          const sb = chartStrengthMatch(b) * b._starWeight;
+        sorted = [...pool].sort((a, b) => {
+          const sa = chartStrengthMatch(a);
+          const sb = chartStrengthMatch(b);
           return (sb - sa) || ((b[countField] || 0) - (a[countField] || 0));
         });
       } else {
-        sorted = [...filtered].sort((a, b) => (b[countField] || 0) - (a[countField] || 0));
+        sorted = [...pool].sort((a, b) => (b[countField] || 0) - (a[countField] || 0));
       }
-      const top10 = sorted.slice(0, 10);
-      const usedKeys = new Set(top10.map(keyOf));
-      const rest = filtered.filter(r => !usedKeys.has(keyOf(r)));
-      const rand5 = shuffle(rest).slice(0, 5);
-      return [...top10, ...rand5];
+      return sorted.slice(0, 15);
     };
     const underSample = sample15(underLamp);
     const reachedSample = sample15(reached);
@@ -1461,90 +1462,8 @@ window.OhsorryCore = {
     return picks.sort((a, b) => a.diffValue - b.diffValue);
   };
 
-  // EXH 전용 추천 — EC/HC 와 별개 로직.
-  // EXH 추천 — EC/HC 와 다른 단순 룰 (2026-05-27~).
-  //   후보: EXH 미달성 (또는 djMode='on' 일 때 AAA 미달) — ★ 상한 제거, 거리 감쇠로 자연 좁힘.
-  //     djMode 'off' (기본): EXH 미달성 (lampNum < 6) 곡만
-  //     djMode 'on'        : 위 + EXH 깬 곡 중 AAA 미달 (lamp >= 6 && djLevel !== 'AAA' && exScore > 0)
-  //   강/약/정리 카테고리 분류 X (단일 풀).
-  //   정렬: chartStrengthMatchByHand.bestTotal × ★ 거리 weight (baseStar±STAR_DISTANCE_W) desc → top 10
-  //   카테고리 hashtag: dv >= baseStar → '강도전' / dv < baseStar → '약도전' (정리곡 표기 안 함)
-  const buildExhRecs = (baseStar, recLevelMode, djMode, opts) => {
-    if (baseStar == null) return [];
-    // canUseByHand — buildRecs (EC/HC) inner const 와 동일 검사. buildExhRecs 는 별도 scope 이라 여기 재정의.
-    const canUseByHand = !!(userVec && userVec.__vecL && userVec.__vecR && weaknessLib && (weaknessLib.chartStrengthMatch8Way || weaknessLib.chartStrengthMatchByHand));
-    const useCutoff = !(opts && opts.useCutoff === false);
-    const items = [];
-    for (const c of allCharts) {
-      if (recLevelMode === 'lv12' && c.gameLevel !== 12) continue;
-      if (recLevelMode === 'lv11+12' && c.gameLevel !== 11 && c.gameLevel !== 12) continue;
-      // EXH 깬 곡 처리 — djMode 따라 분기 (UI 의 "DJ레벨 미달 포함" 토글).
-      const under = c.lampNum < 6;
-      const reachedDjMiss = c.lampNum >= 6 && c.djLevel !== 'AAA' && c.exScore > 0;
-      if (djMode === 'on') {
-        if (!under && !reachedDjMiss) continue;  // AAA 도달 또는 exScore=0 제외
-      } else {
-        if (!under) continue;  // 기본 — EXH 미달성 곡만
-      }
-      let e = ereterMap.get(norm(c.title) + '|' + c.diff);
-      let gameLevel = null;
-      if (!e || e.level == null) {
-        const r = ratingMap.get(norm(c.title) + '|' + c.diff);
-        if (!r || typeof r.zasaLevel !== 'number') continue;
-        e = {
-          level: r.zasaLevel,
-          ec: typeof r.estEc === 'number' ? r.estEc : null,
-          hc: typeof r.estHc === 'number' ? r.estHc : null,
-          exh: typeof r.estExh === 'number' ? r.estExh : null,
-          ec_n: r.nEcCleared || 0, hc_n: r.nHcCleared || 0, exh_n: r.nExhCleared || 0,
-        };
-        gameLevel = r.gameLevel ?? null;
-      }
-      const dv = e.exh;
-      if (typeof dv !== 'number') continue;
-      // ★ 상한 제거 (2026-05-27~) — 거리 감쇠가 자동 cutoff. baseStar+W 이상은 weight=0 → 정렬 제외.
-      const item = {
-        title: c.title, chart: c.diff, level: e.level,
-        ec: e.ec, hc: e.hc, exh: e.exh,
-        ec_n: e.ec_n, hc_n: e.hc_n, exh_n: e.exh_n,
-        diffValue: dv, currentLamp: c.lamp,
-        margin: baseStar - dv,
-        gameLevel,
-        _category: dv >= baseStar ? 'hard' : 'easy',  // hashtag 표기용
-      };
-      items.push(item);
-    }
-    // 손 분리 + FLIP 매치 + tag/hashtag 캐시
-    for (const r of items) {
-      if (r._matchByHand === undefined) r._matchByHand = canUseByHand ? chartStrengthMatchByHand(r) : null;
-      if (r._tags === undefined) r._tags = computeChartTags(r);
-      if (r._hashtags === undefined) r._hashtags = computeRecHashtags(r);
-    }
-    // ★ 거리 weight 적용 — chart ★ (e.level) 가 없으면 gameLevel 평균 fallback. weight=0 곡은 풀 제외.
-    for (const r of items) {
-      r._starWeight = starDistanceWeight(getEffectiveStar(r.level, r.gameLevel), baseStar);
-    }
-    // cutoff 후 풀 비면 items 그대로 사용 (안전망 — 추천이 통째로 비는 것 방지).
-    let filtered = useCutoff ? items.filter(r => r._starWeight > 0) : items;
-    if (filtered.length === 0) filtered = items;
-    // bestTotal × 거리 weight desc (vec 있을 때) 또는 diffValue asc (fallback)
-    if (canUseByHand) {
-      filtered.sort((a, b) => {
-        const sa = (a._matchByHand ? a._matchByHand.bestTotal : 0) * a._starWeight;
-        const sb = (b._matchByHand ? b._matchByHand.bestTotal : 0) * b._starWeight;
-        return (sb - sa) || (a.diffValue - b.diffValue);
-      });
-    } else if (userVec) {
-      filtered.sort((a, b) => {
-        const sa = chartStrengthMatch(a) * a._starWeight;
-        const sb = chartStrengthMatch(b) * b._starWeight;
-        return (sb - sa) || (a.diffValue - b.diffValue);
-      });
-    } else {
-      filtered.sort((a, b) => a.diffValue - b.diffValue);
-    }
-    return filtered.slice(0, 10);
-  };
+  // (2026-05-27~) buildExhRecs 제거 — EXH 도 buildRecs(6, 'exh') 새 룰로 통일.
+  //   buildPools 의 effectiveBase = baseStar + 2, 정리곡만 (약/강도전 없음).
 
   // 약점보완 추천 (2026-05-27~) — chartWeaknessMatchByHand 의 bestTotal (= -strength) 기반.
   //   bestTotal 양수면 약점 차트 (FLIP best 까지 고려) — 값 클수록 약점 정도 큼.
@@ -1798,10 +1717,10 @@ window.OhsorryCore = {
   const REC_DJ_MODE_DEFAULT = 'off';
   const ecBase = recBaseStar != null ? recBaseStar : EC_FALLBACK_BASE;
   // EC fallback (recBaseStar==null, baseStar=0.3) 케이스는 ★ 거리 cutoff 끄기 — 안 그러면 lv11/12 풀이 통째로 컷됨.
-  recsEC.push(...buildRecs(3, 'ec', ecBase, REC_LEVEL_MODE_DEFAULT, REC_DJ_MODE_DEFAULT, { useCutoff: recBaseStar != null }));
+  recsEC.push(...buildRecs(3, 'ec', ecBase, REC_LEVEL_MODE_DEFAULT, REC_DJ_MODE_DEFAULT));
   if (recBaseStar != null) {
     recsHC.push(...buildRecs(5, 'hc', recBaseStar, REC_LEVEL_MODE_DEFAULT, REC_DJ_MODE_DEFAULT));
-    recsEXH.push(...buildExhRecs(recBaseStar, REC_LEVEL_MODE_DEFAULT, REC_DJ_MODE_DEFAULT));
+    recsEXH.push(...buildRecs(6, 'exh', recBaseStar, REC_LEVEL_MODE_DEFAULT, REC_DJ_MODE_DEFAULT));
   }
   // 약점보완 — userVec.__vecL/__vecR 있어야 동작. default (FLIP on + 양손 통합, 합산 mode, top 5). UI 토글로 변경 가능.
   //   recLevelMode (lv12 / lv11+12 / all) 와 무관 — 약점보완은 자체 ★ 상한 (topClearZasa) + 거리 cutoff 로 좁힘.
@@ -1821,10 +1740,10 @@ window.OhsorryCore = {
     const base = typeof baseStarOverride === 'number' ? baseStarOverride : recBaseStar;
     const lvMode = recLevelMode === 'lv12' ? 'lv12' : REC_LEVEL_MODE_DEFAULT;
     const dMode = djMode === 'on' ? 'on' : 'off';
-    if (stage === 'exh') return base != null ? buildExhRecs(base, lvMode, dMode) : [];
+    if (stage === 'exh') return base != null ? buildRecs(6, 'exh', base, lvMode, dMode) : [];
     if (stage === 'hc')  return base != null ? buildRecs(5, 'hc', base, lvMode, dMode) : [];
     // EC reroll 도 base==null 이면 EC_FALLBACK_BASE + ★ 거리 cutoff 끄기 (초기 계산과 동일).
-    if (stage === 'ec')  return buildRecs(3, 'ec', base != null ? base : EC_FALLBACK_BASE, lvMode, dMode, { useCutoff: base != null });
+    if (stage === 'ec')  return buildRecs(3, 'ec', base != null ? base : EC_FALLBACK_BASE, lvMode, dMode);
     return [];
   };
 
