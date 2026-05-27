@@ -42,7 +42,7 @@ window.OhsorryCore = {
   let dbData = opts.dbData || null;
   const rivalToken = opts.rivalToken || null;
   const wrapperVersion = opts.wrapperVersion || 'unknown';
-  const CORE_VERSION_SHORT = '0.0.379'.replace(/^0\.0\./, '');  // '346'
+  const CORE_VERSION_SHORT = '0.0.380'.replace(/^0\.0\./, '');  // '346'
   const dbVersionString = `${wrapperVersion}-core${CORE_VERSION_SHORT}`;
   dbData = dbData || null;
   // -------- 0. ereter 데이터 로드 (Gist 에서 자동 fetch) --------
@@ -1368,9 +1368,11 @@ window.OhsorryCore = {
       if (reachedForDj && accuracyOK(c.djLevel)) continue;
       if (reachedForDj && c.exScore === 0) continue;
       let e = ereterMap.get(norm(c.title) + '|' + c.diff);
-      // c.gameLevel — allCharts 단계 textage meta 보강에서 채워진 game level. ereter 분기 (아래 if false) 에서
-      // gameLevel 누락되던 버그 → ohsorryRender 가 chart letter 앞 "12A" 같은 prefix 못 그림.
+      // c.gameLevel — allCharts 단계 textage meta 보강에서 채워진 game level.
+      //   prefix ("12A") 는 모든 차트에 표시 위해 c.gameLevel 그대로 사용.
+      //   ratingOnly flag — ereter 미등록 + ohSorryRating 만 등록된 차트 marker. 곡명 색깔 / tooltip "ereter 미등록" 표시 조건.
       let gameLevel = (typeof c.gameLevel === 'number') ? c.gameLevel : null;
+      let ratingOnly = false;
       if (!e || e.level == null) {
         const r = ratingMap.get(norm(c.title) + '|' + c.diff);
         if (r && typeof r.zasaLevel === 'number') {
@@ -1383,7 +1385,8 @@ window.OhsorryCore = {
             hc_n: r.nHcCleared || 0,
             exh_n: r.nExhCleared || 0,
           };
-          gameLevel = r.gameLevel ?? null;
+          gameLevel = r.gameLevel ?? gameLevel;
+          ratingOnly = true;
         } else if (isLowLevelRec && typeof c.gameLevel === 'number') {
           const z = zasaMap.get(norm(c.title) + '|' + c.diff);
           const lowLv = c.gameLevel;
@@ -1399,6 +1402,7 @@ window.OhsorryCore = {
             __lowFallback: true,
           };
           gameLevel = lowLv;
+          ratingOnly = true;
         } else continue;
       }
       const dv = e[getDiffField];
@@ -1410,6 +1414,7 @@ window.OhsorryCore = {
         diffValue: dv, currentLamp: c.lamp,
         margin: baseStar - dv,
         gameLevel,
+        ratingOnly,
         lampNum: c.lampNum,
         djLevel: c.djLevel || null,
         exScore: c.exScore,

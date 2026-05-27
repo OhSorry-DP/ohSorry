@@ -1,4 +1,4 @@
-// ohsorryRender.js — 오소리 결과 렌더 모듈 (v0.0.374)
+// ohsorryRender.js — 오소리 결과 렌더 모듈 (v0.0.375)
 //
 // calcOhsorryCore.compute() 가 반환한 result 객체를 받아 화면 패널 + 추천곡 + supabase upload.
 // 본체 / 라이벌 wrapper 가 fetch + eval 해서 사용.
@@ -481,8 +481,9 @@ window.OhsorryRender = {
               ? String(r.gameLevel) + chartLetter
               : chartLetter;
             const cColor = chartColor(r.chart);
-            // 연습곡 row 는 lv 색 적용 X (기본색) — 어차피 chart letter 앞에 게임 lv prefix 로 표시.
-            const titleStyle = (r._category === 'weakness') ? '' :
+            // 곡명 색 — ereter 미등록 + ohSorryRating 만 있는 차트 (r.ratingOnly) 한정. 추정값이라는 시각 marker.
+            // 연습곡 (weakness) row 는 무조건 기본색.
+            const titleStyle = (r._category === 'weakness' || !r.ratingOnly) ? '' :
               r.gameLevel === 11 ? ' style="color:#9ccc65"' :
               r.gameLevel === 12 ? ' style="color:#87ceeb"' : '';
             // 배치 권장 마크 — calcOhsorryCore 가 8 배치 평가 후 _matchByHand.bestLabel 캐시.
@@ -500,8 +501,9 @@ window.OhsorryRender = {
               : '';
             const tooltipParts = [];
             if (tagsJoined) tooltipParts.push(tagsJoined);
-            if (r.gameLevel === 11) tooltipParts.push('ohSorry 추정 ★ (게임 LEVEL 11, ereter 미등록)');
-            else if (r.gameLevel === 12) tooltipParts.push('ohSorry 추정 ★ (게임 LEVEL 12, ereter 미등록)');
+            // tooltip "ereter 미등록" — r.ratingOnly 인 경우만 (gameLevel 만 있는 ereter 등록 차트엔 표시 안 함)
+            if (r.ratingOnly && r.gameLevel === 11) tooltipParts.push('ohSorry 추정 ★ (게임 LEVEL 11, ereter 미등록)');
+            else if (r.ratingOnly && r.gameLevel === 12) tooltipParts.push('ohSorry 추정 ★ (게임 LEVEL 12, ereter 미등록)');
             const titleAttr = tooltipParts.length > 0 ? ` title="${escHtml(tooltipParts.join('\n\n'))}"` : '';
             const dataTagsAttr = tagsJoined ? ` data-tags="${escHtml(tagsJoined)}"` : '';
             const dataGoalAttr = goalText ? ` data-goal="${escHtml(goalText)}"` : '';

@@ -309,6 +309,11 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### 2026-05-28 — 곡명 색 / "ereter 미등록" tooltip 조건 fix — calcOhsorryCore v0.0.380 / ohsorryRender v0.0.375
+- **증상**: 클리어 추천 곡명 색 (lv11 초록 / lv12 하늘) + tooltip "ohSorry 추정 ★ ereter 미등록" 이 ereter 등록 차트에도 적용 (= 모든 lv11/12 차트에 색).
+- **원인**: 직전 commit (v0.0.378 의 game level prefix fix) 에서 `gameLevel` 을 모든 차트에 채우게 했더니, ohsorryRender 의 titleStyle / tooltip 조건이 `r.gameLevel === 11/12` 단일로 판단 → ereter 등록 차트도 색 입혀짐. 원래 `gameLevel` 자체가 "ohSorryRating-only" marker 였는데 그 의미가 prefix 요구로 깨짐.
+- **fix**: 별도 flag `ratingOnly` 분리. prefix (12A) 는 `gameLevel` 로 모든 차트, 색/tooltip 은 `ratingOnly` 로 ohSorryRating only 차트만.
+
 ### 2026-05-28 — 클리어 추천에도 배치추천 토글 추가 — calcOhsorryCore v0.0.379 / ohsorryRender v0.0.374
 - **클리어 추천 (EC/HC/EXH) 의 복습곡 토글 옆에 "배치추천 ON/OFF" 토글 신규** — 같은 `rec-review-toggle` 스타일.
   - ON (기본) → 8 배치 (mirror + flip) 평가 → best 배치 선택 + misfinger penalty 자동 반영.
