@@ -309,6 +309,11 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### 2026-05-28 — 클리어 추천 row 의 game level prefix 누락 fix — calcOhsorryCore v0.0.378
+- **증상**: 클리어 추천 (EC/HC/EXH) 의 chart letter 앞 game level prefix 가 ereter 등록 차트 (대부분 lv12 ANO 등) 에서 누락 ("12A" → "A"). 미등록 차트 (ratingMap 만 있는 lv11/12 신곡) 는 정상 "11A" 표시.
+- **원인**: `buildPools` 의 `let gameLevel = null` 초기값이 ereter 분기에서 override 되지 않음 (ratingMap fallback 분기에서만 `r.gameLevel` 로 채움).
+- **fix**: `let gameLevel = (typeof c.gameLevel === 'number') ? c.gameLevel : null` — allCharts 단계 textage meta 보강에서 이미 채워진 `c.gameLevel` 을 기본값으로 사용.
+
 ### 2026-05-28 — 8 배치 misfinger penalty — calcWeakness 무리배치 차트 후순위 자연 강등
 - **`chartStrengthMatch8Way` 의 각 배치 result.total 에서 misfinger penalty 차감** — patterns-all-slim 의 m1/m2 `MISFINGER` 컬럼 활용 (ohSorryRating 새 metric).
   - 가중치 — strong (k12/k67) × 0.5 + rand × 0.15 (강도 순서 k12/k67 > rand).

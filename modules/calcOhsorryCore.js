@@ -42,7 +42,7 @@ window.OhsorryCore = {
   let dbData = opts.dbData || null;
   const rivalToken = opts.rivalToken || null;
   const wrapperVersion = opts.wrapperVersion || 'unknown';
-  const CORE_VERSION_SHORT = '0.0.377'.replace(/^0\.0\./, '');  // '346'
+  const CORE_VERSION_SHORT = '0.0.378'.replace(/^0\.0\./, '');  // '346'
   const dbVersionString = `${wrapperVersion}-core${CORE_VERSION_SHORT}`;
   dbData = dbData || null;
   // -------- 0. ereter 데이터 로드 (Gist 에서 자동 fetch) --------
@@ -1363,7 +1363,9 @@ window.OhsorryCore = {
       if (reachedForDj && accuracyOK(c.djLevel)) continue;
       if (reachedForDj && c.exScore === 0) continue;
       let e = ereterMap.get(norm(c.title) + '|' + c.diff);
-      let gameLevel = null;
+      // c.gameLevel — allCharts 단계 textage meta 보강에서 채워진 game level. ereter 분기 (아래 if false) 에서
+      // gameLevel 누락되던 버그 → ohsorryRender 가 chart letter 앞 "12A" 같은 prefix 못 그림.
+      let gameLevel = (typeof c.gameLevel === 'number') ? c.gameLevel : null;
       if (!e || e.level == null) {
         const r = ratingMap.get(norm(c.title) + '|' + c.diff);
         if (r && typeof r.zasaLevel === 'number') {
