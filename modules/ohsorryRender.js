@@ -1,4 +1,4 @@
-// ohsorryRender.js — 오소리 결과 렌더 모듈 (v0.0.365)
+// ohsorryRender.js — 오소리 결과 렌더 모듈 (v0.0.366)
 //
 // calcOhsorryCore.compute() 가 반환한 result 객체를 받아 화면 패널 + 추천곡 + supabase upload.
 // 본체 / 라이벌 wrapper 가 fetch + eval 해서 사용.
@@ -516,7 +516,7 @@ window.OhsorryRender = {
           }).join('');
         };
         window.__dp_renderRecItems = renderRecItems;
-        let recLevelMode = result.recLevelModeDefault === 'lv12' ? 'lv12' : 'all';
+        let recLevelMode = result.recLevelModeDefault === 'lv12' ? 'lv12' : result.recLevelModeDefault === 'low' ? 'low' : 'all';
         let recDjMode = result.recDjModeDefault === 'on' ? 'on' : 'off';
         const rerenderRecStage = (stage, color) => {
           const newRecs = window.__dp_rerollRecs(stage, recBaseStar, recLevelMode, recDjMode);
@@ -531,12 +531,11 @@ window.OhsorryRender = {
         };
         window.__dp_rerollAndRender = rerenderRecStage;
 
-        // 연습곡 (weakness) UI 옵션 상태 — 건반/차지/스크/소프란을 분리해서 window.__dp_rerollWeakness(opts) 호출.
-        //   zasaMin / zasaMax 를 비우면 core 가 recBaseStar 기준 자동 범위를 사용.
-        const weaknessOpts = { mode: 'all', topN: 5, flipOn: true, handMode: 'both', strength: 1, zasaMin: undefined, zasaMax: undefined };
+        // 연습곡 (weakness) UI 옵션 상태 — 기본은 LEVEL 12 기준 zasa 11.6~12.7.
+        const weaknessOpts = { mode: 'all', topN: 5, flipOn: true, handMode: 'both', strength: 1, zasaMin: 11.6, zasaMax: 12.7 };
         const rerenderWeakness = () => {
           if (typeof window.__dp_rerollWeakness !== 'function') return;
-          const newRecs = window.__dp_rerollWeakness({ ...weaknessOpts, recLevelMode });
+          const newRecs = window.__dp_rerollWeakness({ ...weaknessOpts });
           const container = document.getElementById('__dp_recs_weakness');
           if (container) container.innerHTML = window.__dp_renderRecItems(newRecs, '#ff6b9d');
           const counter = document.getElementById('__dp_recs_count_weakness');
@@ -657,12 +656,12 @@ window.OhsorryRender = {
           const weaknessControls = stage === 'weakness' ? `
             <div class="rec-mode-toggle" style="margin-top:4px;display:flex;flex-wrap:wrap;align-items:center;gap:4px">
               <span style="${wkLabel}">☆</span>
-              <input type="number" class="wk-zasa-min" min="5.9" max="12.7" step="0.1" value="" placeholder="자동"
+              <input type="number" class="wk-zasa-min" min="5.9" max="12.7" step="0.1" value="11.6" placeholder="11.6"
                 style="${wkInput}"
                 onclick="event.stopPropagation();" onmousedown="event.stopPropagation();" onkeydown="event.stopPropagation();"
                 oninput="event.stopPropagation();window.__dp_weakness_setZasaMin(this.value);">
               <span style="${wkLabel}">~</span>
-              <input type="number" class="wk-zasa-max" min="5.9" max="12.7" step="0.1" value="" placeholder="자동"
+              <input type="number" class="wk-zasa-max" min="5.9" max="12.7" step="0.1" value="12.7" placeholder="12.7"
                 style="${wkInput}"
                 onclick="event.stopPropagation();" onmousedown="event.stopPropagation();" onkeydown="event.stopPropagation();"
                 oninput="event.stopPropagation();window.__dp_weakness_setZasaMax(this.value);">
@@ -754,7 +753,7 @@ window.OhsorryRender = {
         })();
         // 복습곡 (램프는 클리어했지만 DJ레벨 미달인 곡) 추천 포함 체크박스
         // 체크 해제: ✓ 연한 회색 / 체크: ✔ 기본 글자색 (︎ = 텍스트 스타일 강제, 이모지 렌더링 방지)
-        // '추천 범위' 토글 행 안에 첫 자식으로 삽입 → margin-right:auto 로 같은 줄 왼쪽 끝에 배치
+        // '클리어 범위' 토글 행 안에 첫 자식으로 삽입 → margin-right:auto 로 같은 줄 왼쪽 끝에 배치
         const recDjToggle = `
           <span class="rec-review-toggle${recDjMode === 'on' ? ' active' : ''}"
             onclick="window.__dp_setRecDjMode && window.__dp_setRecDjMode()"
@@ -766,15 +765,15 @@ window.OhsorryRender = {
         const recLevelToggle = `
           <div class="rec-mode-toggle" style="margin-top:4px">
             ${recDjToggle}
-            <span class="rec-mode-label">추천 범위 :</span>
+            <span class="rec-mode-label">클리어 범위 :</span>
             <div class="rec-mode-options">
               <span class="rec-level-mode-opt${recLevelMode === 'lv12' ? ' active' : ''}" data-mode="lv12"
                 style="cursor:pointer;color:${recLevelMode === 'lv12' ? '#212529' : '#aaa'};font-weight:${recLevelMode === 'lv12' ? '700' : '400'};transition:color .15s"
                 onclick="window.__dp_setRecLevelMode && window.__dp_setRecLevelMode('lv12')"
                 title="게임 LEVEL 12 차트만 추천">DP12</span>
               <span class="rec-mode-sep">|</span>
-              <span class="rec-level-mode-opt${recLevelMode === 'all' ? ' active' : ''}" data-mode="all"
-                style="cursor:pointer;color:${recLevelMode === 'all' ? '#212529' : '#aaa'};font-weight:${recLevelMode === 'all' ? '700' : '400'};transition:color .15s"
+              <span class="rec-level-mode-opt${recLevelMode === 'all' || recLevelMode === 'low' ? ' active' : ''}" data-mode="all"
+                style="cursor:pointer;color:${recLevelMode === 'all' || recLevelMode === 'low' ? '#212529' : '#aaa'};font-weight:${recLevelMode === 'all' || recLevelMode === 'low' ? '700' : '400'};transition:color .15s"
                 onclick="window.__dp_setRecLevelMode && window.__dp_setRecLevelMode('all')"
                 title="게임 LEVEL 11 + 12 차트 추천">DP11+</span>
             </div>

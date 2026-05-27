@@ -309,6 +309,28 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### 2026-05-27 — 클리어 추천 _clearScore 점수식 + 'low' 모드 + 연습곡 기본 zasa 11.6~12.7 — calcOhsorryCore v0.0.374 / ohsorryRender v0.0.366
+- **클리어 추천 정렬 → `_clearScore` 점수식 desc**. 기존 `bestTotal × _starWeight` 또는 단순 `bestTotal` 대체.
+  - `diffFit × 0.24` (`|diffValue - baseStar|` 거리 감쇠, stage 별 폭 EXH 3.2 / EC/HC 2.4)
+  - `lampFit × 0.18` (그 stage 미달 lamp 갭이 작을수록 큼; reached 도달이면 0.74 고정)
+  - `rateFit × 0.18` (현재 EX rate 가 stage target 근처면 큼 — EXH 89 / HC 82 / EC 74, 폭 10/12/14)
+  - `countFit × 0.14` (그 stage 클리어 인원 log10 정규화)
+  - `layoutFit × 0.14` (8 way best 의 bestTotal 정규화)
+  - `layoutGainFit × 0.06` (mirror/flip 으로 정규 대비 향상폭)
+  - `djFit × 0.06` (현재 dj 레벨 F~AAA → 0~1)
+  - `categoryBoost` (cleanup +0.10 / easy +0.04 / hard -0.03 — 정리곡 우선)
+- **`_clearType` 분류** — `near-lamp` / `score-ready` / `popular` / `fit`. hashtag `#램프근접 / #점수충분 / #검증곡` + `#가능성높음 (≥0.72) / #도전권 (<0.45)`.
+- **최종 추출 변경** — 옛 SLOTS (hard 2 / easy 4 / cleanup 4 + fallback) 폐기, **underLamp 우선 + clearScore desc takeFrom** 으로 교체.
+  - `djMode='off'` → underLamp 10곡
+  - `djMode='on'` → underLamp 8 + reached 2
+  - EXH 는 `cleanup ≤ 10 + easy 1 + hard 1` (정리곡 위주), EC/HC 는 `cleanup 4 + easy 4 + hard 2` (부족 시 3+3+2)
+- **'low' 추천 모드 신규** — `recBaseStar < 0.5` 시 자동 진입. gameLevel 8~10 만, lv 별 base ec/hc/exh fallback (zasa 데이터 없는 lv8~10 신규 유저 보호). 분류: lv8=cleanup, lv9=easy, lv10=hard.
+- **`buildPools` 차트 item 에 추가 필드** — `lampNum / djLevel / exScore / noteCount / scoreRate`. `_clearScore` 계산에 필요.
+- **`CATEGORY_TAG_MAP.cleanup = '정리곡'`** — 표기 생략 → 명시.
+- **연습곡 기본 zasa 11.6~12.7 고정** — 옛 자동 범위 (baseStar 기준) 폐기, `PRACTICE_ZASA_MIN/MAX` 상수. UI input 비우면 placeholder 11.6/12.7 그대로.
+- **ohsorryRender v0.0.366** — "추천 범위" → "클리어 범위" 라벨. 'low' lvMode 활성 표시 (DP11+ 와 같이 active). 연습곡 zasa 기본값 11.6/12.7 placeholder 로 복원.
+- 효과: 클리어 점수식이 명시적으로 "클리어 가능성 큰 곡" 우선화. low 모드로 신규 유저 (★ <0.5) 도 lv8~10 곡 추천 가능. 연습곡 범위는 직관적 lv12 기본.
+
 ### 2026-05-27 — '연습곡' 알고리즘 재설계 — calcOhsorryCore v0.0.373 / ohsorryRender v0.0.365
 - 탭/라벨 명명 변경: **약점보완 → 연습곡**, 합산 → 건반, 강도 1/2/3 → **가볍게/적당히/빡세게**. zasaMin/Max 빈 칸 = "자동" (placeholder).
 - 풀 확장: 친 곡만 → **친 곡 + 안 친 곡** (신규 패턴 곡 노출). `rate ≥ 95%` 곡 제외.
