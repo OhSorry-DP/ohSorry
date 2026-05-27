@@ -309,6 +309,18 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### 2026-05-27 — 추천 정렬 ★ 거리 감쇠 + baseStar 상한 제거 (calcOhsorryCore v0.0.364)
+- **gameLevel 별 zasaLevel 평균 lookup** — `ohSorryRatings` (lv11/12) + `zasaData` (lv1~10) 합쳐서 산출. 차트에 zasa 가 없을 때 fallback.
+- **getEffectiveStar / starDistanceWeight 헬퍼** — `weight = max(0, 1 - |chart★ - baseStar| / STAR_DISTANCE_W)`, W=3.
+- **baseStar ★ 상한 제거** —
+  - `buildPools` (EC/HC) 의 `hardMax = hi + 1.0` 제거, hard 카테고리 `[hardMin, +∞)` 로 개방.
+  - `buildExhRecs` 의 `hardMax = baseStar + 1.0` cut 제거. 거리 감쇠가 자동 cutoff (weight=0 → 정렬 제외).
+- **추천 정렬에 ★ 거리 weight 적용** (EC/HC/EXH):
+  - `chartStrengthMatchByHand.bestTotal × starDistanceWeight` 으로 desc 정렬.
+  - weight=0 곡은 풀에서 제외 (baseStar±W 안의 곡만).
+- **약점보완** — 점진학습 정렬 (`bestTotal asc`) 보호. 거리 weight 는 **cutoff 만** 적용 (weight=0 곡 풀 제외, 곱셈 X). `topClearZasa` 상한은 그대로.
+- **약점보완 zasa fallback** — ratingMap 매칭 안 되는 차트도 `zasaAvgByGameLv[gameLevel]` 로 e.level 채워서 풀 진입 가능 (ec/hc/exh 는 null).
+
 ### 2026-05-27 — 약점보완 토글 UI 한 줄 압축 (ohsorryRender v0.0.361)
 - 5라인 라디오 → 한 줄 dropdown (모드/곡수/손/강도) + FLIP 토글 버튼.
 - 옛 5라인 정의는 코드 안에 JS 블록 주석으로 보존 (필요 시 복구).

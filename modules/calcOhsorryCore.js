@@ -34,7 +34,7 @@
 //   wrapperVersion: wrapper 자기 버전 (예: 'v3.3.6') — supabase version 컬럼은
 //                   `${wrapperVersion}-core${CORE_VERSION_SHORT}` 조합 (예: 'v3.3.6-core335')
 window.OhsorryCore = {
-  VERSION: '0.0.363',
+  VERSION: '0.0.364',
   compute: async (opts) => {
   opts = opts || {};
   const mode = opts.mode || 'own';
@@ -42,7 +42,7 @@ window.OhsorryCore = {
   let dbData = opts.dbData || null;
   const rivalToken = opts.rivalToken || null;
   const wrapperVersion = opts.wrapperVersion || 'unknown';
-  const CORE_VERSION_SHORT = '0.0.363'.replace(/^0\.0\./, '');  // '346'
+  const CORE_VERSION_SHORT = '0.0.364'.replace(/^0\.0\./, '');  // '346'
   const dbVersionString = `${wrapperVersion}-core${CORE_VERSION_SHORT}`;
   dbData = dbData || null;
   // -------- 0. ereter 데이터 로드 (Gist 에서 자동 fetch) --------
@@ -431,6 +431,41 @@ window.OhsorryCore = {
     if (typeof r.estEc !== 'number' && typeof r.estHc !== 'number') continue;
     ratingMap.set(norm(r.title) + '|' + r.diff, r);
   }
+
+  // gameLevel 별 zasaLevel 평균 — 차트에 zasa 가 없을 때 fallback (★ 거리 감쇠용).
+  //   ohSorryRatings (lv11/12) + zasaData (lv1~10 등) 합쳐서 산출.
+  const zasaAvgByGameLv = (() => {
+    const sum = {}, cnt = {};
+    for (const r of ohSorryRatings || []) {
+      if (typeof r.zasaLevel === 'number' && typeof r.gameLevel === 'number') {
+        sum[r.gameLevel] = (sum[r.gameLevel] || 0) + r.zasaLevel;
+        cnt[r.gameLevel] = (cnt[r.gameLevel] || 0) + 1;
+      }
+    }
+    for (const z of zasaData || []) {
+      if (typeof z.level === 'number' && typeof z.gameLevel === 'number') {
+        sum[z.gameLevel] = (sum[z.gameLevel] || 0) + z.level;
+        cnt[z.gameLevel] = (cnt[z.gameLevel] || 0) + 1;
+      }
+    }
+    const out = {};
+    for (const lv in sum) out[lv] = sum[lv] / cnt[lv];
+    return out;
+  })();
+  // 차트의 ★ — level (zasa) 있으면 그대로, 없으면 gameLevel 평균. 둘 다 없으면 null.
+  const getEffectiveStar = (level, gameLevel) => {
+    if (typeof level === 'number') return level;
+    if (typeof gameLevel === 'number' && zasaAvgByGameLv[gameLevel] != null) return zasaAvgByGameLv[gameLevel];
+    return null;
+  };
+  // ★ 거리 감쇠 weight — bestTotal × max(0, 1 - |chart★ - baseStar| / W).
+  //   W = STAR_DISTANCE_W (3). chart★ 가 baseStar±W 안이면 1→0 선형, 밖이면 0 (정렬에서 제외).
+  //   baseStar 또는 chart★ 정보 없으면 1 (감쇠 없음, 옛 동작 유지).
+  const STAR_DISTANCE_W = 3;
+  const starDistanceWeight = (star, baseStar) => {
+    if (star == null || baseStar == null) return 1;
+    return Math.max(0, 1 - Math.abs(star - baseStar) / STAR_DISTANCE_W);
+  };
 
   // ereter 에 없는 zasa 전용 차트 (★ 단위별 표의 곡 수 보강용)
   const zasaSupplemental = zasaData.filter((c) => {
@@ -1221,7 +1256,7 @@ window.OhsorryCore = {
     const hi = Math.max(topClearStar, baseStar);
     const lo = Math.min(topClearStar, baseStar);
     const hardMin = hi;
-    const hardMax = hi + 1.0;
+    // hardMax 제거 (2026-05-27~) — ★ 거리 감쇠로 상한 대체. hard 카테고리는 [hardMin, +∞).
     const easyMin = lo;
     // stage 별 정확도 임계치 — EC: A 이상이면 OK / HC: AA 이상 / EXH: AAA 만
     const accuracyOK = (djLv) => {
@@ -1272,15 +1307,15 @@ window.OhsorryCore = {
         margin: baseStar - dv,
         gameLevel,
       };
-      // dv 기반 분류 (새 룰) — stage 도달 여부 무관 (도달 곡도 dv 가 hard 범위면 hard 로)
-      //   강도전 [hardMin = hi, hardMax = hi+1]  /  약도전 [easyMin = lo, hardMin)  /  정리곡 [0, easyMin)
+      // dv 기반 분류 (2026-05-27~) — baseStar 상한 제거. ★ 거리 감쇠 (STAR_DISTANCE_W) 로 자연 좁힘.
+      //   강도전 [hardMin = hi, +∞)  /  약도전 [easyMin = lo, hardMin)  /  정리곡 [0, easyMin)
       let cls;
-      if (dv >= hardMin && dv <= hardMax) cls = 'hard';
+      if (dv >= hardMin) cls = 'hard';
       else if (dv >= easyMin && dv < hardMin) cls = 'easy';
-      else if (dv < easyMin) {
+      else {
         if (isEC && typeof e.hc === 'number' && e.hc < baseStar - 3) continue;  // 너무 쉬운 곡 제외
         cls = 'cleanup';
-      } else continue;
+      }
       item._category = cls;
       (reachedForDj ? reached : underLamp)[cls].push(item);
     }
@@ -1301,29 +1336,34 @@ window.OhsorryCore = {
     const sample15 = (cat) => {
       const pool = [...cat.hard, ...cat.easy, ...cat.cleanup];
       // 모든 차트에 hashtag 캐시 (canUseByHand 무관). vecL/vecR 없으면 _matchByHand=null, FLIP/한손위주 hashtag 만 빠짐.
+      // ★ 거리 weight 도 같이 캐시 — chart ★ (r.level) 없으면 gameLevel 평균 fallback.
       for (const r of pool) {
         if (r._matchByHand === undefined) r._matchByHand = canUseByHand ? chartStrengthMatchByHand(r) : null;
         if (r._tags === undefined) r._tags = computeChartTags(r);
         if (r._hashtags === undefined) r._hashtags = computeRecHashtags(r);
+        if (r._starWeight === undefined) r._starWeight = starDistanceWeight(getEffectiveStar(r.level, r.gameLevel), baseStar);
       }
+      // ★ 거리 weight 0 곡은 정렬 제외 (baseStar 와 너무 멀어 추천 가치 없음).
+      const filtered = pool.filter(r => r._starWeight > 0);
       let sorted;
       if (canUseByHand) {
-        sorted = [...pool].sort((a, b) => {
-          const sa = a._matchByHand ? a._matchByHand.bestTotal : 0;
-          const sb = b._matchByHand ? b._matchByHand.bestTotal : 0;
+        sorted = [...filtered].sort((a, b) => {
+          const sa = (a._matchByHand ? a._matchByHand.bestTotal : 0) * a._starWeight;
+          const sb = (b._matchByHand ? b._matchByHand.bestTotal : 0) * b._starWeight;
           return (sb - sa) || ((b[countField] || 0) - (a[countField] || 0));
         });
       } else if (userVec) {
-        sorted = [...pool].sort((a, b) => {
-          const sa = chartStrengthMatch(a), sb = chartStrengthMatch(b);
+        sorted = [...filtered].sort((a, b) => {
+          const sa = chartStrengthMatch(a) * a._starWeight;
+          const sb = chartStrengthMatch(b) * b._starWeight;
           return (sb - sa) || ((b[countField] || 0) - (a[countField] || 0));
         });
       } else {
-        sorted = [...pool].sort((a, b) => (b[countField] || 0) - (a[countField] || 0));
+        sorted = [...filtered].sort((a, b) => (b[countField] || 0) - (a[countField] || 0));
       }
       const top10 = sorted.slice(0, 10);
       const usedKeys = new Set(top10.map(keyOf));
-      const rest = pool.filter(r => !usedKeys.has(keyOf(r)));
+      const rest = filtered.filter(r => !usedKeys.has(keyOf(r)));
       const rand5 = shuffle(rest).slice(0, 5);
       return [...top10, ...rand5];
     };
@@ -1383,18 +1423,17 @@ window.OhsorryCore = {
 
   // EXH 전용 추천 — EC/HC 와 별개 로직.
   // EXH 추천 — EC/HC 와 다른 단순 룰 (2026-05-27~).
-  //   후보: baseStar+1 이하 차트 중
+  //   후보: EXH 미달성 (또는 djMode='on' 일 때 AAA 미달) — ★ 상한 제거, 거리 감쇠로 자연 좁힘.
   //     djMode 'off' (기본): EXH 미달성 (lampNum < 6) 곡만
   //     djMode 'on'        : 위 + EXH 깬 곡 중 AAA 미달 (lamp >= 6 && djLevel !== 'AAA' && exScore > 0)
   //   강/약/정리 카테고리 분류 X (단일 풀).
-  //   정렬: 손 분리 + FLIP 매치 점수 (chartStrengthMatchByHand.bestTotal) desc → top 10
+  //   정렬: chartStrengthMatchByHand.bestTotal × ★ 거리 weight (baseStar±STAR_DISTANCE_W) desc → top 10
   //   카테고리 hashtag: dv >= baseStar → '강도전' / dv < baseStar → '약도전' (정리곡 표기 안 함)
   const buildExhRecs = (baseStar, recLevelMode, djMode) => {
     if (baseStar == null) return [];
     // canUseByHand — buildRecs (EC/HC) inner const 와 동일 검사. buildExhRecs 는 별도 scope 이라 여기 재정의.
     const canUseByHand = !!(userVec && userVec.__vecL && userVec.__vecR && weaknessLib && weaknessLib.chartStrengthMatchByHand);
     const items = [];
-    const hardMax = baseStar + 1.0;
     for (const c of allCharts) {
       if (recLevelMode === 'lv12' && c.gameLevel !== 12) continue;
       if (recLevelMode === 'lv11+12' && c.gameLevel !== 11 && c.gameLevel !== 12) continue;
@@ -1422,7 +1461,7 @@ window.OhsorryCore = {
       }
       const dv = e.exh;
       if (typeof dv !== 'number') continue;
-      if (dv > hardMax) continue;  // baseStar+1 위 차트 제외
+      // ★ 상한 제거 (2026-05-27~) — 거리 감쇠가 자동 cutoff. baseStar+W 이상은 weight=0 → 정렬 제외.
       const item = {
         title: c.title, chart: c.diff, level: e.level,
         ec: e.ec, hc: e.hc, exh: e.exh,
@@ -1440,22 +1479,28 @@ window.OhsorryCore = {
       if (r._tags === undefined) r._tags = computeChartTags(r);
       if (r._hashtags === undefined) r._hashtags = computeRecHashtags(r);
     }
-    // bestTotal desc (vec 있을 때) 또는 diffValue asc (fallback)
+    // ★ 거리 weight 적용 — chart ★ (e.level) 가 없으면 gameLevel 평균 fallback. weight=0 곡은 풀 제외.
+    for (const r of items) {
+      r._starWeight = starDistanceWeight(getEffectiveStar(r.level, r.gameLevel), baseStar);
+    }
+    const filtered = items.filter(r => r._starWeight > 0);
+    // bestTotal × 거리 weight desc (vec 있을 때) 또는 diffValue asc (fallback)
     if (canUseByHand) {
-      items.sort((a, b) => {
-        const sa = a._matchByHand ? a._matchByHand.bestTotal : 0;
-        const sb = b._matchByHand ? b._matchByHand.bestTotal : 0;
+      filtered.sort((a, b) => {
+        const sa = (a._matchByHand ? a._matchByHand.bestTotal : 0) * a._starWeight;
+        const sb = (b._matchByHand ? b._matchByHand.bestTotal : 0) * b._starWeight;
         return (sb - sa) || (a.diffValue - b.diffValue);
       });
     } else if (userVec) {
-      items.sort((a, b) => {
-        const sa = chartStrengthMatch(a), sb = chartStrengthMatch(b);
+      filtered.sort((a, b) => {
+        const sa = chartStrengthMatch(a) * a._starWeight;
+        const sb = chartStrengthMatch(b) * b._starWeight;
         return (sb - sa) || (a.diffValue - b.diffValue);
       });
     } else {
-      items.sort((a, b) => a.diffValue - b.diffValue);
+      filtered.sort((a, b) => a.diffValue - b.diffValue);
     }
-    return items.slice(0, 10);
+    return filtered.slice(0, 10);
   };
 
   // 약점보완 추천 (2026-05-27~) — chartWeaknessMatchByHand 의 bestTotal (= -strength) 기반.
@@ -1550,22 +1595,32 @@ window.OhsorryCore = {
         // 약점 매치 — flipOn / handMode 옵션 전달 (best/bestTotal 가 그에 맞춰 결정).
         const w = weaknessLib.chartWeaknessMatchByHand(chartPt, vecL, vecR, { feats, flipOn, handMode });
         if (!w || w.bestTotal <= 0) continue;
-        // 차트 메타 (★, est) — ereterMap 우선, 없으면 ratingMap zasa 추정
+        // 차트 메타 (★, est) — ereterMap 우선, 없으면 ratingMap zasa 추정. 둘 다 없으면 gameLevel 평균으로 fallback.
         let e = ereterMap.get(norm(title) + '|' + diff);
         if (!e || e.level == null) {
           const r = ratingMap.get(norm(title) + '|' + diff);
-          if (!r || typeof r.zasaLevel !== 'number') continue;
-          e = {
-            level: r.zasaLevel,
-            ec: typeof r.estEc === 'number' ? r.estEc : null,
-            hc: typeof r.estHc === 'number' ? r.estHc : null,
-            exh: typeof r.estExh === 'number' ? r.estExh : null,
-            ec_n: r.nEcCleared || 0, hc_n: r.nHcCleared || 0, exh_n: r.nExhCleared || 0,
-          };
+          if (r && typeof r.zasaLevel === 'number') {
+            e = {
+              level: r.zasaLevel,
+              ec: typeof r.estEc === 'number' ? r.estEc : null,
+              hc: typeof r.estHc === 'number' ? r.estHc : null,
+              exh: typeof r.estExh === 'number' ? r.estExh : null,
+              ec_n: r.nEcCleared || 0, hc_n: r.nHcCleared || 0, exh_n: r.nExhCleared || 0,
+            };
+          } else if (typeof zasaAvgByGameLv[gameLevel] === 'number') {
+            // fallback — 해당 gameLevel 의 zasaLevel 평균. ec/hc/exh 는 추정 안 함 (null).
+            e = {
+              level: zasaAvgByGameLv[gameLevel],
+              ec: null, hc: null, exh: null,
+              ec_n: 0, hc_n: 0, exh_n: 0,
+            };
+          } else continue;
         }
         // ★ 상한 — 차트 zasaLevel (e.level) 이 topClearZasa 이하인 곡만 통과.
         //   topClearZasa = 0 (= 클리어 차트 없음) 이면 상한 없음 (모두 통과).
         if (topClearZasa > 0 && typeof e.level === 'number' && e.level > topClearZasa) continue;
+        // ★ 거리 cutoff — baseStar 와 ±STAR_DISTANCE_W 밖이면 풀 제외 (점진학습 정렬은 그대로 bestTotal asc).
+        if (starDistanceWeight(e.level, baseStar) <= 0) continue;
         const dv = typeof e.exh === 'number' ? e.exh : (typeof e.hc === 'number' ? e.hc : e.level);
         // user 가 친 곡이면 lamp / djLevel / exScore 채움 (안 친 곡은 null)
         const uc = userChartByKey.get(norm(title) + '|' + diff);
