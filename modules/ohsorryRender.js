@@ -1,4 +1,4 @@
-// ohsorryRender.js — 오소리 결과 렌더 모듈 (v0.0.366)
+// ohsorryRender.js — 오소리 결과 렌더 모듈 (v0.0.367)
 //
 // calcOhsorryCore.compute() 가 반환한 result 객체를 받아 화면 패널 + 추천곡 + supabase upload.
 // 본체 / 라이벌 wrapper 가 fetch + eval 해서 사용.
@@ -504,6 +504,8 @@ window.OhsorryRender = {
             // 연습곡 (_category='weakness') 은 클리어 도전 무관 → rec-diff (★ 실력값) 안 표시. ☆ (zasa) 만 유지.
             const diffSpan = r._category === 'weakness'
               ? ''
+              : r._hideDiffValue
+                ? '<span class="rec-diff" style="color:#aaa" title="EC/HC/EXH 지표 없음">★--</span>'
               : `<span class="rec-diff" style="color:${color}" title="실력 ★">★${r.diffValue.toFixed(2)}</span>`;
             return `
               <div class="rec-item"${dataTagsAttr}>
@@ -531,8 +533,9 @@ window.OhsorryRender = {
         };
         window.__dp_rerollAndRender = rerenderRecStage;
 
-        // 연습곡 (weakness) UI 옵션 상태 — 기본은 LEVEL 12 기준 zasa 11.6~12.7.
-        const weaknessOpts = { mode: 'all', topN: 5, flipOn: true, handMode: 'both', strength: 1, zasaMin: 11.6, zasaMax: 12.7 };
+        // 연습곡 (weakness) UI 옵션 상태 — 기본 ☆ 범위는 core 가 최대 클리어 게임레벨 기준으로 계산.
+        const practiceDefault = result.practiceZasaDefault || { min: 11.6, max: 12.7 };
+        const weaknessOpts = { mode: 'all', topN: 5, flipOn: true, handMode: 'both', strength: 1, zasaMin: practiceDefault.min, zasaMax: practiceDefault.max };
         const rerenderWeakness = () => {
           if (typeof window.__dp_rerollWeakness !== 'function') return;
           const newRecs = window.__dp_rerollWeakness({ ...weaknessOpts });
@@ -656,12 +659,12 @@ window.OhsorryRender = {
           const weaknessControls = stage === 'weakness' ? `
             <div class="rec-mode-toggle" style="margin-top:4px;display:flex;flex-wrap:wrap;align-items:center;gap:4px">
               <span style="${wkLabel}">☆</span>
-              <input type="number" class="wk-zasa-min" min="5.9" max="12.7" step="0.1" value="11.6" placeholder="11.6"
+              <input type="number" class="wk-zasa-min" min="5.9" max="12.7" step="0.1" value="${practiceDefault.min}" placeholder="${practiceDefault.min}"
                 style="${wkInput}"
                 onclick="event.stopPropagation();" onmousedown="event.stopPropagation();" onkeydown="event.stopPropagation();"
                 oninput="event.stopPropagation();window.__dp_weakness_setZasaMin(this.value);">
               <span style="${wkLabel}">~</span>
-              <input type="number" class="wk-zasa-max" min="5.9" max="12.7" step="0.1" value="12.7" placeholder="12.7"
+              <input type="number" class="wk-zasa-max" min="5.9" max="12.7" step="0.1" value="${practiceDefault.max}" placeholder="${practiceDefault.max}"
                 style="${wkInput}"
                 onclick="event.stopPropagation();" onmousedown="event.stopPropagation();" onkeydown="event.stopPropagation();"
                 oninput="event.stopPropagation();window.__dp_weakness_setZasaMax(this.value);">
@@ -775,7 +778,7 @@ window.OhsorryRender = {
               <span class="rec-level-mode-opt${recLevelMode === 'all' || recLevelMode === 'low' ? ' active' : ''}" data-mode="all"
                 style="cursor:pointer;color:${recLevelMode === 'all' || recLevelMode === 'low' ? '#212529' : '#aaa'};font-weight:${recLevelMode === 'all' || recLevelMode === 'low' ? '700' : '400'};transition:color .15s"
                 onclick="window.__dp_setRecLevelMode && window.__dp_setRecLevelMode('all')"
-                title="게임 LEVEL 11 + 12 차트 추천">DP11+</span>
+                title="${recLevelMode === 'low' ? '게임 LEVEL 8~10 중심 추천' : '게임 LEVEL 11 + 12 차트 추천'}">${recLevelMode === 'low' ? 'DP8~10' : 'DP11+'}</span>
             </div>
           </div>
         `;

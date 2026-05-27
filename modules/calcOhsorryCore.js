@@ -42,7 +42,7 @@ window.OhsorryCore = {
   let dbData = opts.dbData || null;
   const rivalToken = opts.rivalToken || null;
   const wrapperVersion = opts.wrapperVersion || 'unknown';
-  const CORE_VERSION_SHORT = '0.0.374'.replace(/^0\.0\./, '');  // '346'
+  const CORE_VERSION_SHORT = '0.0.375'.replace(/^0\.0\./, '');  // '346'
   const dbVersionString = `${wrapperVersion}-core${CORE_VERSION_SHORT}`;
   dbData = dbData || null;
   // -------- 0. ereter 데이터 로드 (Gist 에서 자동 fetch) --------
@@ -1266,6 +1266,15 @@ window.OhsorryCore = {
   };
 
   const recsEC = [], recsHC = [], recsEXH = [], recsWeakness = [];
+  const maxClearGameLevel = (() => {
+    let maxLv = 0;
+    for (const c of allCharts) {
+      if (typeof c.gameLevel === 'number' && typeof c.lampNum === 'number' && c.lampNum >= 3) {
+        if (c.gameLevel > maxLv) maxLv = c.gameLevel;
+      }
+    }
+    return maxLv;
+  })();
 
   // Fisher-Yates shuffle
   const shuffle = (arr) => {
@@ -1299,6 +1308,15 @@ window.OhsorryCore = {
     const reached   = { hard: [], easy: [], cleanup: [] };       // lampNum >= threshold && !accuracyOK
     if (baseStar == null) return { underLamp: empty, reached: empty };
     const isLowLevelRec = recLevelMode === 'low';
+    let maxClearGameLevel = 0;
+    for (const c of allCharts) {
+      if (typeof c.gameLevel === 'number' && typeof c.lampNum === 'number' && c.lampNum >= 3) {
+        if (c.gameLevel > maxClearGameLevel) maxClearGameLevel = c.gameLevel;
+      }
+    }
+    const lowAllowedLevels = maxClearGameLevel >= 12 ? [10, 11, 12]
+      : maxClearGameLevel >= 11 ? [10, 11]
+      : [8, 9, 10];
     const isEC = getDiffField === 'ec';
     const isHC  = getDiffField === 'hc';
     const isEXH = getDiffField === 'exh';
@@ -1332,7 +1350,7 @@ window.OhsorryCore = {
       return lampN === 3 || lampN === 4;  // EC/NC + A 미도달
     };
     for (const c of allCharts) {
-      if (isLowLevelRec && (c.gameLevel == null || c.gameLevel < 8 || c.gameLevel > 10)) continue;
+      if (isLowLevelRec && (c.gameLevel == null || !lowAllowedLevels.includes(c.gameLevel))) continue;
       if (recLevelMode === 'lv12' && c.gameLevel !== 12) continue;
       if (recLevelMode === 'lv11+12' && c.gameLevel !== 11 && c.gameLevel !== 12) continue;
       const under = c.lampNum < threshold;
@@ -1392,6 +1410,7 @@ window.OhsorryCore = {
         scoreRate: (typeof c.exScore === 'number' && typeof c.noteCount === 'number' && c.noteCount > 0)
           ? (c.exScore / (c.noteCount * 2)) * 100
           : null,
+        _hideDiffValue: !!e.__lowFallback,
       };
       // dv 기반 분류 (2026-05-27~) — stage 별 effectiveBase + hardMax 상한.
       //   EC/HC: 정리곡 [0, easyMin) / 약도전 [easyMin, hardMin) / 강도전 [hardMin, hardMax]. dv > hardMax 풀 제외.
@@ -1423,6 +1442,7 @@ window.OhsorryCore = {
     const { underLamp, reached } = buildPools(threshold, getDiffField, baseStar, recLevelMode, djMode);
     const countField = getDiffField + '_n';
     const keyOf = r => (r.title || '') + '|' + r.chart;
+    const isLowLevelRec = recLevelMode === 'low';
     const clamp01 = (v) => Math.max(0, Math.min(1, v));
     const djRankScore = (djLv) => {
       const m = { F: 0, E: 0.1, D: 0.2, C: 0.35, B: 0.5, A: 0.68, AA: 0.84, AAA: 1 };
@@ -1558,6 +1578,18 @@ window.OhsorryCore = {
       }
       return taken;
     };
+    if (isLowLevelRec) {
+      const underAll = [...under.cleanup, ...under.easy, ...under.hard];
+      const lowLevels = [...new Set(underAll.map((r) => r.gameLevel).filter((lv) => typeof lv === 'number'))].sort((a, b) => a - b);
+      const targetLv12 = lowLevels.includes(12) ? 1 : 0;
+      const mainLevels = lowLevels.filter((lv) => lv !== 12);
+      const perLevel = mainLevels.length > 0 ? Math.max(1, Math.floor((10 - targetLv12) / mainLevels.length)) : 10 - targetLv12;
+      for (const lv of mainLevels) takeFrom(underAll.filter((r) => r.gameLevel === lv), perLevel);
+      if (targetLv12 > 0) takeFrom(underAll.filter((r) => r.gameLevel === 12), 1);
+      if (picks.length < 10) takeFrom(underAll, 10 - picks.length);
+      if (djMode === 'on' && picks.length < 10) takeFrom([...reach.cleanup, ...reach.easy, ...reach.hard], 10 - picks.length);
+      return picks.sort((a, b) => (b._clearScore || 0) - (a._clearScore || 0));
+    }
     const underTarget = djMode === 'on' ? 8 : 10;
     const underSlots = getDiffField === 'exh'
       ? [
@@ -1603,8 +1635,12 @@ window.OhsorryCore = {
   //     topN     : 5 (default) / 10 / 20
   const WEAKNESS_FEATS = ['NOTES', 'CHORD', 'PEAK', 'PHRASE', 'JACK', 'TRILL', 'RAND'];
   const WEAKNESS_CLEAR_LAMP = 4;   // EC 이상 (lampNum >= 4) 을 "클리어" 로 봄 — topClearZasa 산정 기준
-  const PRACTICE_ZASA_MIN = 11.6;
-  const PRACTICE_ZASA_MAX = 12.7;
+  const practiceZasaDefault = (() => {
+    if (maxClearGameLevel >= 12) return { min: 11.6, max: 12.7 };
+    if (maxClearGameLevel >= 11) return { min: 10.0, max: 12.1 };
+    if (maxClearGameLevel >= 10) return { min: 8.0, max: 10.9 };
+    return { min: 5.9, max: 10.0 };
+  })();
   const WEAKNESS_MODE_FEATS = {
     all:       WEAKNESS_FEATS,
     CHARGE:    ['CHARGE'],
@@ -1636,8 +1672,8 @@ window.OhsorryCore = {
     const topN = (opts && typeof opts.topN === 'number') ? opts.topN : 5;
     const strength = (opts && typeof opts.strength === 'number' && opts.strength >= 1) ? opts.strength : 1;
     const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
-    const zasaMin = (opts && typeof opts.zasaMin === 'number') ? opts.zasaMin : PRACTICE_ZASA_MIN;
-    const zasaMax = (opts && typeof opts.zasaMax === 'number') ? opts.zasaMax : PRACTICE_ZASA_MAX;
+    const zasaMin = (opts && typeof opts.zasaMin === 'number') ? opts.zasaMin : practiceZasaDefault.min;
+    const zasaMax = (opts && typeof opts.zasaMax === 'number') ? opts.zasaMax : practiceZasaDefault.max;
     const rangeW = Math.max(0.1, zasaMax - zasaMin);
     const targetZasa = strength >= 3 ? (zasaMax - rangeW * 0.2)
                      : strength === 2 ? ((zasaMin + zasaMax) / 2)
@@ -1921,13 +1957,15 @@ window.OhsorryCore = {
   const ecBase = recBaseStar != null ? recBaseStar : EC_FALLBACK_BASE;
   // EC fallback (recBaseStar==null, baseStar=0.3) 케이스는 ★ 거리 cutoff 끄기 — 안 그러면 lv11/12 풀이 통째로 컷됨.
   recsEC.push(...buildRecs(3, 'ec', ecBase, REC_LEVEL_MODE_DEFAULT, REC_DJ_MODE_DEFAULT));
-  if (recBaseStar != null) {
+  if (recBaseStar != null && recBaseStar >= 0.5) {
     recsHC.push(...buildRecs(5, 'hc', recBaseStar, REC_LEVEL_MODE_DEFAULT, REC_DJ_MODE_DEFAULT));
     recsEXH.push(...buildRecs(6, 'exh', recBaseStar, REC_LEVEL_MODE_DEFAULT, REC_DJ_MODE_DEFAULT));
   }
-  // 연습곡 — userVec.__vecL/__vecR 있어야 동작. default (FLIP on + 양손 통합, 건반 mode, top 5). UI 토글로 변경 가능.
-  //   zasaMin/zasaMax 를 비우면 recBaseStar 기준 자동 범위로 추천.
-  recsWeakness.push(...buildWeaknessRecs(recBaseStar, { flipOn: true, handMode: 'both', mode: 'all', topN: 5, strength: 1 }));
+  // 연습곡 — userVec.__vecL/__vecR 있어야 동작. 기본 ☆ 범위는 최대 클리어 게임레벨 기준으로 설정.
+  recsWeakness.push(...buildWeaknessRecs(recBaseStar, {
+    flipOn: true, handMode: 'both', mode: 'all', topN: 5, strength: 1,
+    zasaMin: practiceZasaDefault.min, zasaMax: practiceZasaDefault.max,
+  }));
   // window.__dp_rerollWeakness(opts) — ohsorryRender UI 토글에서 호출. opts: { flipOn, handMode, mode, topN, strength, zasaMin, zasaMax }
   window.__dp_rerollWeakness = (opts) => buildWeaknessRecs(recBaseStar, opts || {});
   console.log(`[step2] 추천곡: EC ${recsEC.length}, HC ${recsHC.length}, EXH ${recsEXH.length}, 연습곡 ${recsWeakness.length}`);
@@ -1943,6 +1981,7 @@ window.OhsorryCore = {
     const base = typeof baseStarOverride === 'number' ? baseStarOverride : recBaseStar;
     const lvMode = recLevelMode === 'lv12' ? 'lv12' : recLevelMode === 'low' ? 'low' : REC_LEVEL_MODE_DEFAULT;
     const dMode = djMode === 'on' ? 'on' : 'off';
+    if ((stage === 'hc' || stage === 'exh') && base != null && base < 0.5) return [];
     if (stage === 'exh') return base != null ? buildRecs(6, 'exh', base, lvMode, dMode) : [];
     if (stage === 'hc')  return base != null ? buildRecs(5, 'hc', base, lvMode, dMode) : [];
     // EC reroll 도 base==null 이면 EC_FALLBACK_BASE + ★ 거리 cutoff 끄기 (초기 계산과 동일).
@@ -2040,6 +2079,7 @@ window.OhsorryCore = {
     recBaseMode, recBaseStar,
     recLevelModeDefault: REC_LEVEL_MODE_DEFAULT,
     recDjModeDefault: REC_DJ_MODE_DEFAULT,
+    practiceZasaDefault,
     userVec,
     weaknessLib,
     norm, SERIES, shelfLib,

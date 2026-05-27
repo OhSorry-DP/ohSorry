@@ -309,6 +309,24 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### 2026-05-27 — 사용자 게임레벨 적응 (low 모드 / 연습곡 zasa / HC/EXH 가드) — calcOhsorryCore v0.0.375 / ohsorryRender v0.0.367
+- **`maxClearGameLevel` 산정** — `allCharts` 중 `lampNum ≥ 3` (EC 이상) 클리어한 차트의 `gameLevel` 최댓값. 추천 풀 / 연습곡 기본 범위에 모두 활용.
+- **'low' 모드 허용 레벨 동적** — 기존 고정 lv8~10 → `maxClearGameLevel` 기반:
+  - ≥ 12 → `[10, 11, 12]` (이미 12 까지 깬 유저는 더 위 레벨)
+  - ≥ 11 → `[10, 11]`
+  - 그 외 → `[8, 9, 10]` (신규 / 초보)
+- **low 모드 추출 흐름 신규** — 게임레벨별 균등 분배 (12 제외 main 레벨 각각 ≈ `(10-targetLv12)/N`) + lv12 1곡 + 부족분 채움 + `djMode='on'` 시 reached 보충.
+- **연습곡 기본 ☆ 범위 동적** (`practiceZasaDefault`):
+  - max ≥ 12 → `11.6 ~ 12.7`
+  - max ≥ 11 → `10.0 ~ 12.1`
+  - max ≥ 10 → `8.0 ~ 10.9`
+  - 그 외 → `5.9 ~ 10.0`
+  - UI input placeholder 도 그 값으로. core 가 `practiceZasaDefault` 노출, ohsorryRender 가 받아서 활용.
+- **HC / EXH 가드** — `recBaseStar < 0.5` 면 HC/EXH 추천 빈 배열. reroll 도 동일 가드. 신규 유저 (★ 측정 안 됨) 는 EC + low 모드 + 연습곡 만 노출.
+- **`_hideDiffValue`** — low 모드 fallback (zasa/ratingMap 미수록 lv8~10 차트의 임의 estEc/Hc/Exh) 시 차트 item 에 플래그. ohsorryRender 가 `★--` (회색) + tooltip "EC/HC/EXH 지표 없음" 으로 표시 (정확 추정값 아닌데 ★ 숫자 표시 안 함).
+- **ohsorryRender v0.0.367** — 연습곡 zasa input 기본값 `practiceZasaDefault` 로, low 모드일 때 추천 토글 라벨 "DP11+" → "DP8~10" + tooltip.
+- 효과: 사용자 게임레벨에 맞춰 추천 풀 / 연습곡 범위 자동 조정. 신규 유저 / 저레벨 유저는 HC/EXH 비노출, low 모드 + 적정 zasa 로 진입 부담 완화.
+
 ### 2026-05-27 — 클리어 추천 _clearScore 점수식 + 'low' 모드 + 연습곡 기본 zasa 11.6~12.7 — calcOhsorryCore v0.0.374 / ohsorryRender v0.0.366
 - **클리어 추천 정렬 → `_clearScore` 점수식 desc**. 기존 `bestTotal × _starWeight` 또는 단순 `bestTotal` 대체.
   - `diffFit × 0.24` (`|diffValue - baseStar|` 거리 감쇠, stage 별 폭 EXH 3.2 / EC/HC 2.4)
