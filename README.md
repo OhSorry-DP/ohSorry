@@ -309,6 +309,9 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### 2026-05-28 — low 모드 토글 라벨 "11-" — ohsorryRender v0.0.371
+- 저레벨 유저 (`recBaseStar < 0.5` low 모드) 클리어 범위 토글 라벨 `DP8~10` → `11-`. tooltip 도 "게임 LEVEL 11 미만 중심 추천" 으로.
+
 ### 2026-05-28 — 연습곡 ☆ 범위 라벨 다크 테마 가독성 — ohsorryRender v0.0.370
 - 연습곡 zasa 범위 입력 옆 "☆ ~" 라벨 색 `#555 → #e9ecef` + `font-weight:600`. 다크 배경에서 잘 보이도록.
 

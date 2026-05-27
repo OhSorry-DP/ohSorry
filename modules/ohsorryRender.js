@@ -1,4 +1,4 @@
-// ohsorryRender.js — 오소리 결과 렌더 모듈 (v0.0.370)
+// ohsorryRender.js — 오소리 결과 렌더 모듈 (v0.0.371)
 //
 // calcOhsorryCore.compute() 가 반환한 result 객체를 받아 화면 패널 + 추천곡 + supabase upload.
 // 본체 / 라이벌 wrapper 가 fetch + eval 해서 사용.
@@ -781,7 +781,7 @@ window.OhsorryRender = {
               <span class="rec-level-mode-opt${recLevelMode === 'all' || recLevelMode === 'low' ? ' active' : ''}" data-mode="all"
                 style="cursor:pointer;color:${recLevelMode === 'all' || recLevelMode === 'low' ? '#212529' : '#aaa'};font-weight:${recLevelMode === 'all' || recLevelMode === 'low' ? '700' : '400'};transition:color .15s"
                 onclick="window.__dp_setRecLevelMode && window.__dp_setRecLevelMode('all')"
-                title="${recLevelMode === 'low' ? '게임 LEVEL 8~10 중심 추천' : '게임 LEVEL 11 + 12 차트 추천'}">${recLevelMode === 'low' ? 'DP8~10' : 'DP11+'}</span>
+                title="${recLevelMode === 'low' ? '게임 LEVEL 11 미만 중심 추천' : '게임 LEVEL 11 + 12 차트 추천'}">${recLevelMode === 'low' ? '11-' : 'DP11+'}</span>
             </div>
           </div>
         `;
