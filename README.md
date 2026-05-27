@@ -309,6 +309,16 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### 2026-05-27 — 약점보완 알고리즘 vec 잔차 약점 + 강점 보완 우선 — calcOhsorryCore v0.0.372
+- `buildWeaknessRecs` 풀 진입 조건 강화:
+  - 기존: zasa bin 평균 대비 `deficit > 0` (못 친 곡) 모두 풀
+  - **추가**: 사용자 vec 잔차 음수 (`userVec[f] < 0`) feature 가 곡 top 3 (feats subset 의 feature score 큰 top 3) 안에 하나라도 있어야 풀 진입
+  - 해석: "이 곡 못 친 이유가 내 약점 feature 라서일 가능성" 있는 곡만
+- 정렬 — `deficit asc` (살짝 부족 → 큰 약점) 에서 **`bestTotal` desc (8 way best 강점 매치 desc)** 로 교체.
+  - 의도: 그 곡의 다른 feature 가 사용자 강점이면 우선 (= 강점으로 보완 가능)
+- 강도 1/2/3 의미 — `bestTotal` 정렬 위치. 1=앞 (가장 보완 잘 됨), 2=중간, 3=뒤 (가장 힘듦).
+- 효과: "약점 feature 노출 + 강점으로 풀 만한" 곡 우선 표시.
+
 ### 2026-05-27 — 정리곡 50/50 다양성 보정 — calcOhsorryCore v0.0.371
 - sample 15 안의 cleanup 분류 곡들 중 bestTotal 낮은 절반을 잘라내고, **cleanup 풀 전체의 `dv` asc top** (= 그 stage 추정 ★ 낮은 = 가장 쉬운 곡) 으로 교체.
 - hard / easy 카테고리는 현행 그대로 bestTotal desc.

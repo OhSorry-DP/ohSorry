@@ -42,7 +42,7 @@ window.OhsorryCore = {
   let dbData = opts.dbData || null;
   const rivalToken = opts.rivalToken || null;
   const wrapperVersion = opts.wrapperVersion || 'unknown';
-  const CORE_VERSION_SHORT = '0.0.371'.replace(/^0\.0\./, '');  // '346'
+  const CORE_VERSION_SHORT = '0.0.372'.replace(/^0\.0\./, '');  // '346'
   const dbVersionString = `${wrapperVersion}-core${CORE_VERSION_SHORT}`;
   dbData = dbData || null;
   // -------- 0. ereter 데이터 로드 (Gist 에서 자동 fetch) --------
@@ -1514,15 +1514,17 @@ window.OhsorryCore = {
     for (const d in weaknessLib.DIFF2CHART) CHART2DIFF_REC[weaknessLib.DIFF2CHART[d]] = d;
   }
   // recLevelMode 인자는 받지 않음 — 약점보완은 일반 추천 lv 토글 무관 (자체 ★ 상한 + 거리 cutoff).
-  // 새 약점보완 알고리즘 (2026-05-27~) — zasa 0.1 단위 bin 안의 사용자 평균 rate 대비 deficit 기반.
-  //   1. 사용자가 친 곡 (rate>0) 만 풀에 진입 — 안 친 곡은 bin 평균 + 추천 풀 둘 다 제외 (사용자 수준 안에서만 추천)
-  //   2. zasa 0.1 단위 bin 의 사용자 EX rate 평균 — bin 곡 < MIN_BIN_N 이면 이웃 bin 결합 (양쪽 ±0.1 씩 확장)
-  //   3. deficit = bin 평균 rate - 사용자 rate. deficit > 0 곡들 (= 그 bin 평균보다 못 친 곡) 만 약점 풀
-  //   4. mode 별 풀 필터 — 'all' 은 7 feature (NOTES/CHORD/PEAK/PHRASE/JACK/TRILL/RAND) 의 raw pt 필터,
-  //                       단일 mode (CHARGE/SCRATCH/SOF-LAN) 는 그 feature 강한 곡만
-  //   5. deficit asc 정렬 + 강도 1/2/3 위치 — 1=소(앞, 살짝 부족) / 2=중(중간 median) / 3=대(뒤, 큰 약점)
-  //   6. 곡의 top 3 feature (7 feature 안) 추출 — 표시/태그 용. mode 'all' 풀 분류는 곡 자체 (한 풀)
-  //   7. _matchByHand — 배치추천 라벨 (8 way best) 표시용. 정렬 영향 X.
+  // 약점보완 알고리즘 (2026-05-27 ~ v0.0.372) — zasa bin deficit + vec 잔차 약점 + 강점 보완 우선.
+  //   1. 사용자가 친 곡 (rate>0) 만 풀 진입 — 안 친 곡은 bin 평균 / 풀 둘 다 제외
+  //   2. zasa 0.1 단위 bin 의 사용자 EX rate 평균 — bin 곡 < MIN_BIN_N 이면 이웃 bin 결합 (양쪽 ±0.1 씩)
+  //   3. deficit = bin 평균 rate - 사용자 rate. deficit > 0 곡들 만 풀 후보
+  //   4. weakFeats = feats 중 userVec[f] < 0 (잔차 음수 = 사용자 약점) feature 모음
+  //      곡 top 3 (feats subset 에서 feature score 큰 top 3) 안에 weakFeats 가 하나라도 있어야 풀 진입
+  //      → "이 곡 못 친 이유가 내 약점 feature 라서일 가능성 있음"
+  //   5. bestTotal (8 way best) desc 정렬 — 강점 보완 점수 큰 곡 우선 (그 곡의 다른 feature 가 사용자 강점이면 점수 큼)
+  //   6. 강도 1=앞 (가장 보완 잘 됨, 쉬움) / 2=중간 / 3=뒤 (가장 힘듦, 보완 점수 낮음)
+  //   7. mode 별 — 'all' = 7 feature (WEAKNESS_FEATS) 안에서 약/강점 모두 판단, 단일 mode 는 그 feature 1개만
+  //   8. _matchByHand = 배치추천 라벨 (8 way best). 정렬에 사용된 bestTotal 의 best 객체 그대로.
   const MIN_BIN_N = 10;
   const buildWeaknessRecs = (baseStar, opts) => {
     if (!userVec || !userVec.__vecL || !userVec.__vecR) return [];
@@ -1659,37 +1661,53 @@ window.OhsorryCore = {
       c.deficit = (c.binMean != null) ? (c.binMean - c.rate) : 0;
     }
 
-    // 3단계 — deficit > 0 (bin 평균보다 못 친 곡) 만 풀.
-    //   top 3 feature 분류 — 7 feature 안에서. 표시용 + mode 'all' 풀의 hashtag 활용.
+    // 3단계 — deficit > 0 + 사용자 약점 feature 가 곡 top 3 안에 있는 곡만 풀.
+    //   weakFeats = feats 중 userVec[f] < 0 인 feature (= 잔차 음수, 사용자 약점).
+    //   곡 top 3 (feats subset 에서 feature score 큰 top 3) 안에 weakFeats 가 하나라도 있어야 진입.
+    //   해석: "이 곡 못 친 (deficit>0) 이유가 내 약점 feature 라서일 가능성 있음".
+    //   weakFeats 비어있으면 (사용자가 그 mode 안에서 약점 없음) → 풀 빔.
+    const weakFeats = feats.filter((f) => (userVec[f] || 0) < 0);
+    const weakFeatSet = new Set(weakFeats);
     const pool = [];
     for (const c of candidates) {
       if (c.deficit <= 0) continue;
-      // top 3 feature (7 feature subset 에서) 추출 — 단일 mode 도 같은 계산 (정보용)
       const arr = [];
-      for (let fi = 0; fi < WEAKNESS_FEATS.length; fi++) {
-        const f = WEAKNESS_FEATS[fi];
+      for (let fi = 0; fi < feats.length; fi++) {
+        const f = feats[fi];
         const s = c.featScores[f];
         if (typeof s !== 'number' || s <= 0) continue;
         arr.push({ f, s });
       }
       arr.sort((a, b) => b.s - a.s);
       c.top3 = arr.slice(0, 3).map((x) => x.f);
+      if (weakFeatSet.size > 0 && !c.top3.some((f) => weakFeatSet.has(f))) continue;
       pool.push(c);
     }
 
-    // 4단계 — deficit asc 정렬 + 강도 1/2/3 위치
-    pool.sort((a, b) => a.deficit - b.deficit);
+    // 4단계 — bestTotal (8 way best) desc 정렬 — 강점 보완 점수 큰 곡 우선.
+    //   강도 1/2/3 = 정렬 위치. 1=앞 (가장 보완 잘 됨), 2=중간, 3=뒤 (가장 힘듦, 보완 점수 낮음).
+    if (weaknessLib && weaknessLib.chartStrengthMatch8Way) {
+      for (const c of pool) {
+        const w8 = weaknessLib.chartStrengthMatch8Way(c.chartPt, userVec,
+          { feats, handMode, flipOn, mirrorOn: flipOn });
+        c._w8 = w8;
+        c.bestTotal = (w8 && typeof w8.bestTotal === 'number') ? w8.bestTotal : 0;
+      }
+    } else {
+      for (const c of pool) c.bestTotal = 0;
+    }
+    pool.sort((a, b) => b.bestTotal - a.bestTotal);
     const P = pool.length;
     let startIdx;
     if (strength === 1) startIdx = 0;
     else if (strength >= 3) startIdx = Math.max(0, P - topN);
-    else startIdx = Math.max(0, Math.floor((P - topN) / 2));  // 강도 2 = 중간
+    else startIdx = Math.max(0, Math.floor((P - topN) / 2));
     const slice = pool.slice(startIdx, startIdx + topN);
 
     // 5단계 — items 변환 + _matchByHand (8 way best 라벨) + tags/hashtags
     const items = [];
     for (const c of slice) {
-      items.push({
+      const r = {
         title: c.title, chart: c.diff, level: c.zasa,
         ec: c.e.ec, hc: c.e.hc, exh: c.e.exh,
         ec_n: c.e.ec_n, hc_n: c.e.hc_n, exh_n: c.e.exh_n,
@@ -1697,30 +1715,24 @@ window.OhsorryCore = {
         currentLamp: c.uc ? c.uc.lamp : null,
         margin: baseStar - c.dv,
         gameLevel: c.gameLevel,
-        _weaknessScore: c.deficit,
+        _weaknessScore: c.bestTotal,
+        _weaknessBestTotal: c.bestTotal,
         _weaknessDeficit: c.deficit,
         _weaknessBinMean: c.binMean,
         _weaknessRate: c.rate,
         _weaknessTop3: c.top3,
+        _weaknessWeakFeats: weakFeats,
         _category: 'weakness',
-      });
-    }
-    // _matchByHand — 8 way best 라벨 (표시용, 정렬 영향 X)
-    if (weaknessLib && weaknessLib.chartStrengthMatch8Way) {
-      for (let i = 0; i < items.length; i++) {
-        const r = items[i];
-        const c = slice[i];
-        const w8 = weaknessLib.chartStrengthMatch8Way(c.chartPt, userVec,
-          { feats, handMode, flipOn, mirrorOn: flipOn });
-        if (w8 && w8.best) {
-          r._matchByHand = {
-            bestTotal: w8.bestTotal, bestLabel: w8.bestLabel, best: w8.best,
-            L: w8.best.L, R: w8.best.R,
-            flip: w8.best.flip, mL: w8.best.mL, mR: w8.best.mR,
-            total: w8.best.total, results: w8.results,
-          };
-        }
+      };
+      if (c._w8 && c._w8.best) {
+        r._matchByHand = {
+          bestTotal: c._w8.bestTotal, bestLabel: c._w8.bestLabel, best: c._w8.best,
+          L: c._w8.best.L, R: c._w8.best.R,
+          flip: c._w8.best.flip, mL: c._w8.best.mL, mR: c._w8.best.mR,
+          total: c._w8.best.total, results: c._w8.results,
+        };
       }
+      items.push(r);
     }
     const top = items;
     for (const r of top) {
