@@ -309,6 +309,10 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### 2026-05-28 — 오소리웹 (다크) 환경의 토글 active 색 가독성 — ohsorryRender v0.0.376
+- **`복습곡 포함` / `배치추천 ON` 토글의 active 색**이 본체 (밝은 테마) 기준 검정 (#212529) — 오소리웹 다크 배경에서 안 보이는 문제.
+- **`.__users_card #__dp_score_panel .rec-review-toggle.active` override 추가** — 다크 wrapper 한정으로 `#e9ecef` (밝은 색) 적용.
+
 ### 2026-05-28 — 곡명 색 / "ereter 미등록" tooltip 조건 fix — calcOhsorryCore v0.0.380 / ohsorryRender v0.0.375
 - **증상**: 클리어 추천 곡명 색 (lv11 초록 / lv12 하늘) + tooltip "ohSorry 추정 ★ ereter 미등록" 이 ereter 등록 차트에도 적용 (= 모든 lv11/12 차트에 색).
 - **원인**: 직전 commit (v0.0.378 의 game level prefix fix) 에서 `gameLevel` 을 모든 차트에 채우게 했더니, ohsorryRender 의 titleStyle / tooltip 조건이 `r.gameLevel === 11/12` 단일로 판단 → ereter 등록 차트도 색 입혀짐. 원래 `gameLevel` 자체가 "ohSorryRating-only" marker 였는데 그 의미가 prefix 요구로 깨짐.
