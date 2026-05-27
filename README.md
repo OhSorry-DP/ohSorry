@@ -309,6 +309,18 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### 2026-05-27 — 8 배치 추천 (mirror + flip 조합) — calcOhsorryCore v0.0.368 / ohsorryRender v0.0.364
+- 추천 곡 옆에 배치 라벨 표시 (`M/-`, `-/M`, `M/M`, `F`, `F M/-`, `F -/M`, `F M/M`). 정규(N/N) 면 라벨 없음. 8 배치 중 best 의 라벨이 핑크 배지로 노출.
+- **[modules/calcWeakness.js](modules/calcWeakness.js)** — `MIRROR_STEMS` (STAIR_UP/DN + K1~K7), `applyMirror` (UP↔DN swap, DENSITY reverse), 새 18 dim vec 산출 (residual × m1/m2 가중평균), `chartStrengthMatch8Way` + `chartWeaknessMatch8Way` (정규+mirror+flip 조합 8 배치 평가).
+- **[modules/calcOhsorryCore.js](modules/calcOhsorryCore.js) v0.0.368** — `chartStrengthMatchByHand` wrapper 가 새 `chartStrengthMatch8Way` 우선 사용 (옛 gist fallback 유지). `_matchByHand` 에 `bestLabel` / `best.{flip,mL,mR}` 노출. `computeRecHashtags` 의 `#FLIP+N` 제거 (label 로 대체). 약점보완 `buildWeaknessRecs` 도 8 배치 — `flipOn` 토글이 `mirrorOn` 도 같이 ON/OFF (ON=8 배치 best, OFF=정규 N/N 강제).
+- **[modules/ohsorryRender.js](modules/ohsorryRender.js) v0.0.364** — 추천 row 의 FLIP 핑크 배지를 `bestLabel` 출력으로 교체 (정규 시 미표시). 약점보완 토글 라벨 `FLIP` → `배치추천` (8 배치 추천 ON/OFF 의미).
+- **데이터 의존** — patterns-all-slim.json 의 `m1` / `m2` (정규 mirror metric, ohSorryRating Stage A) + user_ohsorry_radars 의 18 신규 컬럼 (ohSorryAdmin migration + ohSorryRating Stage B backfill). 셋이 모두 갱신돼야 작동.
+
+### 2026-05-27 — 약점보완 한 줄 UI 높이 통일 + 레벨 입력 앞 배치 (ohsorryRender v0.0.363)
+- 약점보완 한 줄 컨트롤 (select / number input / FLIP 토글) 모두 `height:22px; box-sizing:border-box` 로 통일 — 브라우저 native 렌더 차이로 시각적 높이 제각각이던 문제 해소.
+- 순서 재배치 — `☆ min ~ max → 모드 → 곡수 → FLIP → 손 → 강도`. 레벨 입력이 가장 앞으로 (사용 빈도 높을 것으로 가정).
+- 공통 스타일 변수화 (`wkCtl` / `wkInput` / `wkSelect` / `wkFlipOn` / `wkLabel`) — 동일 값 반복 인라인 정리.
+
 ### 2026-05-27 — 약점보완 zasa 범위 입력 (calcOhsorryCore v0.0.367 / ohsorryRender v0.0.362)
 - **calcOhsorryCore v0.0.367** ([modules/calcOhsorryCore.js](modules/calcOhsorryCore.js)) — `buildWeaknessRecs` opts 에 `zasaMin` / `zasaMax` 추가. number 일 때만 적용, 기존 `topClearZasa` 상한 + ★ 거리 cutoff 와 **AND 결합** (모두 통과해야 풀 진입). 초기 호출 default `11.6 ~ 12.7` (lv12 zasa 분포 중심).
 - **ohsorryRender v0.0.362** ([modules/ohsorryRender.js](modules/ohsorryRender.js)) — 약점보완 한 줄 UI 에 `☆ [number] ~ [number]` input 두 칸 추가 (step 0.1, value 11.6 / 12.7). `__dp_weakness_setZasaMin` / `__dp_weakness_setZasaMax` setter, `weaknessOpts.zasaMin/Max` 초기값 11.6 / 12.7. input 비우면 NaN → undefined → 해당 방향 필터 해제 (자동 cutoff 만 동작).

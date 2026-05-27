@@ -27,8 +27,42 @@
   if (typeof module === 'object' && module.exports) module.exports = api;  // Node
   if (typeof window !== 'undefined') window.OhsorryWeakness = api;         // 브라우저
 })(function () {
-  // FEATS — 우리 정의 표기 (UPPERCASE + hyphen). patterns-all-slim.json 의 데이터 key 와 일치.
+  // FEATS — mirror-invariant 10 feature. 양손 평균/vecL/vecR 흐름.
   var FEATS = ['NOTES', 'CHORD', 'PEAK', 'CHARGE', 'SCRATCH', 'SOF-LAN', 'PHRASE', 'JACK', 'TRILL', 'RAND'];
+  // MIRROR_FEATS — mirror 적용 시 변하는 9 feature × 손별 분리 (18 dim).
+  //   patterns-all-slim 의 m1/m2 에 저장된 STAIR_UP/STAIR_DN/DENSITY[k1~k7] 와 매칭.
+  //   user vec 의 dim 이름: STAIR_UP_L, STAIR_UP_R, STAIR_DN_L, STAIR_DN_R, K1_L, K1_R, ..., K7_L, K7_R
+  //   각 dim 의 chart pt source — m1 (왼손 _L) 또는 m2 (오른손 _R) 에서 정해진 key/index 의 값.
+  var MIRROR_STEMS = [
+    { stem: 'STAIR_UP', srcKey: 'STAIR_UP', srcIdx: null },
+    { stem: 'STAIR_DN', srcKey: 'STAIR_DN', srcIdx: null },
+    { stem: 'K1', srcKey: 'DENSITY', srcIdx: 0 },
+    { stem: 'K2', srcKey: 'DENSITY', srcIdx: 1 },
+    { stem: 'K3', srcKey: 'DENSITY', srcIdx: 2 },
+    { stem: 'K4', srcKey: 'DENSITY', srcIdx: 3 },
+    { stem: 'K5', srcKey: 'DENSITY', srcIdx: 4 },
+    { stem: 'K6', srcKey: 'DENSITY', srcIdx: 5 },
+    { stem: 'K7', srcKey: 'DENSITY', srcIdx: 6 },
+  ];
+  // m 객체에서 stem 에 대응하는 value 추출.
+  function mSrc(m, stem) {
+    if (!m) return 0;
+    if (stem.srcIdx == null) return m[stem.srcKey] || 0;
+    var arr = m[stem.srcKey];
+    return (arr && typeof arr[stem.srcIdx] === 'number') ? arr[stem.srcIdx] : 0;
+  }
+  // mirror swap — m1/m2 를 mirror 적용한 새 객체 반환. STAIR_UP↔STAIR_DN, DENSITY[k]↔DENSITY[6-k].
+  function applyMirror(m) {
+    if (!m) return null;
+    var d = m.DENSITY || [0, 0, 0, 0, 0, 0, 0];
+    return {
+      STAIR_UP: m.STAIR_DN || 0,
+      STAIR_DN: m.STAIR_UP || 0,
+      DENSITY: [d[6] || 0, d[5] || 0, d[4] || 0, d[3] || 0, d[2] || 0, d[1] || 0, d[0] || 0],
+      // PEAK_CHORD 은 best 평가에 안 쓰지만 정보용 보존 가능 (지금은 swap 안 함, dim 비교 아님).
+      PEAK_CHORD: m.PEAK_CHORD || {},
+    };
+  }
   var DIFF2CHART = {
     NORMAL: 'DP_NOR',
     HYPER: 'DP_HYP',
@@ -169,6 +203,8 @@
       var pt = avgPt(sp.c[cn]);
       var ptP1 = sp.c[cn].p1 || {};
       var ptP2 = sp.c[cn].p2 || {};
+      var ptM1 = sp.c[cn].m1 || null;  // mirror metric — 왼손 (정규 시 1P 자리)
+      var ptM2 = sp.c[cn].m2 || null;
       var rate;
       if (typeof c.scorePercent === 'number') rate = c.scorePercent;
       else if (typeof c.exScore === 'number' && typeof c.noteCount === 'number' && c.noteCount > 0) {
@@ -192,7 +228,7 @@
           entries.push({
             chartId: sid + '|' + cn, title: c.title, diff: c.diff, lv: lv,
             stage: stage, star: star, bucket: bucket,
-            rate: rate, pt: pt, ptP1: ptP1, ptP2: ptP2, lampNum: c.lampNum,
+            rate: rate, pt: pt, ptP1: ptP1, ptP2: ptP2, ptM1: ptM1, ptM2: ptM2, lampNum: c.lampNum,
             referenceRate: refRate,
             residual: refRate != null ? rate - refRate : null,  // self-relative 모드는 뒤에서 계산
           });
@@ -258,6 +294,20 @@
       vec[f] = sumP > 0 ? sumRP / sumP : 0;
       vecL[f] = sumPL > 0 ? sumRPL / sumPL : 0;
       vecR[f] = sumPR > 0 ? sumRPR / sumPR : 0;
+    }
+    // mirror 9 feature × 손별 분리 (18 dim). residual × m1.X (L) 또는 m2.X (R) 가중평균.
+    for (var msi = 0; msi < MIRROR_STEMS.length; msi++) {
+      var ms = MIRROR_STEMS[msi];
+      var sumRPmL = 0, sumPmL = 0, sumRPmR = 0, sumPmR = 0;
+      for (var k3 = 0; k3 < entries.length; k3++) {
+        var e3 = entries[k3];
+        var ml = mSrc(e3.ptM1, ms);
+        var mr = mSrc(e3.ptM2, ms);
+        sumRPmL += e3.residual * ml; sumPmL += ml;
+        sumRPmR += e3.residual * mr; sumPmR += mr;
+      }
+      vec[ms.stem + '_L'] = sumPmL > 0 ? sumRPmL / sumPmL : 0;
+      vec[ms.stem + '_R'] = sumPmR > 0 ? sumRPmR / sumPmR : 0;
     }
     vec.__meta = {
       matched: matched,
@@ -357,6 +407,100 @@
       best: bestFlip ? 'flip' : 'normal',
       bestTotal: bestFlip ? fT : nT,
     };
+  }
+
+  // 차트 8 배치 매치 — chartStrengthMatchByHand 의 mirror 확장.
+  //   8 배치: N/N, M/-, -/M, M/M, F, F M/-, F -/M, F M/M
+  //   mirror-invariant 10 feature (FEATS) dot product + mirror 9 feature (MIRROR_STEMS) × 손별 dot product.
+  //   user vec 의 새 18 dim (STAIR_UP_L/R, ..., K7_L/R) 가 chart 의 m1/m2 (mirror applyMirror 거친) 와 매칭.
+  //
+  // chart: { p1, p2, m1, m2 } (patterns-all-slim 의 차트 row, lv 제외)
+  // userVec: calcUserWeakness 결과. __vecL/__vecR + 새 18 dim 포함.
+  // opts:
+  //   flipOn   true(default) — false 면 4 배치 (정규 mirror 만), flip 안 비교
+  //   mirrorOn true(default) — false 면 mirror 안 비교 (정규 + flip 만)
+  //   handMode 'both'(default) / 'left' / 'right' — best 결정 시 합계 기준
+  // return: { results: [...8 배치...], best: {label, total, flip, mL, mR}, bestLabel, bestTotal }
+  function chartStrengthMatch8Way(chart, userVec, opts) {
+    var feats = (opts && Array.isArray(opts.feats)) ? opts.feats : FEATS;
+    var flipOn = !(opts && opts.flipOn === false);
+    var mirrorOn = !(opts && opts.mirrorOn === false);
+    var handMode = (opts && opts.handMode) || 'both';
+    var vecL = userVec.__vecL || userVec;
+    var vecR = userVec.__vecR || userVec;
+    var p1 = (chart && chart.p1) || {}, p2 = (chart && chart.p2) || {};
+    var m1 = (chart && chart.m1) || null, m2 = (chart && chart.m2) || null;
+
+    // 손별 mirror feature score — user vec 의 _L 또는 _R suffix dim × chart m (mirror 거친 거 가능).
+    function mirrorScore(vec, suffix, m) {
+      if (!m) return 0;
+      var s = 0;
+      for (var i = 0; i < MIRROR_STEMS.length; i++) {
+        var ms = MIRROR_STEMS[i];
+        var v = vec[ms.stem + '_' + suffix] || 0;
+        s += v * mSrc(m, ms);
+      }
+      return s;
+    }
+    // 손별 invariant feature score — FEATS subset × chart pt.
+    function invariantScore(vec, pt) {
+      var s = 0;
+      for (var i = 0; i < feats.length; i++) {
+        var f = feats[i];
+        s += (vec[f] || 0) * (pt[f] || 0);
+      }
+      return s;
+    }
+
+    var results = [];
+    var flipCases = flipOn ? [false, true] : [false];
+    var mirrorCases = mirrorOn ? [false, true] : [false];
+    for (var fi = 0; fi < flipCases.length; fi++) {
+      var flipped = flipCases[fi];
+      var Lpt = flipped ? p2 : p1, Rpt = flipped ? p1 : p2;
+      var Lm = flipped ? m2 : m1, Rm = flipped ? m1 : m2;
+      for (var ml = 0; ml < mirrorCases.length; ml++) {
+        for (var mr = 0; mr < mirrorCases.length; mr++) {
+          var mirL = mirrorCases[ml], mirR = mirrorCases[mr];
+          var LmCur = mirL ? applyMirror(Lm) : Lm;
+          var RmCur = mirR ? applyMirror(Rm) : Rm;
+          var sL = invariantScore(vecL, Lpt) + mirrorScore(userVec, 'L', LmCur);
+          var sR = invariantScore(vecR, Rpt) + mirrorScore(userVec, 'R', RmCur);
+          var label;
+          if (!flipped && !mirL && !mirR) label = '';
+          else {
+            var mirPart = (mirL || mirR) ? ((mirL ? 'M' : '-') + '/' + (mirR ? 'M' : '-')) : '';
+            label = (flipped ? 'F' : '') + (flipped && mirPart ? ' ' : '') + mirPart;
+          }
+          results.push({ flip: flipped, mL: mirL, mR: mirR, label: label, L: sL, R: sR, total: sL + sR });
+        }
+      }
+    }
+    // best 결정 — handMode 별 합계 기준
+    var best = results[0];
+    var bestKey = function (r) {
+      if (handMode === 'left') return r.L;
+      if (handMode === 'right') return r.R;
+      return r.total;
+    };
+    for (var ri = 1; ri < results.length; ri++) {
+      if (bestKey(results[ri]) > bestKey(best)) best = results[ri];
+    }
+    return { results: results, best: best, bestLabel: best.label, bestTotal: best.total };
+  }
+
+  // 약점 8 배치 매치 — chartStrengthMatch8Way 의 부호 반대.
+  //   strength 작은 (= 어느 배치로도 매치 안 되는) 차트가 약점.
+  //   chartStrengthMatch8Way 의 bestTotal (= max 8 배치) 의 부호만 뒤집어 반환.
+  //   약점 정렬에서 bestTotal desc → 진짜 약점 (어느 배치로도 매치 안 됨) 우선.
+  function chartWeaknessMatch8Way(chart, userVec, opts) {
+    var s = chartStrengthMatch8Way(chart, userVec, opts);
+    var out = {
+      results: s.results, best: s.best,
+      bestLabel: s.bestLabel,
+      bestTotal: -s.bestTotal,
+    };
+    return out;
   }
 
   // chart_score × score_rate 의 top N 가중합 → supabase user_ohsorry_radars 컬럼 upsert 용.
@@ -768,6 +912,8 @@
     chartStrengthMatch: chartStrengthMatch,
     chartWeaknessMatch: chartWeaknessMatch,
     chartStrengthMatchByHand: chartStrengthMatchByHand,
+    chartStrengthMatch8Way: chartStrengthMatch8Way,
+    chartWeaknessMatch8Way: chartWeaknessMatch8Way,
     chartWeaknessMatchByHand: chartWeaknessMatchByHand,
     computePatternScoreVec: computePatternScoreVec,
     fetchPatternsMap: fetchPatternsMap,

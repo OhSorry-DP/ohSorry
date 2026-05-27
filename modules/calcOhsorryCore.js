@@ -42,7 +42,7 @@ window.OhsorryCore = {
   let dbData = opts.dbData || null;
   const rivalToken = opts.rivalToken || null;
   const wrapperVersion = opts.wrapperVersion || 'unknown';
-  const CORE_VERSION_SHORT = '0.0.367'.replace(/^0\.0\./, '');  // '346'
+  const CORE_VERSION_SHORT = '0.0.368'.replace(/^0\.0\./, '');  // '346'
   const dbVersionString = `${wrapperVersion}-core${CORE_VERSION_SHORT}`;
   dbData = dbData || null;
   // -------- 0. ereter 데이터 로드 (Gist 에서 자동 fetch) --------
@@ -1160,13 +1160,43 @@ window.OhsorryCore = {
   //   return: { L, R, total, max, flipL, flipR, flipTotal, flipMax, best:'normal'|'flip', bestTotal }
   //   추천 정렬은 bestTotal desc — FLIP 으로 더 잘 맞는 곡도 같이 우선순위 결정.
   //   weaknessLib 신규 함수 / __vecL / __vecR 모두 있어야 동작 (옛 gist 호환 위해 null 반환 fallback).
+  // 새 gist (chartStrengthMatch8Way 있음) 우선 — 8 배치 (N/N, M/-, -/M, M/M, F, F M/-, F -/M, F M/M) 평가.
+  // 옛 gist fallback — 2 배치 (normal / flip) 평가. return 형식 normalize 해서 _matchByHand 통일.
   const chartStrengthMatchByHand = (r) => {
-    if (!userVec || !userVec.__vecL || !userVec.__vecR || !weaknessLib || !weaknessLib.chartStrengthMatchByHand) return null;
+    if (!userVec || !userVec.__vecL || !userVec.__vecR || !weaknessLib) return null;
     const sid = patternsTitleMap[norm(r.title || '')];
     if (!sid) return null;
     const cn = weaknessLib.DIFF2CHART[r.chart];
     if (!cn || !patternsMap[sid] || !patternsMap[sid].c[cn]) return null;
-    return weaknessLib.chartStrengthMatchByHand(patternsMap[sid].c[cn], userVec.__vecL, userVec.__vecR);
+    const chartC = patternsMap[sid].c[cn];
+    if (weaknessLib.chartStrengthMatch8Way) {
+      const w8 = weaknessLib.chartStrengthMatch8Way(chartC, userVec);
+      if (!w8) return null;
+      return {
+        bestTotal: w8.bestTotal,
+        bestLabel: w8.bestLabel,
+        best: w8.best,
+        L: w8.best.L, R: w8.best.R,
+        flip: w8.best.flip, mL: w8.best.mL, mR: w8.best.mR,
+        total: w8.best.total,
+        results: w8.results,
+      };
+    }
+    // 옛 gist fallback
+    if (weaknessLib.chartStrengthMatchByHand) {
+      const w = weaknessLib.chartStrengthMatchByHand(chartC, userVec.__vecL, userVec.__vecR);
+      const isF = w.best === 'flip';
+      return {
+        bestTotal: w.bestTotal,
+        bestLabel: isF ? 'F' : '',
+        best: { flip: isF, mL: false, mR: false, label: isF ? 'F' : '', L: isF ? w.flipL : w.L, R: isF ? w.flipR : w.R, total: w.bestTotal },
+        L: isF ? w.flipL : w.L, R: isF ? w.flipR : w.R,
+        flip: isF, mL: false, mR: false,
+        total: w.bestTotal,
+        results: null,
+      };
+    }
+    return null;
   };
 
   // 차트 패턴 hashtag — 그 곡의 강한 top 3 feature (양손 평균 pt 큰 순) → 한국어 약어.
@@ -1198,14 +1228,9 @@ window.OhsorryCore = {
     if (r._category && CATEGORY_TAG_MAP[r._category]) tags.push('#' + CATEGORY_TAG_MAP[r._category]);
     const m = r._matchByHand;
     if (m) {
-      // FLIP+N — flipTotal > total 일 때 (best === 'flip' 과 같은 조건)
-      if (m.best === 'flip') {
-        const diff = m.flipTotal - m.total;
-        if (diff > 0) tags.push('#FLIP+' + diff.toFixed(0));
-      }
-      // 한 손 위주 — best 배치의 |L−R| / max(L,R) ≥ 30%
-      const l = m.best === 'flip' ? m.flipL : m.L;
-      const rh = m.best === 'flip' ? m.flipR : m.R;
+      // 한 손 위주 — best 배치의 |L−R| / max(L,R) ≥ 30%. 8 배치 wrapper 가 m.L/m.R 에 best 배치 값 노출.
+      const l = m.L || 0;
+      const rh = m.R || 0;
       const mxLR = l > rh ? l : rh;
       if (mxLR > 0 && Math.abs(l - rh) / mxLR >= HAND_BIAS_THRESHOLD) {
         tags.push(l > rh ? '#왼손위주' : '#오른손위주');
@@ -1334,7 +1359,7 @@ window.OhsorryCore = {
     //   2순위: 양손 평균 매치 (chartStrengthMatch) — 옛 fallback
     //   3순위: count desc — userVec 자체 없을 때 (patterns/weaknessLib 로드 실패 등)
     // 동점 시 count desc tiebreak. 차트 객체에 _matchByHand 캐시 (UI 에서 FLIP 권장 표시 등 활용).
-    const canUseByHand = !!(userVec && userVec.__vecL && userVec.__vecR && weaknessLib && weaknessLib.chartStrengthMatchByHand);
+    const canUseByHand = !!(userVec && userVec.__vecL && userVec.__vecR && weaknessLib && (weaknessLib.chartStrengthMatch8Way || weaknessLib.chartStrengthMatchByHand));
     const sample15 = (cat) => {
       const pool = [...cat.hard, ...cat.easy, ...cat.cleanup];
       // 모든 차트에 hashtag 캐시 (canUseByHand 무관). vecL/vecR 없으면 _matchByHand=null, FLIP/한손위주 hashtag 만 빠짐.
@@ -1436,7 +1461,7 @@ window.OhsorryCore = {
   const buildExhRecs = (baseStar, recLevelMode, djMode, opts) => {
     if (baseStar == null) return [];
     // canUseByHand — buildRecs (EC/HC) inner const 와 동일 검사. buildExhRecs 는 별도 scope 이라 여기 재정의.
-    const canUseByHand = !!(userVec && userVec.__vecL && userVec.__vecR && weaknessLib && weaknessLib.chartStrengthMatchByHand);
+    const canUseByHand = !!(userVec && userVec.__vecL && userVec.__vecR && weaknessLib && (weaknessLib.chartStrengthMatch8Way || weaknessLib.chartStrengthMatchByHand));
     const useCutoff = !(opts && opts.useCutoff === false);
     const items = [];
     for (const c of allCharts) {
@@ -1519,7 +1544,8 @@ window.OhsorryCore = {
   //     'all' (default): NOTES/CHORD/PEAK/PHRASE/JACK/TRILL/RAND (7개, SOF-LAN/SCRATCH/CHARGE 제외)
   //     'CHARGE' / 'SCRATCH' / 'SOF-LAN': 단일 feature 전용
   //   기타 opts:
-  //     flipOn   : true (default) / false — false 면 chartWeaknessMatchByHand 가 normal 강제.
+  //     flipOn   : true (default) / false — UI 토글. ON=8 배치 best, OFF=정규(N/N) 강제.
+  //                내부적으로 chartWeaknessMatch8Way 에 flipOn / mirrorOn 동시 전달 (둘 다 같이 ON/OFF).
   //     handMode : 'both' (default) / 'left' / 'right' — 매치 점수 합계의 손 범위.
   //     strength : 1 (default) / 2 / 3 ... — offset 단계. offset = (strength - 1) × topN, slice(offset, offset+topN).
   //     topN     : 5 (default) / 10 / 20
@@ -1539,7 +1565,7 @@ window.OhsorryCore = {
   // recLevelMode 인자는 받지 않음 — 약점보완은 일반 추천 lv 토글 무관 (자체 ★ 상한 + 거리 cutoff).
   const buildWeaknessRecs = (baseStar, opts) => {
     if (!userVec || !userVec.__vecL || !userVec.__vecR) return [];
-    if (!weaknessLib || !weaknessLib.chartWeaknessMatchByHand) return [];
+    if (!weaknessLib || !(weaknessLib.chartWeaknessMatch8Way || weaknessLib.chartWeaknessMatchByHand)) return [];
     if (!patternsMap) return [];
     if (baseStar == null) baseStar = 11;
     const mode = (opts && opts.mode) || 'all';
@@ -1603,8 +1629,15 @@ window.OhsorryCore = {
           else if (mode === 'SCRATCH')    { if (scratchAvg < 6.35) continue; }
           else if (mode === 'SOF-LAN')    { if (soflanAvg <= 0) continue; }
         }
-        // 약점 매치 — flipOn / handMode 옵션 전달 (best/bestTotal 가 그에 맞춰 결정).
-        const w = weaknessLib.chartWeaknessMatchByHand(chartPt, vecL, vecR, { feats, flipOn, handMode });
+        // 약점 매치 — 새 8 배치 우선, 옛 gist 면 옛 2 배치 fallback.
+        //   flipOn 토글: ON → 8 배치 (mirror+flip 모두), OFF → 정규 N/N 강제 (mirrorOn=false, flipOn=false).
+        let w;
+        if (weaknessLib.chartWeaknessMatch8Way) {
+          w = weaknessLib.chartWeaknessMatch8Way(chartPt, userVec,
+            { feats, handMode, flipOn, mirrorOn: flipOn });
+        } else {
+          w = weaknessLib.chartWeaknessMatchByHand(chartPt, vecL, vecR, { feats, flipOn, handMode });
+        }
         if (!w || w.bestTotal <= 0) continue;
         // 차트 메타 (★, est) — ereterMap 우선, 없으면 ratingMap zasa 추정. 둘 다 없으면 gameLevel 평균으로 fallback.
         let e = ereterMap.get(norm(title) + '|' + diff);
@@ -1647,7 +1680,14 @@ window.OhsorryCore = {
           margin: baseStar - dv,
           gameLevel: gameLevel,
           _weaknessScore: w.bestTotal,
-          _matchByHand: w,
+          // _matchByHand 형식 통일 (strength wrapper 와 동일). 8 way 결과의 best 객체에서 L/R/flip/mL/mR 노출.
+          _matchByHand: w.best ? {
+            bestTotal: w.bestTotal, bestLabel: w.bestLabel, best: w.best,
+            L: w.best.L, R: w.best.R,
+            flip: w.best.flip, mL: w.best.mL, mR: w.best.mR,
+            total: w.best.total,
+            results: w.results,
+          } : w,
           _category: 'weakness',
         });
       }

@@ -1,4 +1,4 @@
-// ohsorryRender.js — 오소리 결과 렌더 모듈 (v0.0.361)
+// ohsorryRender.js — 오소리 결과 렌더 모듈 (v0.0.364)
 //
 // calcOhsorryCore.compute() 가 반환한 result 객체를 받아 화면 패널 + 추천곡 + supabase upload.
 // 본체 / 라이벌 wrapper 가 fetch + eval 해서 사용.
@@ -30,7 +30,7 @@
 // ============================================================
 
 window.OhsorryRender = {
-  VERSION: '0.0.362',
+  VERSION: '0.0.363',
 
   // 진행률 UI — core 의 onProgress 콜백에서 호출
   showProgress: function (msg, pct) {
@@ -485,10 +485,11 @@ window.OhsorryRender = {
             const titleStyle = (r._category === 'weakness') ? '' :
               r.gameLevel === 11 ? ' style="color:#9ccc65"' :
               r.gameLevel === 12 ? ' style="color:#87ceeb"' : '';
-            // FLIP 권장 마크 — calcOhsorryCore 가 sample15 정렬 시 _matchByHand 캐시 저장.
-            //   best === 'flip' 이면 FLIP 배치 (양손 바꿈) 가 더 잘 맞는 곡이라 작은 핑크 배지 표시.
-            const flipBadge = r._matchByHand && r._matchByHand.best === 'flip'
-              ? ` <span class="rec-flip" style="color:#ff6b9d;font-size:9px;font-weight:700;margin-left:3px;padding:0 3px;border:1px solid #ff6b9d;border-radius:2px;line-height:1.2">FLIP</span>`
+            // 배치 권장 마크 — calcOhsorryCore 가 8 배치 평가 후 _matchByHand.bestLabel 캐시.
+            //   N/N (정규) 면 라벨 없음 (배지 안 그림). M/-, -/M, M/M, F, F M/-, F -/M, F M/M 일 때 핑크 배지 표시.
+            const bestLabel = r._matchByHand && r._matchByHand.bestLabel;
+            const flipBadge = bestLabel
+              ? ` <span class="rec-flip" style="color:#ff6b9d;font-size:9px;font-weight:700;margin-left:3px;padding:0 3px;border:1px solid #ff6b9d;border-radius:2px;line-height:1.2">${escHtml(bestLabel)}</span>`
               : '';
             // 추천 이유 hashtag — calcOhsorryCore 의 computeRecHashtags 결과 (#강도전 #FLIP+N #왼손위주 #동치 #계단 #밀도 등).
             //   hover title (rec-title-clickable 의 title 에 합침 — 자식 element title 이 부모 title 보다 우선이라 직접 통합) + data-tags (곡명 클릭 토스트 안에서 표시).
@@ -645,9 +646,26 @@ window.OhsorryRender = {
           */
           // 새 한 줄 UI — 모드/곡수/손/강도 dropdown + FLIP 토글 버튼 한 줄. select 의 background 는 #f8f9fa,
           // 글씨는 회색 (#555), FLIP 토글 active 는 .wk-flip-opt active 스타일 (핑크 #ff6b9d) 재사용.
+          // 한 줄 UI — 모든 컨트롤 (select / input / FLIP span) 동일 height(22px) + box-sizing:border-box 로 높이 통일.
+          // 순서: ☆ min ~ max (레벨 입력) → 모드 → 곡수 → FLIP → 손 → 강도.
+          const wkCtl = 'height:22px;box-sizing:border-box;font-size:11px;border:1px solid #ced4da;border-radius:3px;background:#fff;color:#555;padding:0 4px;line-height:20px;vertical-align:middle';
+          const wkInput = `${wkCtl};width:54px`;
+          const wkSelect = `${wkCtl};cursor:pointer`;
+          const wkFlipOn = 'height:22px;box-sizing:border-box;font-size:11px;font-weight:600;border:1px solid #ff6b9d;border-radius:3px;background:#ff6b9d;color:#fff;padding:0 8px;line-height:20px;vertical-align:middle;cursor:pointer';
+          const wkLabel = 'font-size:11px;color:#555;line-height:22px';
           const weaknessControls = stage === 'weakness' ? `
             <div class="rec-mode-toggle" style="margin-top:4px;display:flex;flex-wrap:wrap;align-items:center;gap:4px">
-              <select class="wk-select" style="padding:1px 4px;font-size:11px;border:1px solid #ced4da;border-radius:3px;background:#fff;color:#555;cursor:pointer"
+              <span style="${wkLabel}">☆</span>
+              <input type="number" class="wk-zasa-min" min="5.9" max="12.7" step="0.1" value="11.6" placeholder="5.9"
+                style="${wkInput}"
+                onclick="event.stopPropagation();" onmousedown="event.stopPropagation();" onkeydown="event.stopPropagation();"
+                oninput="event.stopPropagation();window.__dp_weakness_setZasaMin(this.value);">
+              <span style="${wkLabel}">~</span>
+              <input type="number" class="wk-zasa-max" min="5.9" max="12.7" step="0.1" value="12.7" placeholder="12.7"
+                style="${wkInput}"
+                onclick="event.stopPropagation();" onmousedown="event.stopPropagation();" onkeydown="event.stopPropagation();"
+                oninput="event.stopPropagation();window.__dp_weakness_setZasaMax(this.value);">
+              <select class="wk-select" style="${wkSelect}"
                 onclick="event.stopPropagation();" onmousedown="event.stopPropagation();"
                 onchange="event.stopPropagation();window.__dp_weakness_setMode(this.value);">
                 <option value="all" selected>합산</option>
@@ -655,39 +673,29 @@ window.OhsorryRender = {
                 <option value="SCRATCH">스크</option>
                 <option value="SOF-LAN">소프란</option>
               </select>
-              <select class="wk-select" style="padding:1px 4px;font-size:11px;border:1px solid #ced4da;border-radius:3px;background:#fff;color:#555;cursor:pointer"
+              <select class="wk-select" style="${wkSelect}"
                 onclick="event.stopPropagation();" onmousedown="event.stopPropagation();"
                 onchange="event.stopPropagation();window.__dp_weakness_setTopN(Number(this.value));">
                 <option value="5" selected>5곡</option>
                 <option value="10">10곡</option>
                 <option value="20">20곡</option>
               </select>
-              <span class="rec-mode-opt wk-flip-opt active" data-v="on" style="padding:1px 6px;border:1px solid #ff6b9d;border-radius:3px;font-size:11px;font-weight:600;cursor:pointer;background:#ff6b9d;color:#fff"
-                onclick="event.preventDefault();event.stopPropagation();window.__dp_weakness_setFlip(!this.classList.contains('active'));">FLIP</span>
-              <select class="wk-select" style="padding:1px 4px;font-size:11px;border:1px solid #ced4da;border-radius:3px;background:#fff;color:#555;cursor:pointer"
+              <span class="rec-mode-opt wk-flip-opt active" data-v="on" style="${wkFlipOn}"
+                onclick="event.preventDefault();event.stopPropagation();window.__dp_weakness_setFlip(!this.classList.contains('active'));">배치추천</span>
+              <select class="wk-select" style="${wkSelect}"
                 onclick="event.stopPropagation();" onmousedown="event.stopPropagation();"
                 onchange="event.stopPropagation();window.__dp_weakness_setHand(this.value);">
                 <option value="both" selected>양손</option>
                 <option value="left">왼손</option>
                 <option value="right">오른손</option>
               </select>
-              <select class="wk-select" style="padding:1px 4px;font-size:11px;border:1px solid #ced4da;border-radius:3px;background:#fff;color:#555;cursor:pointer"
+              <select class="wk-select" style="${wkSelect}"
                 onclick="event.stopPropagation();" onmousedown="event.stopPropagation();"
                 onchange="event.stopPropagation();window.__dp_weakness_setStrength(Number(this.value));">
                 <option value="1" selected>강도 1</option>
                 <option value="2">강도 2</option>
                 <option value="3">강도 3</option>
               </select>
-              <span style="font-size:11px;color:#555">☆</span>
-              <input type="number" class="wk-zasa-min" min="5.9" max="12.7" step="0.1" value="11.6" placeholder="5.9"
-                style="width:48px;padding:1px 4px;font-size:11px;border:1px solid #ced4da;border-radius:3px;background:#fff;color:#555"
-                onclick="event.stopPropagation();" onmousedown="event.stopPropagation();" onkeydown="event.stopPropagation();"
-                oninput="event.stopPropagation();window.__dp_weakness_setZasaMin(this.value);">
-              <span style="font-size:11px;color:#555">~</span>
-              <input type="number" class="wk-zasa-max" min="5.9" max="12.7" step="0.1" value="12.7" placeholder="12.7"
-                style="width:48px;padding:1px 4px;font-size:11px;border:1px solid #ced4da;border-radius:3px;background:#fff;color:#555"
-                onclick="event.stopPropagation();" onmousedown="event.stopPropagation();" onkeydown="event.stopPropagation();"
-                oninput="event.stopPropagation();window.__dp_weakness_setZasaMax(this.value);">
             </div>
           ` : '';
           const summaryLabel = stage === 'weakness'
