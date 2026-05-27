@@ -309,6 +309,11 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### 2026-05-28 — 연습곡 목표 점수 DJ LEVEL 보장 — calcOhsorryCore v0.0.377 / ohsorryRender v0.0.373
+- **`nextDjTarget()` 신규** — 현재 EX score 의 다음 DJ LEVEL (E/D/C/B/A/AA/AAA) 도달 점수 산출. `targetRate / targetExScore` 가 적어도 다음 DJ 랭크는 보장하도록 강화.
+- **`_targetExScore` / `_targetDjLevel` / `_currentExScore`** 노출 — render 가 "현재 EX → 목표 EX (djLevel)" 형식 표시 가능.
+- **[ohsorryRender] tags row goal 표시** — `data-goal` attribute + display:flex 로 우측 정렬. 곡명 클릭 시 hashtag + 목표 동시 노출 (좌: 태그 / 우: `현재 → 목표 (DJLV)`).
+
 ### 2026-05-28 — 연습곡 목표 점수 + 쌍미러 표기 — calcOhsorryCore v0.0.376
 - **`_targetRate` / `_targetExScore` 신규** — 연습곡 row 에 강도별 목표 EX rate / EX 점수 산출.
   - 강도별 step: 가볍게 +2 / 적당히 +3 / 빡세게 +4 (현재 rate 대비)

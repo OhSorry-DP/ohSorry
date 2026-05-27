@@ -1,4 +1,4 @@
-// ohsorryRender.js — 오소리 결과 렌더 모듈 (v0.0.372)
+// ohsorryRender.js — 오소리 결과 렌더 모듈 (v0.0.373)
 //
 // calcOhsorryCore.compute() 가 반환한 result 객체를 받아 화면 패널 + 추천곡 + supabase upload.
 // 본체 / 라이벌 wrapper 가 fetch + eval 해서 사용.
@@ -495,12 +495,16 @@ window.OhsorryRender = {
             //   hover title (rec-title-clickable 의 title 에 합침 — 자식 element title 이 부모 title 보다 우선이라 직접 통합) + data-tags (곡명 클릭 토스트 안에서 표시).
             const hashtags = Array.isArray(r._hashtags) ? r._hashtags : [];
             const tagsJoined = hashtags.join(' ');
+            const goalText = (r._category === 'weakness' && typeof r._currentExScore === 'number' && typeof r._targetExScore === 'number')
+              ? `${r._currentExScore} → ${r._targetExScore}${r._targetDjLevel ? ' (' + r._targetDjLevel + ')' : ''}`
+              : '';
             const tooltipParts = [];
             if (tagsJoined) tooltipParts.push(tagsJoined);
             if (r.gameLevel === 11) tooltipParts.push('ohSorry 추정 ★ (게임 LEVEL 11, ereter 미등록)');
             else if (r.gameLevel === 12) tooltipParts.push('ohSorry 추정 ★ (게임 LEVEL 12, ereter 미등록)');
             const titleAttr = tooltipParts.length > 0 ? ` title="${escHtml(tooltipParts.join('\n\n'))}"` : '';
             const dataTagsAttr = tagsJoined ? ` data-tags="${escHtml(tagsJoined)}"` : '';
+            const dataGoalAttr = goalText ? ` data-goal="${escHtml(goalText)}"` : '';
             // 연습곡 (_category='weakness') 은 클리어 도전 무관 → rec-diff (★ 실력값) 안 표시. ☆ (zasa) 만 유지.
             const diffSpan = r._category === 'weakness'
               ? ''
@@ -511,7 +515,7 @@ window.OhsorryRender = {
               ? `<span class="rec-diff" style="color:${color}" title="${r._targetExScore ? '목표 EX SCORE ' + r._targetExScore : '목표 EX rate'}">목표${r._targetRate.toFixed(1)}%</span>`
               : diffSpan;
             return `
-              <div class="rec-item"${dataTagsAttr}>
+              <div class="rec-item"${dataTagsAttr}${dataGoalAttr}>
                 <span class="rec-chart" style="color:${cColor}" title="${r.chart || ''}">${chartDisplay}</span>
                 <div class="rec-title rec-title-clickable" data-t="${escHtml(r.title)}" data-c="${escHtml(r.chart || '')}"${titleAttr}><span${titleStyle}>${escHtml(r.title)}</span><span style="color:#aaa;font-weight:400;margin-left:4px;font-size:10.5px">${r.currentLamp || ''}</span>${flipBadge}</div>
                 ${goalSpan}
@@ -1097,12 +1101,15 @@ window.OhsorryRender = {
         document.querySelectorAll('.__dp_rec_tags_row').forEach((r) => r.remove());
         if (sameOpen) return;
         const tags = (recItemEl.dataset && recItemEl.dataset.tags) || '';
-        if (!tags) return;
+        const goal = (recItemEl.dataset && recItemEl.dataset.goal) || '';
+        if (!tags && !goal) return;
         const tagsRow = document.createElement('div');
         tagsRow.className = '__dp_rec_tags_row';
         // !important — 호스트 페이지의 외부 CSS 가 text-decoration / color override 하는 것 방지.
-        tagsRow.setAttribute('style', 'padding:3px 8px!important;background:#2a2a2a!important;color:#ff6b9d!important;font-size:10.5px!important;font-weight:600!important;line-height:1.3!important;text-decoration:none!important');
-        tagsRow.textContent = tags;
+        tagsRow.setAttribute('style', 'display:flex!important;align-items:center!important;gap:8px!important;padding:3px 8px!important;background:#2a2a2a!important;color:#ff6b9d!important;font-size:10.5px!important;font-weight:600!important;line-height:1.3!important;text-decoration:none!important');
+        tagsRow.innerHTML =
+          `<span style="min-width:0!important;overflow:hidden!important;text-overflow:ellipsis!important;white-space:nowrap!important">${escHtml(tags)}</span>` +
+          (goal ? `<span style="margin-left:auto!important;text-align:right!important;color:#fff!important;font-variant-numeric:tabular-nums!important;white-space:nowrap!important">${escHtml(goal)}</span>` : '');
         recItemEl.insertAdjacentElement('afterend', tagsRow);
       });
     }

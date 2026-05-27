@@ -42,7 +42,7 @@ window.OhsorryCore = {
   let dbData = opts.dbData || null;
   const rivalToken = opts.rivalToken || null;
   const wrapperVersion = opts.wrapperVersion || 'unknown';
-  const CORE_VERSION_SHORT = '0.0.376'.replace(/^0\.0\./, '');  // '346'
+  const CORE_VERSION_SHORT = '0.0.377'.replace(/^0\.0\./, '');  // '346'
   const dbVersionString = `${wrapperVersion}-core${CORE_VERSION_SHORT}`;
   dbData = dbData || null;
   // -------- 0. ereter 데이터 로드 (Gist 에서 자동 fetch) --------
@@ -1908,15 +1908,41 @@ window.OhsorryCore = {
 
     // 5단계 — items 변환 + _matchByHand (8 way best 라벨) + tags/hashtags
     const items = [];
+    const nextDjTarget = (exScore, noteCount) => {
+      if (typeof exScore !== 'number' || typeof noteCount !== 'number' || noteCount <= 0) return null;
+      const maxEx = noteCount * 2;
+      const rankSteps = [
+        { lv: 'E',   rate: 2 / 9 },
+        { lv: 'D',   rate: 3 / 9 },
+        { lv: 'C',   rate: 4 / 9 },
+        { lv: 'B',   rate: 5 / 9 },
+        { lv: 'A',   rate: 6 / 9 },
+        { lv: 'AA',  rate: 7 / 9 },
+        { lv: 'AAA', rate: 8 / 9 },
+      ];
+      for (const s of rankSteps) {
+        const score = Math.ceil(maxEx * s.rate);
+        if (exScore < score) return { djLevel: s.lv, score, rate: (score / maxEx) * 100 };
+      }
+      return null;
+    };
     for (const c of slice) {
+      const currentExScore = c.uc && typeof c.uc.exScore === 'number' ? c.uc.exScore : null;
+      const noteCount = c.uc && typeof c.uc.noteCount === 'number' ? c.uc.noteCount : null;
+      const djTarget = nextDjTarget(currentExScore, noteCount);
       const targetRate = (() => {
         if (typeof c.rate === 'number' && typeof c.binMean === 'number') {
           const step = strength >= 3 ? 4 : strength === 2 ? 3 : 2;
-          return clamp(Math.max(c.rate + step, c.binMean - 1.5), 0, 98);
+          return clamp(Math.max(c.rate + step, c.binMean - 1.5, djTarget ? djTarget.rate : 0), 0, 98);
         }
-        if (typeof c.rate === 'number') return clamp(c.rate + (strength >= 3 ? 4 : strength === 2 ? 3 : 2), 0, 98);
+        if (typeof c.rate === 'number') return clamp(Math.max(c.rate + (strength >= 3 ? 4 : strength === 2 ? 3 : 2), djTarget ? djTarget.rate : 0), 0, 98);
         if (typeof c.binMean === 'number') return clamp(c.binMean, 0, 98);
         return null;
+      })();
+      const targetExScore = (() => {
+        if (targetRate == null || typeof noteCount !== 'number' || noteCount <= 0) return djTarget ? djTarget.score : null;
+        const rateScore = Math.round(noteCount * 2 * targetRate / 100);
+        return djTarget ? Math.max(rateScore, djTarget.score) : rateScore;
       })();
       const r = {
         title: c.title, chart: c.diff, level: c.zasa,
@@ -1936,9 +1962,9 @@ window.OhsorryCore = {
         _practiceScore: c.practiceScore,
         _practiceType: c.practiceType,
         _targetRate: targetRate,
-        _targetExScore: (targetRate != null && c.uc && typeof c.uc.noteCount === 'number' && c.uc.noteCount > 0)
-          ? Math.round(c.uc.noteCount * 2 * targetRate / 100)
-          : null,
+        _targetExScore: targetExScore,
+        _targetDjLevel: djTarget ? djTarget.djLevel : null,
+        _currentExScore: currentExScore,
         _layoutGain: c.layoutGain,
         _layoutBaseTotal: c.layoutBaseTotal,
         _category: 'weakness',
