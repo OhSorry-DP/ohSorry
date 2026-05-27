@@ -309,6 +309,10 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### 2026-05-28 — 복습곡 토글 + 배치추천 토글 좌측에 붙도록 정렬 — ohsorryRender v0.0.377
+- 두 토글 모두 `rec-review-toggle` 의 `margin-right: auto` 가 적용돼 첫 토글이 두 번째를 오른쪽 끝으로 밀어내던 문제.
+- `.rec-layout-toggle` 만 `margin-right: 0; margin-left: 12px` 로 override → 복습곡 옆에 바로 붙음.
+
 ### 2026-05-28 — 오소리웹 (다크) 환경의 토글 active 색 가독성 — ohsorryRender v0.0.376
 - **`복습곡 포함` / `배치추천 ON` 토글의 active 색**이 본체 (밝은 테마) 기준 검정 (#212529) — 오소리웹 다크 배경에서 안 보이는 문제.
 - **`.__users_card #__dp_score_panel .rec-review-toggle.active` override 추가** — 다크 wrapper 한정으로 `#e9ecef` (밝은 색) 적용.

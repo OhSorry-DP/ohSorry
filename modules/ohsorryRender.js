@@ -1,4 +1,4 @@
-// ohsorryRender.js — 오소리 결과 렌더 모듈 (v0.0.376)
+// ohsorryRender.js — 오소리 결과 렌더 모듈 (v0.0.377)
 //
 // calcOhsorryCore.compute() 가 반환한 result 객체를 받아 화면 패널 + 추천곡 + supabase upload.
 // 본체 / 라이벌 wrapper 가 fetch + eval 해서 사용.
@@ -297,6 +297,8 @@ window.OhsorryRender = {
         #__dp_score_panel .rec-mode-opt.active { color: #212529; font-weight: 700; cursor: default; }
         #__dp_score_panel .rec-mode-sep { color: #ccc; margin: 0 8px; }
         #__dp_score_panel .rec-review-toggle { margin-right: auto; display: flex; align-items: center; gap: 4px; cursor: pointer; -webkit-user-select: none; user-select: none; }
+        /* 배치추천 토글 — 복습곡 토글 바로 옆에 붙도록 margin-right: auto 제거 + 좌측 간격만 */
+        #__dp_score_panel .rec-review-toggle.rec-layout-toggle { margin-right: 0; margin-left: 12px; }
         #__dp_score_panel .rec-review-toggle .rrt-check { font-size: 13px; line-height: 1; color: #ccc; transition: color 0.15s; }
         #__dp_score_panel .rec-review-toggle .rrt-label { font-size: 12px; color: #888; transition: color 0.15s; }
         #__dp_score_panel .rec-review-toggle:hover .rrt-label { color: #555; }
