@@ -42,7 +42,7 @@ window.OhsorryCore = {
   let dbData = opts.dbData || null;
   const rivalToken = opts.rivalToken || null;
   const wrapperVersion = opts.wrapperVersion || 'unknown';
-  const CORE_VERSION_SHORT = '0.0.378'.replace(/^0\.0\./, '');  // '346'
+  const CORE_VERSION_SHORT = '0.0.379'.replace(/^0\.0\./, '');  // '346'
   const dbVersionString = `${wrapperVersion}-core${CORE_VERSION_SHORT}`;
   dbData = dbData || null;
   // -------- 0. ereter 데이터 로드 (Gist 에서 자동 fetch) --------
@@ -1165,6 +1165,10 @@ window.OhsorryCore = {
   //   return: { L, R, total, max, flipL, flipR, flipTotal, flipMax, best:'normal'|'flip', bestTotal }
   //   추천 정렬은 bestTotal desc — FLIP 으로 더 잘 맞는 곡도 같이 우선순위 결정.
   //   weaknessLib 신규 함수 / __vecL / __vecR 모두 있어야 동작 (옛 gist 호환 위해 null 반환 fallback).
+  // 클리어 추천의 배치추천 토글 상태 (closure 변수, __dp_rerollRecs / __dp_setRecLayoutMode 가 갱신).
+  //   'on'  → 8 배치 best 평가 (mirror + flip 비교, default).
+  //   'off' → 정규 N/N 강제 (chartStrengthMatch8Way 에 flipOn=false / mirrorOn=false 전달).
+  let layoutModeForClear = 'on';
   // 새 gist (chartStrengthMatch8Way 있음) 우선 — 8 배치 (N/N, M/-, -/M, M/M, F, F M/-, F -/M, F M/M) 평가.
   // 옛 gist fallback — 2 배치 (normal / flip) 평가. return 형식 normalize 해서 _matchByHand 통일.
   const chartStrengthMatchByHand = (r) => {
@@ -1175,7 +1179,8 @@ window.OhsorryCore = {
     if (!cn || !patternsMap[sid] || !patternsMap[sid].c[cn]) return null;
     const chartC = patternsMap[sid].c[cn];
     if (weaknessLib.chartStrengthMatch8Way) {
-      const w8 = weaknessLib.chartStrengthMatch8Way(chartC, userVec);
+      const w8Opts = layoutModeForClear === 'off' ? { flipOn: false, mirrorOn: false } : undefined;
+      const w8 = weaknessLib.chartStrengthMatch8Way(chartC, userVec, w8Opts);
       if (!w8) return null;
       return {
         bestTotal: w8.bestTotal,
@@ -2018,10 +2023,12 @@ window.OhsorryCore = {
 
   // 다시 뽑기 버튼에서 사용할 수 있도록 노출
   // (panel 생성 후 클릭으로 재호출 → DOM 부분 업데이트)
-  window.__dp_rerollRecs = (stage, baseStarOverride, recLevelMode, djMode) => {
+  //   layoutMode — 'on'(default) 8 배치 best / 'off' 정규 N/N 강제. closure 의 layoutModeForClear 에 set 해서 chartStrengthMatchByHand 가 참조.
+  window.__dp_rerollRecs = (stage, baseStarOverride, recLevelMode, djMode, layoutMode) => {
     const base = typeof baseStarOverride === 'number' ? baseStarOverride : recBaseStar;
     const lvMode = recLevelMode === 'lv12' ? 'lv12' : recLevelMode === 'low' ? 'low' : REC_LEVEL_MODE_DEFAULT;
     const dMode = djMode === 'on' ? 'on' : 'off';
+    layoutModeForClear = layoutMode === 'off' ? 'off' : 'on';
     if ((stage === 'hc' || stage === 'exh') && base != null && base < 0.5) return [];
     if (stage === 'exh') return base != null ? buildRecs(6, 'exh', base, lvMode, dMode) : [];
     if (stage === 'hc')  return base != null ? buildRecs(5, 'hc', base, lvMode, dMode) : [];

@@ -309,6 +309,13 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### 2026-05-28 — 클리어 추천에도 배치추천 토글 추가 — calcOhsorryCore v0.0.379 / ohsorryRender v0.0.374
+- **클리어 추천 (EC/HC/EXH) 의 복습곡 토글 옆에 "배치추천 ON/OFF" 토글 신규** — 같은 `rec-review-toggle` 스타일.
+  - ON (기본) → 8 배치 (mirror + flip) 평가 → best 배치 선택 + misfinger penalty 자동 반영.
+  - OFF → 정규 N/N 강제 (chartStrengthMatch8Way 에 `flipOn: false, mirrorOn: false` 전달).
+- **[calcOhsorryCore]** `layoutModeForClear` closure 변수 + `chartStrengthMatchByHand` 가 OFF 시 정규 강제 opts 전달. `__dp_rerollRecs(stage, base, lvMode, djMode, layoutMode)` 시그니처 확장.
+- **[ohsorryRender]** `recLayoutMode` 상태 + `window.__dp_setRecLayoutMode` setter. `rerenderRecStage` 호출 시 layoutMode 전달.
+
 ### 2026-05-28 — 클리어 추천 row 의 game level prefix 누락 fix — calcOhsorryCore v0.0.378
 - **증상**: 클리어 추천 (EC/HC/EXH) 의 chart letter 앞 game level prefix 가 ereter 등록 차트 (대부분 lv12 ANO 등) 에서 누락 ("12A" → "A"). 미등록 차트 (ratingMap 만 있는 lv11/12 신곡) 는 정상 "11A" 표시.
 - **원인**: `buildPools` 의 `let gameLevel = null` 초기값이 ereter 분기에서 override 되지 않음 (ratingMap fallback 분기에서만 `r.gameLevel` 로 채움).

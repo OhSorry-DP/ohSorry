@@ -1,4 +1,4 @@
-// ohsorryRender.js — 오소리 결과 렌더 모듈 (v0.0.373)
+// ohsorryRender.js — 오소리 결과 렌더 모듈 (v0.0.374)
 //
 // calcOhsorryCore.compute() 가 반환한 result 객체를 받아 화면 패널 + 추천곡 + supabase upload.
 // 본체 / 라이벌 wrapper 가 fetch + eval 해서 사용.
@@ -527,8 +527,9 @@ window.OhsorryRender = {
         window.__dp_renderRecItems = renderRecItems;
         let recLevelMode = result.recLevelModeDefault === 'lv12' ? 'lv12' : result.recLevelModeDefault === 'low' ? 'low' : 'all';
         let recDjMode = result.recDjModeDefault === 'on' ? 'on' : 'off';
+        let recLayoutMode = result.recLayoutModeDefault === 'off' ? 'off' : 'on';
         const rerenderRecStage = (stage, color) => {
-          const newRecs = window.__dp_rerollRecs(stage, recBaseStar, recLevelMode, recDjMode);
+          const newRecs = window.__dp_rerollRecs(stage, recBaseStar, recLevelMode, recDjMode, recLayoutMode);
           const container = document.getElementById(`__dp_recs_${stage}`);
           if (container) container.innerHTML = window.__dp_renderRecItems(newRecs, color);
           const counter = document.getElementById(`__dp_recs_count_${stage}`);
@@ -772,9 +773,19 @@ window.OhsorryRender = {
             <span class="rrt-label">복습곡 ${recDjMode === 'on' ? '포함' : '제외'}</span>
           </span>
         `;
+        // 배치추천 — 클리어 추천에도 8배치 평가 토글 (ON=mirror/flip 비교, OFF=정규 N/N 강제). 복습곡 토글과 같은 스타일.
+        const recLayoutToggle = `
+          <span class="rec-review-toggle rec-layout-toggle${recLayoutMode === 'on' ? ' active' : ''}"
+            onclick="window.__dp_setRecLayoutMode && window.__dp_setRecLayoutMode()"
+            title="배치추천 — ON: 8배치 (mirror/flip) 평가, OFF: 정규 N/N 강제">
+            <span class="rrt-check">${recLayoutMode === 'on' ? '✔︎' : '✓︎'}</span>
+            <span class="rrt-label">배치추천 ${recLayoutMode === 'on' ? 'ON' : 'OFF'}</span>
+          </span>
+        `;
         const recLevelToggle = `
           <div class="rec-mode-toggle" style="margin-top:4px">
             ${recDjToggle}
+            ${recLayoutToggle}
             <span class="rec-mode-label">클리어 범위 :</span>
             <div class="rec-mode-options">
               <span class="rec-level-mode-opt${recLevelMode === 'lv12' ? ' active' : ''}" data-mode="lv12"
@@ -814,13 +825,27 @@ window.OhsorryRender = {
           if (mode === 'on' || mode === 'off') recDjMode = mode;
           else recDjMode = recDjMode === 'on' ? 'off' : 'on';
           rerenderAllRecs();
-          const el = document.querySelector('.rec-review-toggle');
+          // 복습곡 토글 — rec-review-toggle (단, rec-layout-toggle 클래스 같이 있으면 layout 토글이라 제외)
+          const el = document.querySelector('.rec-review-toggle:not(.rec-layout-toggle)');
           if (el) {
             el.classList.toggle('active', recDjMode === 'on');
             const chk = el.querySelector('.rrt-check');
             if (chk) chk.textContent = recDjMode === 'on' ? '✔︎' : '✓︎';
             const lbl = el.querySelector('.rrt-label');
             if (lbl) lbl.textContent = '복습곡 ' + (recDjMode === 'on' ? '포함' : '제외');
+          }
+        };
+        window.__dp_setRecLayoutMode = (mode) => {
+          if (mode === 'on' || mode === 'off') recLayoutMode = mode;
+          else recLayoutMode = recLayoutMode === 'on' ? 'off' : 'on';
+          rerenderAllRecs();
+          const el = document.querySelector('.rec-layout-toggle');
+          if (el) {
+            el.classList.toggle('active', recLayoutMode === 'on');
+            const chk = el.querySelector('.rrt-check');
+            if (chk) chk.textContent = recLayoutMode === 'on' ? '✔︎' : '✓︎';
+            const lbl = el.querySelector('.rrt-label');
+            if (lbl) lbl.textContent = '배치추천 ' + (recLayoutMode === 'on' ? 'ON' : 'OFF');
           }
         };
 
