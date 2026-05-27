@@ -1375,6 +1375,7 @@ window.OhsorryCore = {
   const buildRecs = (threshold, getDiffField, baseStar, recLevelMode, djMode) => {
     const { underLamp, reached } = buildPools(threshold, getDiffField, baseStar, recLevelMode, djMode);
     const countField = getDiffField + '_n';
+    const keyOf = r => (r.title || '') + '|' + r.chart;
 
     // 카테고리 내 모든 분류 합쳐서 sample 15 — bestTotal desc top 15 (2026-05-27~).
     //   풀 자체가 stage 별 effectiveBase 기준으로 ★ 범위 좁혀짐 → 추가 ★ 거리 감쇠 불필요.
