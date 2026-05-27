@@ -309,6 +309,11 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### 2026-05-27 — 정리곡 50/50 다양성 보정 — calcOhsorryCore v0.0.371
+- sample 15 안의 cleanup 분류 곡들 중 bestTotal 낮은 절반을 잘라내고, **cleanup 풀 전체의 `dv` asc top** (= 그 stage 추정 ★ 낮은 = 가장 쉬운 곡) 으로 교체.
+- hard / easy 카테고리는 현행 그대로 bestTotal desc.
+- 의도: 정리곡 추천이 사용자 강점 매치 곡만 우선하지 않고 "치기 쉬운 곡" 도 절반 보장 — 한쪽만 우선되는 편향 완화.
+
 ### 2026-05-27 — 클리어 추천 풀 / 정렬 재정의 — calcOhsorryCore v0.0.370
 - **풀 분류 (`buildPools`)** — stage 별 `effectiveBase` + `d = max(0, topClearStar - effectiveBase)` 기반.
   - effectiveBase: EC=`baseStar - 0.5` / HC=`baseStar` / EXH=`baseStar + 2`

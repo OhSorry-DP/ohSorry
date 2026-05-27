@@ -42,7 +42,7 @@ window.OhsorryCore = {
   let dbData = opts.dbData || null;
   const rivalToken = opts.rivalToken || null;
   const wrapperVersion = opts.wrapperVersion || 'unknown';
-  const CORE_VERSION_SHORT = '0.0.370'.replace(/^0\.0\./, '');  // '346'
+  const CORE_VERSION_SHORT = '0.0.371'.replace(/^0\.0\./, '');  // '346'
   const dbVersionString = `${wrapperVersion}-core${CORE_VERSION_SHORT}`;
   dbData = dbData || null;
   // -------- 0. ereter 데이터 로드 (Gist 에서 자동 fetch) --------
@@ -1383,6 +1383,9 @@ window.OhsorryCore = {
     //   1순위: 8 way / by-hand 매치 — vecL/vecR + 신규 gist
     //   2순위: 양손 평균 매치 — 옛 fallback
     //   3순위: count desc — userVec 자체 없을 때
+    //
+    // cleanup 50/50 보정 — sample15 안의 cleanup 분류 곡들 중 절반은 bestTotal 낮은 쪽 잘라내고
+    //   cleanup 풀 전체의 dv asc (= 그 stage 쉬운 곡 우선) 곡으로 교체. 한쪽만 우선하지 않고 다양성 확보.
     const canUseByHand = !!(userVec && userVec.__vecL && userVec.__vecR && weaknessLib && (weaknessLib.chartStrengthMatch8Way || weaknessLib.chartStrengthMatchByHand));
     const sample15 = (cat) => {
       const pool = [...cat.hard, ...cat.easy, ...cat.cleanup];
@@ -1391,23 +1394,40 @@ window.OhsorryCore = {
         if (r._tags === undefined) r._tags = computeChartTags(r);
         if (r._hashtags === undefined) r._hashtags = computeRecHashtags(r);
       }
+      const sortByBest = (a, b) => {
+        const sa = a._matchByHand ? a._matchByHand.bestTotal : 0;
+        const sb = b._matchByHand ? b._matchByHand.bestTotal : 0;
+        return (sb - sa) || ((b[countField] || 0) - (a[countField] || 0));
+      };
+      const sortByMatch = (a, b) => {
+        const sa = chartStrengthMatch(a);
+        const sb = chartStrengthMatch(b);
+        return (sb - sa) || ((b[countField] || 0) - (a[countField] || 0));
+      };
       let sorted;
-      if (canUseByHand) {
-        sorted = [...pool].sort((a, b) => {
-          const sa = a._matchByHand ? a._matchByHand.bestTotal : 0;
-          const sb = b._matchByHand ? b._matchByHand.bestTotal : 0;
-          return (sb - sa) || ((b[countField] || 0) - (a[countField] || 0));
-        });
-      } else if (userVec) {
-        sorted = [...pool].sort((a, b) => {
-          const sa = chartStrengthMatch(a);
-          const sb = chartStrengthMatch(b);
-          return (sb - sa) || ((b[countField] || 0) - (a[countField] || 0));
-        });
-      } else {
-        sorted = [...pool].sort((a, b) => (b[countField] || 0) - (a[countField] || 0));
+      if (canUseByHand) sorted = [...pool].sort(sortByBest);
+      else if (userVec)  sorted = [...pool].sort(sortByMatch);
+      else                sorted = [...pool].sort((a, b) => (b[countField] || 0) - (a[countField] || 0));
+
+      // 1차 top 15
+      let top15 = sorted.slice(0, 15);
+      // cleanup 분류 곡 50/50 교체 — sample 안의 cleanup 중 bestTotal 낮은 절반을 cleanup 풀의 dv asc top 으로 교체.
+      const cleanupKeys = new Set(cat.cleanup.map(keyOf));
+      const cleanupInTop = top15.filter((r) => cleanupKeys.has(keyOf(r)));
+      const halfCount = Math.floor(cleanupInTop.length / 2);
+      if (halfCount > 0) {
+        const cleanupSorted = (canUseByHand ? [...cleanupInTop].sort(sortByBest)
+                              : userVec ? [...cleanupInTop].sort(sortByMatch)
+                              : [...cleanupInTop]);
+        const toRemove = new Set(cleanupSorted.slice(-halfCount).map(keyOf));
+        top15 = top15.filter((r) => !toRemove.has(keyOf(r)));
+        const usedKeys = new Set(top15.map(keyOf));
+        const dvAscPool = [...cat.cleanup]
+          .filter((r) => !usedKeys.has(keyOf(r)))
+          .sort((a, b) => (a.diffValue || 0) - (b.diffValue || 0));
+        top15.push(...dvAscPool.slice(0, halfCount));
       }
-      return sorted.slice(0, 15);
+      return top15;
     };
     const underSample = sample15(underLamp);
     const reachedSample = sample15(reached);
