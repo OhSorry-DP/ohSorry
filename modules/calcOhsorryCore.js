@@ -34,7 +34,7 @@
 //   wrapperVersion: wrapper 자기 버전 (예: 'v3.3.6') — supabase version 컬럼은
 //                   `${wrapperVersion}-core${CORE_VERSION_SHORT}` 조합 (예: 'v3.3.6-core335')
 window.OhsorryCore = {
-  VERSION: '0.0.365',
+  VERSION: '0.0.366',
   compute: async (opts) => {
   opts = opts || {};
   const mode = opts.mode || 'own';
@@ -42,7 +42,7 @@ window.OhsorryCore = {
   let dbData = opts.dbData || null;
   const rivalToken = opts.rivalToken || null;
   const wrapperVersion = opts.wrapperVersion || 'unknown';
-  const CORE_VERSION_SHORT = '0.0.365'.replace(/^0\.0\./, '');  // '346'
+  const CORE_VERSION_SHORT = '0.0.366'.replace(/^0\.0\./, '');  // '346'
   const dbVersionString = `${wrapperVersion}-core${CORE_VERSION_SHORT}`;
   dbData = dbData || null;
   // -------- 0. ereter 데이터 로드 (Gist 에서 자동 fetch) --------
@@ -1322,10 +1322,12 @@ window.OhsorryCore = {
     return { underLamp, reached };
   };
 
-  const buildRecs = (threshold, getDiffField, baseStar, recLevelMode, djMode) => {
+  const buildRecs = (threshold, getDiffField, baseStar, recLevelMode, djMode, opts) => {
     const { underLamp, reached } = buildPools(threshold, getDiffField, baseStar, recLevelMode, djMode);
     const countField = getDiffField + '_n';
     const keyOf = r => (r.title || '') + '|' + r.chart;
+    // ★ 거리 cutoff 옵션 — EC fallback (baseStar=0.3) 처럼 baseStar 가 비현실적으로 작은 경우 false 권장.
+    const useCutoff = !(opts && opts.useCutoff === false);
 
     // 카테고리 내 모든 분류 합쳐서 sample 15 (top 10 + random 5).
     //   1순위: 손 분리 + FLIP 매치 (chartStrengthMatchByHand 의 bestTotal desc) — vecL/vecR + 신규 gist 있을 때
@@ -1344,7 +1346,9 @@ window.OhsorryCore = {
         if (r._starWeight === undefined) r._starWeight = starDistanceWeight(getEffectiveStar(r.level, r.gameLevel), baseStar);
       }
       // ★ 거리 weight 0 곡은 정렬 제외 (baseStar 와 너무 멀어 추천 가치 없음).
-      const filtered = pool.filter(r => r._starWeight > 0);
+      //   단 useCutoff=false 또는 cutoff 후 풀 비면 pool 그대로 사용 (안전망 — 추천이 통째로 비는 것 방지).
+      let filtered = useCutoff ? pool.filter(r => r._starWeight > 0) : pool;
+      if (filtered.length === 0) filtered = pool;
       let sorted;
       if (canUseByHand) {
         sorted = [...filtered].sort((a, b) => {
@@ -1429,10 +1433,11 @@ window.OhsorryCore = {
   //   강/약/정리 카테고리 분류 X (단일 풀).
   //   정렬: chartStrengthMatchByHand.bestTotal × ★ 거리 weight (baseStar±STAR_DISTANCE_W) desc → top 10
   //   카테고리 hashtag: dv >= baseStar → '강도전' / dv < baseStar → '약도전' (정리곡 표기 안 함)
-  const buildExhRecs = (baseStar, recLevelMode, djMode) => {
+  const buildExhRecs = (baseStar, recLevelMode, djMode, opts) => {
     if (baseStar == null) return [];
     // canUseByHand — buildRecs (EC/HC) inner const 와 동일 검사. buildExhRecs 는 별도 scope 이라 여기 재정의.
     const canUseByHand = !!(userVec && userVec.__vecL && userVec.__vecR && weaknessLib && weaknessLib.chartStrengthMatchByHand);
+    const useCutoff = !(opts && opts.useCutoff === false);
     const items = [];
     for (const c of allCharts) {
       if (recLevelMode === 'lv12' && c.gameLevel !== 12) continue;
@@ -1483,7 +1488,9 @@ window.OhsorryCore = {
     for (const r of items) {
       r._starWeight = starDistanceWeight(getEffectiveStar(r.level, r.gameLevel), baseStar);
     }
-    const filtered = items.filter(r => r._starWeight > 0);
+    // cutoff 후 풀 비면 items 그대로 사용 (안전망 — 추천이 통째로 비는 것 방지).
+    let filtered = useCutoff ? items.filter(r => r._starWeight > 0) : items;
+    if (filtered.length === 0) filtered = items;
     // bestTotal × 거리 weight desc (vec 있을 때) 또는 diffValue asc (fallback)
     if (canUseByHand) {
       filtered.sort((a, b) => {
@@ -1657,7 +1664,8 @@ window.OhsorryCore = {
   // 추천곡 DJ레벨 미달 풀 기본값 — 'off' (클리어램프 미달 곡만), 토글로 'on' 가능
   const REC_DJ_MODE_DEFAULT = 'off';
   const ecBase = recBaseStar != null ? recBaseStar : EC_FALLBACK_BASE;
-  recsEC.push(...buildRecs(3, 'ec', ecBase, REC_LEVEL_MODE_DEFAULT, REC_DJ_MODE_DEFAULT));
+  // EC fallback (recBaseStar==null, baseStar=0.3) 케이스는 ★ 거리 cutoff 끄기 — 안 그러면 lv11/12 풀이 통째로 컷됨.
+  recsEC.push(...buildRecs(3, 'ec', ecBase, REC_LEVEL_MODE_DEFAULT, REC_DJ_MODE_DEFAULT, { useCutoff: recBaseStar != null }));
   if (recBaseStar != null) {
     recsHC.push(...buildRecs(5, 'hc', recBaseStar, REC_LEVEL_MODE_DEFAULT, REC_DJ_MODE_DEFAULT));
     recsEXH.push(...buildExhRecs(recBaseStar, REC_LEVEL_MODE_DEFAULT, REC_DJ_MODE_DEFAULT));
@@ -1682,7 +1690,8 @@ window.OhsorryCore = {
     const dMode = djMode === 'on' ? 'on' : 'off';
     if (stage === 'exh') return base != null ? buildExhRecs(base, lvMode, dMode) : [];
     if (stage === 'hc')  return base != null ? buildRecs(5, 'hc', base, lvMode, dMode) : [];
-    if (stage === 'ec')  return buildRecs(3, 'ec', base != null ? base : EC_FALLBACK_BASE, lvMode, dMode);
+    // EC reroll 도 base==null 이면 EC_FALLBACK_BASE + ★ 거리 cutoff 끄기 (초기 계산과 동일).
+    if (stage === 'ec')  return buildRecs(3, 'ec', base != null ? base : EC_FALLBACK_BASE, lvMode, dMode, { useCutoff: base != null });
     return [];
   };
 

@@ -309,6 +309,12 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### 2026-05-27 — 추천 ★ 거리 cutoff 안전망 + EC fallback 보호 (calcOhsorryCore v0.0.366)
+- v0.0.364 의 ★ 거리 cutoff (weight=0 곡 풀 제외) 가 baseStar 가 매우 작거나 풀이 협소한 사용자에서 추천을 통째로 비워버리는 문제 수정.
+- **EC fallback (recBaseStar==null) 케이스 cutoff 끔** — OSR 미산정 신규 유저는 `EC_FALLBACK_BASE = 0.3` 으로 EC 만 계산되는데, ★ 거리 3 cutoff 때문에 lv11/12 풀이 통째로 빠지던 문제. `buildRecs` 호출 시 `useCutoff: false` 전달.
+- **cutoff 안전망** — `buildRecs` / `buildExhRecs` 에서 cutoff 후 풀이 비면 자동으로 원본 풀 (cutoff 전) 그대로 사용. 저실력 유저 (★8 이하 등) 의 풀 협소 케이스도 보호.
+- `window.__dp_rerollRecs` (EC reroll) 도 동일 옵션 적용.
+
 ### 2026-05-27 — 약점보완 풀에서 recLevelMode 분리 (calcOhsorryCore v0.0.365)
 - 일반 추천 (EC/HC/EXH) 의 `recLevelMode` (lv12 / lv11+12 / all) 토글이 약점보완에도 영향 주던 부작용 제거.
 - `buildWeaknessRecs` 시그니처에서 `recLevelMode` 인자 제거 — 호출자 (default + reroll) 도 정리.
