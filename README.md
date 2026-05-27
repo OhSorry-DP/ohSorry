@@ -309,6 +309,23 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### 2026-05-27 — '연습곡' 알고리즘 재설계 — calcOhsorryCore v0.0.373 / ohsorryRender v0.0.365
+- 탭/라벨 명명 변경: **약점보완 → 연습곡**, 합산 → 건반, 강도 1/2/3 → **가볍게/적당히/빡세게**. zasaMin/Max 빈 칸 = "자동" (placeholder).
+- 풀 확장: 친 곡만 → **친 곡 + 안 친 곡** (신규 패턴 곡 노출). `rate ≥ 95%` 곡 제외.
+- 자동 zasa 범위: opts.zasaMin/Max 없으면 `baseStar - 0.7 ~ baseStar + (0.8/1.1/1.4 by 강도)`. `targetZasa` 도 강도별 풀 중심 위치.
+- 점수식 `practiceScore` 가중합 (10 신호):
+  - weakSignal × 0.32 (top 3 feature × `-userVec[f]` 가중평균)
+  - patternScore × 0.18 (top 3 feature score 평균)
+  - difficultyFit × 0.22 (`zasa` vs `targetZasa` 거리 감쇠)
+  - deficitScore × 0.18 (bin 평균 대비 못 친 정도)
+  - unplayedBonus 0.16 / lampNeed 0.12 / alreadyGoodPenalty -0.18
+  - layoutAssistScore × 0.08 / layoutGainScore × 0.08 / layoutPracticeScore × 강도별
+- `practiceType` 분류 (review / pattern / score / practical) + quota slicing — `review 30% + pattern 30% + score 20% + practical 나머지` 다양성 강제.
+- mode 분리 강화: `CHARGE` / `SCRATCH` / `SOF-LAN` 서로 안 섞임 (반대 raw pt 가진 곡 제외).
+- 배치 hashtag: `#FLIP / #좌미러 / #우미러 / #양미러` + `#연습 + #복습/#패턴연습/#점수회복/#실전연습`.
+- **calcWeakness.js**: `chartStrengthMatch8Way.bestTotal` 반환을 `bestKey(best)` 로 변경 — handMode='left'/'right' 일 때 L/R 만 정렬 키로 (handMode='both' 동일).
+- 효과: 약점 + 신규 + 점수회복 + 실전이 균형 잡힘, 한쪽 편향 완화.
+
 ### 2026-05-27 — 약점보완 알고리즘 vec 잔차 약점 + 강점 보완 우선 — calcOhsorryCore v0.0.372
 - `buildWeaknessRecs` 풀 진입 조건 강화:
   - 기존: zasa bin 평균 대비 `deficit > 0` (못 친 곡) 모두 풀

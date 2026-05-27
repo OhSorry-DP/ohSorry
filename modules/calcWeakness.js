@@ -486,7 +486,7 @@
     for (var ri = 1; ri < results.length; ri++) {
       if (bestKey(results[ri]) > bestKey(best)) best = results[ri];
     }
-    return { results: results, best: best, bestLabel: best.label, bestTotal: best.total };
+    return { results: results, best: best, bestLabel: best.label, bestTotal: bestKey(best) };
   }
 
   // 약점 8 배치 매치 — chartStrengthMatch8Way 의 부호 반대.

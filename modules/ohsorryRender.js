@@ -1,4 +1,4 @@
-// ohsorryRender.js — 오소리 결과 렌더 모듈 (v0.0.364)
+// ohsorryRender.js — 오소리 결과 렌더 모듈 (v0.0.365)
 //
 // calcOhsorryCore.compute() 가 반환한 result 객체를 받아 화면 패널 + 추천곡 + supabase upload.
 // 본체 / 라이벌 wrapper 가 fetch + eval 해서 사용.
@@ -476,12 +476,12 @@ window.OhsorryRender = {
           }
           return recs.map(r => {
             const chartLetter = (r.chart || '?')[0];
-            // 약점보완 row 는 chart letter 앞에 게임 레벨 prefix (예: "11H") — 클리어 추천과 달리 ★ 안 보이니 lv 정보 필요.
+            // 연습곡 row 는 chart letter 앞에 게임 레벨 prefix (예: "11H") — 클리어 추천과 달리 ★ 안 보이니 lv 정보 필요.
             const chartDisplay = (r._category === 'weakness' && typeof r.gameLevel === 'number')
               ? String(r.gameLevel) + chartLetter
               : chartLetter;
             const cColor = chartColor(r.chart);
-            // 약점보완 row 는 lv 색 적용 X (기본색) — 어차피 chart letter 앞에 게임 lv prefix 로 표시.
+            // 연습곡 row 는 lv 색 적용 X (기본색) — 어차피 chart letter 앞에 게임 lv prefix 로 표시.
             const titleStyle = (r._category === 'weakness') ? '' :
               r.gameLevel === 11 ? ' style="color:#9ccc65"' :
               r.gameLevel === 12 ? ' style="color:#87ceeb"' : '';
@@ -491,7 +491,7 @@ window.OhsorryRender = {
             const flipBadge = bestLabel
               ? ` <span class="rec-flip" style="color:#ff6b9d;font-size:9px;font-weight:700;margin-left:3px;padding:0 3px;border:1px solid #ff6b9d;border-radius:2px;line-height:1.2">${escHtml(bestLabel)}</span>`
               : '';
-            // 추천 이유 hashtag — calcOhsorryCore 의 computeRecHashtags 결과 (#강도전 #FLIP+N #왼손위주 #동치 #계단 #밀도 등).
+            // 추천 이유 hashtag — calcOhsorryCore 의 computeRecHashtags 결과 (#연습 #FLIP #좌미러 #왼손위주 #동치 등).
             //   hover title (rec-title-clickable 의 title 에 합침 — 자식 element title 이 부모 title 보다 우선이라 직접 통합) + data-tags (곡명 클릭 토스트 안에서 표시).
             const hashtags = Array.isArray(r._hashtags) ? r._hashtags : [];
             const tagsJoined = hashtags.join(' ');
@@ -501,7 +501,7 @@ window.OhsorryRender = {
             else if (r.gameLevel === 12) tooltipParts.push('ohSorry 추정 ★ (게임 LEVEL 12, ereter 미등록)');
             const titleAttr = tooltipParts.length > 0 ? ` title="${escHtml(tooltipParts.join('\n\n'))}"` : '';
             const dataTagsAttr = tagsJoined ? ` data-tags="${escHtml(tagsJoined)}"` : '';
-            // 약점보완 (_category='weakness') 은 클리어 도전 무관 → rec-diff (★ 실력값) 안 표시. ☆ (zasa) 만 유지.
+            // 연습곡 (_category='weakness') 은 클리어 도전 무관 → rec-diff (★ 실력값) 안 표시. ☆ (zasa) 만 유지.
             const diffSpan = r._category === 'weakness'
               ? ''
               : `<span class="rec-diff" style="color:${color}" title="실력 ★">★${r.diffValue.toFixed(2)}</span>`;
@@ -531,9 +531,9 @@ window.OhsorryRender = {
         };
         window.__dp_rerollAndRender = rerenderRecStage;
 
-        // 약점보완 (weakness) UI 옵션 상태 — 모드/곡수/FLIP/손/강도/zasa 범위 토글. 변경 시 window.__dp_rerollWeakness(opts) 호출.
-        //   zasaMin / zasaMax 기본값 11.6 ~ 12.7 (lv12 zasa 분포 중심). input 비우면 undefined → 해당 방향 필터 해제.
-        const weaknessOpts = { mode: 'all', topN: 5, flipOn: true, handMode: 'both', strength: 1, zasaMin: 11.6, zasaMax: 12.7 };
+        // 연습곡 (weakness) UI 옵션 상태 — 건반/차지/스크/소프란을 분리해서 window.__dp_rerollWeakness(opts) 호출.
+        //   zasaMin / zasaMax 를 비우면 core 가 recBaseStar 기준 자동 범위를 사용.
+        const weaknessOpts = { mode: 'all', topN: 5, flipOn: true, handMode: 'both', strength: 1, zasaMin: undefined, zasaMax: undefined };
         const rerenderWeakness = () => {
           if (typeof window.__dp_rerollWeakness !== 'function') return;
           const newRecs = window.__dp_rerollWeakness({ ...weaknessOpts, recLevelMode });
@@ -544,6 +544,7 @@ window.OhsorryRender = {
         };
         window.__dp_weakness_setMode = (m) => {
           weaknessOpts.mode = m;
+          window.__dp_weakness_mode = m;
           rerenderWeakness();
           document.querySelectorAll('.wk-mode-opt').forEach(b => b.classList.toggle('active', b.dataset.m === m));
         };
@@ -595,7 +596,7 @@ window.OhsorryRender = {
             <div class="rec-mode-toggle" style="margin-top:4px">
               <span class="rec-mode-label">모드 :</span>
               <div class="rec-mode-options">
-                <span class="rec-mode-opt wk-mode-opt active" data-m="all"     onclick="event.preventDefault();event.stopPropagation();window.__dp_weakness_setMode('all');">합산</span>
+                <span class="rec-mode-opt wk-mode-opt active" data-m="all"     onclick="event.preventDefault();event.stopPropagation();window.__dp_weakness_setMode('all');">건반</span>
                 <span class="rec-mode-sep">|</span>
                 <span class="rec-mode-opt wk-mode-opt" data-m="CHARGE"  onclick="event.preventDefault();event.stopPropagation();window.__dp_weakness_setMode('CHARGE');">차지</span>
                 <span class="rec-mode-sep">|</span>
@@ -656,19 +657,19 @@ window.OhsorryRender = {
           const weaknessControls = stage === 'weakness' ? `
             <div class="rec-mode-toggle" style="margin-top:4px;display:flex;flex-wrap:wrap;align-items:center;gap:4px">
               <span style="${wkLabel}">☆</span>
-              <input type="number" class="wk-zasa-min" min="5.9" max="12.7" step="0.1" value="11.6" placeholder="5.9"
+              <input type="number" class="wk-zasa-min" min="5.9" max="12.7" step="0.1" value="" placeholder="자동"
                 style="${wkInput}"
                 onclick="event.stopPropagation();" onmousedown="event.stopPropagation();" onkeydown="event.stopPropagation();"
                 oninput="event.stopPropagation();window.__dp_weakness_setZasaMin(this.value);">
               <span style="${wkLabel}">~</span>
-              <input type="number" class="wk-zasa-max" min="5.9" max="12.7" step="0.1" value="12.7" placeholder="12.7"
+              <input type="number" class="wk-zasa-max" min="5.9" max="12.7" step="0.1" value="" placeholder="자동"
                 style="${wkInput}"
                 onclick="event.stopPropagation();" onmousedown="event.stopPropagation();" onkeydown="event.stopPropagation();"
                 oninput="event.stopPropagation();window.__dp_weakness_setZasaMax(this.value);">
               <select class="wk-select" style="${wkSelect}"
                 onclick="event.stopPropagation();" onmousedown="event.stopPropagation();"
                 onchange="event.stopPropagation();window.__dp_weakness_setMode(this.value);">
-                <option value="all" selected>합산</option>
+                <option value="all" selected>건반</option>
                 <option value="CHARGE">차지</option>
                 <option value="SCRATCH">스크</option>
                 <option value="SOF-LAN">소프란</option>
@@ -692,9 +693,9 @@ window.OhsorryRender = {
               <select class="wk-select" style="${wkSelect}"
                 onclick="event.stopPropagation();" onmousedown="event.stopPropagation();"
                 onchange="event.stopPropagation();window.__dp_weakness_setStrength(Number(this.value));">
-                <option value="1" selected>강도 1</option>
-                <option value="2">강도 2</option>
-                <option value="3">강도 3</option>
+                <option value="1" selected>가볍게</option>
+                <option value="2">적당히</option>
+                <option value="3">빡세게</option>
               </select>
             </div>
           ` : '';
@@ -818,7 +819,7 @@ window.OhsorryRender = {
           renderRec('EASY',    topEC,  '#52a447', 'ec'),
           renderRec('HARD',    topHC,  '#dc3545', 'hc'),
           renderRec('EX-HARD', topEXH, '#d4a017', 'exh'),
-          renderRec('약점보완', topWeakness, '#ff6b9d', 'weakness'),
+          renderRec('연습곡', topWeakness, '#ff6b9d', 'weakness'),
         ].join('');
       })()}
       </div>
