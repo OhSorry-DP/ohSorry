@@ -91,6 +91,81 @@ javascript:fetch('https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f43
 - A (ANOTHER): 연한 빨강
 - L (LEGGENDARIA): 연한 마젠타
 
+### 2-1. 배치추천 (8 배치 평가)
+
+추천곡 row 옆 핑크 배지 (예: `M/-`, `F`, `M/M`) 가 그 차트의 **best 배치**. 클리어 추천 + 연습곡 모두 8 배치 (mirror × flip 조합) 를 평가해서 사용자의 손별 강점에 가장 잘 맞는 배치를 골라줍니다.
+
+#### 8 배치 정의
+
+| 배지 | 의미 |
+|---|---|
+| (빈칸) | 정규 (N/N) — 양손 그대로 |
+| `M/-` | 왼손만 mirror |
+| `-/M` | 오른손만 mirror |
+| `M/M` | 양손 mirror (쌍미러) |
+| `F` | flip — 양손 패턴 swap (왼손이 2P 패턴, 오른손이 1P 패턴) |
+| `F M/-`, `F -/M`, `F M/M` | flip + 각 mirror 조합 |
+
+- **mirror (M)**: 한 손의 키 1↔7, 2↔6, 3↔5 swap (4 고정). 가까운 키와 먼 키 위치가 뒤집힘.
+- **flip (F)**: 1P 차트와 2P 차트를 양손이 서로 바꿔 침.
+
+#### 각 배치의 점수 계산
+
+각 배치마다 양손 strength score 를 따로 산출 후 합산:
+
+```
+strength_raw = (vecL · pt_L + vec.*_L · m1_metric)   ← 왼손
+             + (vecR · pt_R + vec.*_R · m2_metric)   ← 오른손
+total        = strength_raw − misfinger_penalty
+```
+
+- **vecL / vecR** — 유저의 손별 강점/약점 벡터 (28 차원).
+  - **mirror-invariant 10 feature**: `NOTES`, `CHORD`, `PEAK`, `CHARGE`, `SCRATCH`, `SOF-LAN`, `PHRASE`, `JACK`, `TRILL`, `RAND`.
+  - **mirror dim 18**: `STAIR_UP_L/R`, `STAIR_DN_L/R`, `K1_L/R` ~ `K7_L/R`. 한 손 내 키 swap 으로 변하는 metric (textage stat 기반).
+  - 잔차 분석 — 차트별 (rate − bucket 평균) 을 그 차트의 feature pt 로 가중평균. 양수 = 강점 / 음수 = 약점.
+- **pt_L / pt_R** — 차트의 손별 feature pt (textage stat → 환산). mirror 적용 시 mirror 변환된 m1/m2 metric (STAIR_UP↔DN, K1↔K7 swap) 사용.
+- **dot product** — vec 와 pt 의 같은 dim 끼리 곱한 후 합. 강점 feature 에 pt 큰 차트 = 매칭 강함 → strength 큼.
+
+#### misfinger (무리배치) penalty
+
+각 배치마다 무리배치 카운트 × 가중치를 strength 에서 차감. **스크래치 + 손가락 새끼 영역 동시발생** 을 무리배치로 봅니다.
+
+**측정** — patterns-all-slim 의 `MISFINGER` 컬럼 (ohSorryRating 의 textage stat 기반, 300ms threshold):
+- **k12** — 스크 + K1/K2 가 300ms 이내 동시 발생 카운트
+- **k67** — 스크 + K6/K7 가 300ms 이내 동시 발생 카운트
+- **rand** — 스크 ±300ms 안에 같은 손이 K1~K7 중 distinct 4 키 이상 (= 흩뿌린 + 스크 = 새끼 따로 + 엄지 스크)
+
+**손 / mirror 조합 별 무리배치 선택**:
+
+| 손 | mirror | 무리배치 metric | 이유 |
+|---|---|---|---|
+| 왼손 | no | k67 | 1P 키보드는 스크가 왼쪽 → K6/K7 가 새끼 영역 (멀리) |
+| 왼손 | yes | k12 | mirror 후 K1/K2 위치가 새끼 영역 |
+| 오른손 | no | k12 | 2P 키보드는 스크가 오른쪽 → K1/K2 가 새끼 영역 |
+| 오른손 | yes | k67 | mirror 후 K6/K7 위치가 새끼 영역 |
+
+- `rand` 는 mirror invariant — 모든 배치에 동일 적용.
+- **flip 영향 없음** — flip 은 어느 손이 어느 패턴 (m1/m2) 을 잡는지만 바꿀 뿐, 손가락 매핑 (왼손=스크 왼쪽 / 오른손=스크 오른쪽) 은 키보드 기준 고정.
+
+**가중치** — k12/k67 × 0.5, rand × 0.15 (강도 순서 k12/k67 > rand). 예: WHA DP_ANO 의 m1.k67=145, m2.k12=231, m1.rand=49, m2.rand=77 → 정규 (N/N) penalty = `(145 + 231) × 0.5 + (49 + 77) × 0.15 ≈ 207`.
+
+#### best 배치 선택 + 추천 정렬 영향
+
+- 각 차트마다 8 배치 result 중 **`total = strength_raw − penalty` 가 max** 인 배치가 best.
+- best 배치의 라벨 (예: `M/-`) 이 추천곡 row 옆 핑크 배지로 표시. 정규 (N/N) 이면 배지 없음.
+- **추천 정렬 자체에 영향**:
+  - 무리배치 많은 차트는 best 배치도 penalty 큰 → strength 낮음 → 추천 후순위로 자연 강등.
+  - 약점 보완 추천 (`chartWeaknessMatch8Way`) 에서도 동일 — `bestTotal = −strengthRaw − penalty` 라 무리배치 차트는 약점 보완 정렬에서도 후순위.
+  - 예: WHA / CODE:Ø / Like+it! 같은 무리배치 끝판왕 차트는 자동 후순위. 그래도 best 배치를 고르면 무리배치가 덜한 쪽 (예: WHA → `−/M` 오른손만 mirror) 이 선택돼서 그나마 칠 만함.
+
+#### 토글 ON / OFF
+
+추천곡 헤더의 토글 (복습곡 토글 옆):
+- **배치추천 ON** (기본) — 8 배치 평가 + misfinger penalty 자동 반영. 사용자에게 가장 잘 맞는 배치 / 무리배치 적은 차트 우선.
+- **배치추천 OFF** — 정규 N/N 강제 (mirror / flip 비교 안 함, penalty 도 없음). "그냥 정규 배치로 친다" 가정한 추천 정렬.
+
+연습곡 추천에도 동일한 동작 — UI 만 다름 (연습곡은 별도 컨트롤 행 안의 `배치추천` 칩).
+
 ### 3. 상세 통계
 - **CLEAR TYPE / DJ LEVEL** (공식 페이지 표): e-amusement 페이지 그대로 표시
 - **난이도 별 클리어 램프**: ★11.6 ~ ★12.7 단위로 FC/EX/HC/CL/EC/AC/FA/NP 분포
