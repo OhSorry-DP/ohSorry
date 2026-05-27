@@ -57,39 +57,96 @@ javascript:fetch('https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f43
   - 초록 (\|차이\| ≤ 0.1) / 노랑 (≤ 0.3) / 빨강 (그 이상)
 
 ### 2. 추천곡 (EASY / HARD / EX-HARD)
-각 단계별 10곡, 매번 랜덤 선정. **3-pool 2:5:3 구조**:
 
-| 풀 | 범위 | 표시 곡 수 |
+각 단계 10곡. **`_clearScore` 가중합 기반 정렬** + cleanup 다양성 보정 + slot 분배 흐름.
+
+#### 1단계 — 풀 생성 (stage 별 ★ 범위)
+
+각 차트의 "그 stage 추정 ★" 값 (dv) 으로 4 풀로 분류. **effectiveBase + d 기반**:
+
+| stage | effectiveBase (eb) | 정리 (cleanup) | 약도전 (easy) | 강도전 (hard) | 풀 제외 |
+|---|---|---|---|---|---|
+| EC | baseStar − 0.5 | dv ∈ [0, eb) | dv ∈ [eb, eb + 0.7d) | dv ∈ [eb + 0.7d, topClearStar + 0.3d] | dv > 강도전 상한 |
+| HC | baseStar | 동일 | 동일 | 동일 | 동일 |
+| EXH | baseStar + 2 | dv ∈ [0, eb) | (없음) | (없음) | dv ≥ eb |
+
+- **baseStar** — 사용자 ★ 추정값 (ohSorry 또는 ereter 모드 토글로 전환).
+- **topClearStar** — 그 stage 를 이미 클리어한 차트의 추정 ★ 최댓값.
+- **d** = `max(0, topClearStar − effectiveBase)` — 클리어 영역 폭. d=0 (effectiveBase 이상 클리어 X) 이면 약/강도전 한 점으로 수렴 → 대부분 정리곡.
+- **EXH 는 정리곡만** — 점수 도전 stage 이므로 약/강도전 없이 cleanup 만.
+
+각 풀은 다시 **underLamp** (램프 미달) 와 **reached** (램프 도달 + DJ레벨 미달 = 복습곡) 로 분리.
+
+#### 2단계 — `_clearScore` 계산 (각 차트별)
+
+차트마다 8 component 가중합:
+
+| component | 가중치 | 정의 |
 |---|---|---|
-| 하드 도전 | ★ + offset − 0.3 ~ ★ + offset | 2곡 |
-| 약 도전 | ★ ~ ★ + 0.2 | 5곡 |
-| 정리 | 0 ~ ★ (미만) | 3곡 |
+| diffFit | 0.24 | ★ 거리 적합도 — 1 − \|dv − baseStar\| / 2.4 (EXH 는 3.2) |
+| lampFit | 0.18 | 램프 도달 거리 — 도달 0.74 / 미달은 gap 기반 |
+| rateFit | 0.18 | 정확도 fit — EC 74% / HC 82% / EXH 89% 기준 width 12~14 |
+| countFit | 0.14 | 클리어 인구수 (log 정규화) |
+| layoutFit | 0.14 | 8 배치 best 매치 점수 적합도 (배치추천 ON 일 때만 의미) |
+| layoutGainFit | 0.06 | 정규 대비 best 배치 이득 (mirror/flip 효과) |
+| djFit | 0.06 | 현재 DJ 레벨 적합도 (AAA=1, AA=0.84, A=0.68, ...) |
+| categoryBoost | (±) | cleanup +0.10 / easy +0.04 / hard −0.03 |
 
-**도전 offset (동적)**: 저레벨일수록 위로 더 멀리 — ★0.5 → +1.0, ★14.0 → +0.3 선형 보간. 즉 ★4.5 사용자라면 도전 offset ≈ +0.79 → 하드 풀은 ★4.99 ~ ★5.29.
+차트마다 추가로 **`_clearType`** 분류 (UI 해시태그 표시):
+- `#한끗` (near-lamp) — 램프 1칸 미달 또는 점수 stage target − 2 이내
+- `#점수도전` (score-ready) — 점수 stage target − 5 이내
+- `#검증곡` (popular) — 클리어 인구수 약 63명 이상 (= 안전한 도전, 무리한 곡 X)
+- `#적합` (fit) — 그 외
 
-**후보 sampling (각 풀)**:
-- 클리어 인구수 desc top 10 + 나머지 풀에서 순랜덤 5 = 후보 최대 15곡
-- 후보를 셔플 → 위 표의 N곡 선택
-- 한 풀이 부족하면 다른 풀 후보에서 보충 (총 10곡 유지)
+#### 3단계 — sample15 + cleanup 50/50 보정
 
-**미클리어 정의** (단계별 threshold):
-- EASY 추천: lamp < EC (NO PLAY/FAILED/ASSIST)
-- HARD 추천: lamp < HC (위 + EASY/CLEAR)
+각 cat (underLamp / reached) 의 hard + easy + cleanup 합쳐서 **`_clearScore` desc top 15** 뽑음. 그 다음:
+
+- top 15 안의 cleanup 분류 곡 중 `_clearScore` 낮은 절반을 잘라냄.
+- cleanup 풀 전체에서 dv asc (= 가장 쉬운 정리곡) 으로 같은 수만큼 교체.
+- 효과 — "사용자에게 잘 맞는 cleanup" + "그냥 쉬운 cleanup" 둘 다 노출, 한쪽 편향 방지.
+
+정렬은 8 배치 evaluator 가 있을 때 sortByBest (`_clearScore` → countField → diffValue), 옛 gist fallback 은 sortByMatch (`chartStrengthMatch` 도 같이), userVec 자체 없을 때는 클리어 인구수 desc.
+
+#### 4단계 — 최종 10곡 추출 (slot 분배)
+
+underLamp 우선, 복습곡 (reached) 은 djMode='on' 일 때만 2곡 섞음:
+
+| stage | djMode off (underTarget 10) | djMode on (underTarget 8 + reached 2) |
+|---|---|---|
+| EC / HC | cleanup 4 + easy 4 + hard 2 | cleanup 3 + easy 3 + hard 2 + reached 2 |
+| EXH | cleanup 8 + easy 1 + hard 1 | cleanup 6 + easy 1 + hard 1 + reached 2 |
+
+- **slot 부족 시 보충 순서**: 각 slot → underAll (cat 무관) → reachedAll → underSample + reachedSample 전체.
+- 한 cat 안에서는 `_clearScore` desc 로 선택.
+
+**low 모드** (DP11- 토글, 게임 lv8~10 중심):
+- gameLevel 별 균등 분배 (예: lv8/9/10 각 3곡) + lv12 1곡 (있으면 도전용) + 부족분 보충.
+- 신규 유저 / ★ 추정 안 되는 유저에게 진입 부담 적은 추천.
+
+#### 미클리어 정의 (stage 별 lamp threshold)
+
+- EASY 추천: lamp < EC (NO PLAY / FAILED / ASSIST)
+- HARD 추천: lamp < HC (위 + EASY / CLEAR)
 - EX-HARD 추천: lamp < EX-HARD (위 + HARD)
 
-**표시 순서**: 카테고리 무관, 전체 10곡을 ★ 오름차순 (낮 → 높) 으로 통합 정렬.
+#### 토글 / 옵션
 
-**↻ 다시 뽑기**: 각 단계 헤더(열린 상태)의 버튼을 누르면 그 단계만 새로 뽑아서 갱신 (panel 새로고침 불필요).
+- **추천곡 기준** (ereter 데이터 매핑 있을 때만): `ereter ★` ↔ `OhSorry ★` 클릭 전환. baseStar 가 바뀌어 전체 추천 자동 재계산.
+- **DP12 / DP11+ / DP11-**: 추천 풀 게임 레벨 필터.
+  - **DP12** — 게임 레벨 12 차트만
+  - **DP11+** (기본) — lv11 + lv12
+  - **DP11-** — low 모드 (게임 lv8~10 중심, 신규 유저용)
+- **복습곡 포함 / 제외**: 램프 도달 + DJ레벨 미달 (= reached) 포함 토글.
+- **배치추천 ON / OFF**: 8 배치 평가 ON/OFF. 자세히는 아래 [2-1 섹션](#2-1-배치추천-8-배치-평가).
+- **↻ 다시 뽑기**: 각 단계 헤더 버튼 — 그 단계만 재계산 후 부분 갱신.
 
-**추천곡 기준 토글** (ereter 데이터 매핑 있을 때만 표시):
-- `ereter ★4.96 | OhSorry ★4.92` — 글씨 클릭으로 즉시 전환
-- 기본값: ereter 모드 (있으면) / 없으면 OhSorry
-- 모드 변경 시 모든 단계 추천곡 자동 재계산
+#### 차트 표시
 
-차트 표시 색상:
-- H (HYPER): 연한 금
-- A (ANOTHER): 연한 빨강
-- L (LEGGENDARIA): 연한 마젠타
+- **prefix (게임 LEVEL)** — 모든 차트에 `12A`, `11H` 등 표시.
+- **chart letter 색**: H (HYPER) 연한 금 / A (ANOTHER) 연한 빨강 / L (LEGGENDARIA) 연한 마젠타.
+- **곡명 색** — ereter 미등록 + ohSorryRating only 차트 한정 (lv11 초록 / lv12 하늘) + tooltip "ohSorry 추정 ★, ereter 미등록". ereter 등록 차트는 기본색.
+- **배치 배지** (핑크) — 8 배치 best 가 정규 (N/N) 아닐 때 옆에 표시 (예: `M/-`, `F`).
 
 ### 2-1. 배치추천 (8 배치 평가)
 
@@ -383,6 +440,10 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 ---
 
 ## 변경 이력
+
+### 2026-05-28 — README 추천곡 섹션 현재 동작에 맞춰 다시 작성
+- 옛 설명 (3-pool 2:5:3 / 도전 offset 동적 / 클리어 인구 top 10 + 랜덤 5 셔플) → 현 코드 (effectiveBase + d 기반 풀 / `_clearScore` 8-component 가중합 / cleanup 50/50 다양성 보정 / slot 분배 4:4:2 또는 EXH 8:1:1).
+- _clearType (#한끗 / #점수도전 / #검증곡 / #적합) 분류 의미 + low 모드 + 토글 옵션 + 차트 표시 (prefix / 곡명 색 조건) 정리.
 
 ### 2026-05-28 — 복습곡 토글 + 배치추천 토글 좌측에 붙도록 정렬 — ohsorryRender v0.0.377
 - 두 토글 모두 `rec-review-toggle` 의 `margin-right: auto` 가 적용돼 첫 토글이 두 번째를 오른쪽 끝으로 밀어내던 문제.
