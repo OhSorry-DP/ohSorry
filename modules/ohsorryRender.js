@@ -1,4 +1,4 @@
-// ohsorryRender.js — 오소리 결과 렌더 모듈 (v0.0.369)
+// ohsorryRender.js — 오소리 결과 렌더 모듈 (v0.0.370)
 //
 // calcOhsorryCore.compute() 가 반환한 result 객체를 받아 화면 패널 + 추천곡 + supabase upload.
 // 본체 / 라이벌 wrapper 가 fetch + eval 해서 사용.
@@ -658,7 +658,7 @@ window.OhsorryRender = {
           const wkInput = `${wkCtl};width:54px`;
           const wkSelect = `${wkCtl};cursor:pointer`;
           const wkFlipOn = 'height:22px;box-sizing:border-box;font-size:11px;font-weight:600;border:1px solid #ff6b9d;border-radius:3px;background:#ff6b9d;color:#fff;padding:0 8px;line-height:20px;vertical-align:middle;cursor:pointer';
-          const wkLabel = 'font-size:11px;color:#212529;font-weight:600;line-height:22px';
+          const wkLabel = 'font-size:11px;color:#e9ecef;font-weight:600;line-height:22px';
           const weaknessControls = stage === 'weakness' ? `
             <div class="rec-mode-toggle" style="margin-top:4px;display:flex;flex-wrap:wrap;align-items:center;gap:4px">
               <span style="${wkLabel}">☆</span>
