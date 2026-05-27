@@ -1,4 +1,4 @@
-// ohsorryRender.js — 오소리 결과 렌더 모듈 (v0.0.367)
+// ohsorryRender.js — 오소리 결과 렌더 모듈 (v0.0.368)
 //
 // calcOhsorryCore.compute() 가 반환한 result 객체를 받아 화면 패널 + 추천곡 + supabase upload.
 // 본체 / 라이벌 wrapper 가 fetch + eval 해서 사용.
@@ -476,8 +476,8 @@ window.OhsorryRender = {
           }
           return recs.map(r => {
             const chartLetter = (r.chart || '?')[0];
-            // 연습곡 row 는 chart letter 앞에 게임 레벨 prefix (예: "11H") — 클리어 추천과 달리 ★ 안 보이니 lv 정보 필요.
-            const chartDisplay = (r._category === 'weakness' && typeof r.gameLevel === 'number')
+            // chart letter 앞에 게임 레벨 prefix (예: "11H") — 클리어 추천 + 연습곡 모두 일관 표기.
+            const chartDisplay = (typeof r.gameLevel === 'number')
               ? String(r.gameLevel) + chartLetter
               : chartLetter;
             const cColor = chartColor(r.chart);

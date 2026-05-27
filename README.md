@@ -309,6 +309,10 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### 2026-05-27 — 클리어 추천 row 에도 game level prefix — ohsorryRender v0.0.368
+- chart letter 앞 game level prefix (예: "11H", "12A") 표시 조건을 `_category === 'weakness'` 한정에서 **모든 row** 로 확장 (`typeof r.gameLevel === 'number'`).
+- 효과: 클리어 추천 (EC/HC/EXH) 에서도 게임 레벨 한눈에 — DP12 / DP11+ / low 모드 결과 구분 쉬워짐.
+
 ### 2026-05-27 — 사용자 게임레벨 적응 (low 모드 / 연습곡 zasa / HC/EXH 가드) — calcOhsorryCore v0.0.375 / ohsorryRender v0.0.367
 - **`maxClearGameLevel` 산정** — `allCharts` 중 `lampNum ≥ 3` (EC 이상) 클리어한 차트의 `gameLevel` 최댓값. 추천 풀 / 연습곡 기본 범위에 모두 활용.
 - **'low' 모드 허용 레벨 동적** — 기존 고정 lv8~10 → `maxClearGameLevel` 기반:
