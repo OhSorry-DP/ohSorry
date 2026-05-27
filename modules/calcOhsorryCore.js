@@ -34,7 +34,7 @@
 //   wrapperVersion: wrapper 자기 버전 (예: 'v3.3.6') — supabase version 컬럼은
 //                   `${wrapperVersion}-core${CORE_VERSION_SHORT}` 조합 (예: 'v3.3.6-core335')
 window.OhsorryCore = {
-  VERSION: '0.0.364',
+  VERSION: '0.0.365',
   compute: async (opts) => {
   opts = opts || {};
   const mode = opts.mode || 'own';
@@ -42,7 +42,7 @@ window.OhsorryCore = {
   let dbData = opts.dbData || null;
   const rivalToken = opts.rivalToken || null;
   const wrapperVersion = opts.wrapperVersion || 'unknown';
-  const CORE_VERSION_SHORT = '0.0.364'.replace(/^0\.0\./, '');  // '346'
+  const CORE_VERSION_SHORT = '0.0.365'.replace(/^0\.0\./, '');  // '346'
   const dbVersionString = `${wrapperVersion}-core${CORE_VERSION_SHORT}`;
   dbData = dbData || null;
   // -------- 0. ereter 데이터 로드 (Gist 에서 자동 fetch) --------
@@ -1529,7 +1529,8 @@ window.OhsorryCore = {
   if (weaknessLib && weaknessLib.DIFF2CHART) {
     for (const d in weaknessLib.DIFF2CHART) CHART2DIFF_REC[weaknessLib.DIFF2CHART[d]] = d;
   }
-  const buildWeaknessRecs = (baseStar, recLevelMode, opts) => {
+  // recLevelMode 인자는 받지 않음 — 약점보완은 일반 추천 lv 토글 무관 (자체 ★ 상한 + 거리 cutoff).
+  const buildWeaknessRecs = (baseStar, opts) => {
     if (!userVec || !userVec.__vecL || !userVec.__vecR) return [];
     if (!weaknessLib || !weaknessLib.chartWeaknessMatchByHand) return [];
     if (!patternsMap) return [];
@@ -1573,8 +1574,8 @@ window.OhsorryCore = {
         if (!diff) continue;
         const chartPt = sm.c[cn];
         const gameLevel = chartPt.lv;
-        if (recLevelMode === 'lv12' && gameLevel !== 12) continue;
-        if (recLevelMode === 'lv11+12' && gameLevel !== 11 && gameLevel !== 12) continue;
+        // recLevelMode (lv12 / lv11+12 / all) — 일반 추천 (EC/HC/EXH) 토글이라 약점보완은 무시.
+        //   약점보완 풀은 topClearZasa 상한 + ★ 거리 cutoff 로 자체 좁힘.
         // mode 별 raw pt 필터.
         //   합산 (all): SOF-LAN raw>0 / CHARGE raw>0 / SCRATCH raw≥6.35(p70) 제외 (순수 7 feature 곡만)
         //   단일 모드 (CHARGE/SCRATCH/SOF-LAN): 그 feature 가 있는 (또는 강한) 곡만 통과 (반대 필터)
@@ -1662,12 +1663,10 @@ window.OhsorryCore = {
     recsEXH.push(...buildExhRecs(recBaseStar, REC_LEVEL_MODE_DEFAULT, REC_DJ_MODE_DEFAULT));
   }
   // 약점보완 — userVec.__vecL/__vecR 있어야 동작. default (FLIP on + 양손 통합, 합산 mode, top 5). UI 토글로 변경 가능.
-  recsWeakness.push(...buildWeaknessRecs(recBaseStar, REC_LEVEL_MODE_DEFAULT, { flipOn: true, handMode: 'both', mode: 'all', topN: 5, strength: 1 }));
-  // window.__dp_rerollWeakness(opts) — ohsorryRender UI 토글에서 호출. opts: { flipOn, handMode, mode, topN, recLevelMode }
-  window.__dp_rerollWeakness = (opts) => {
-    const lvMode = (opts && opts.recLevelMode) || REC_LEVEL_MODE_DEFAULT;
-    return buildWeaknessRecs(recBaseStar, lvMode, opts || {});
-  };
+  //   recLevelMode (lv12 / lv11+12 / all) 와 무관 — 약점보완은 자체 ★ 상한 (topClearZasa) + 거리 cutoff 로 좁힘.
+  recsWeakness.push(...buildWeaknessRecs(recBaseStar, { flipOn: true, handMode: 'both', mode: 'all', topN: 5, strength: 1 }));
+  // window.__dp_rerollWeakness(opts) — ohsorryRender UI 토글에서 호출. opts: { flipOn, handMode, mode, topN, strength }
+  window.__dp_rerollWeakness = (opts) => buildWeaknessRecs(recBaseStar, opts || {});
   console.log(`[step2] 추천곡: EC ${recsEC.length}, HC ${recsHC.length}, EXH ${recsEXH.length}, 약점보완 ${recsWeakness.length}`);
 
   const topEC  = recsEC;

@@ -309,6 +309,11 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### 2026-05-27 — 약점보완 풀에서 recLevelMode 분리 (calcOhsorryCore v0.0.365)
+- 일반 추천 (EC/HC/EXH) 의 `recLevelMode` (lv12 / lv11+12 / all) 토글이 약점보완에도 영향 주던 부작용 제거.
+- `buildWeaknessRecs` 시그니처에서 `recLevelMode` 인자 제거 — 호출자 (default + reroll) 도 정리.
+- 약점보완 풀은 `topClearZasa` 상한 + ★ 거리 cutoff 만으로 자체 좁힘.
+
 ### 2026-05-27 — 추천 정렬 ★ 거리 감쇠 + baseStar 상한 제거 (calcOhsorryCore v0.0.364)
 - **gameLevel 별 zasaLevel 평균 lookup** — `ohSorryRatings` (lv11/12) + `zasaData` (lv1~10) 합쳐서 산출. 차트에 zasa 가 없을 때 fallback.
 - **getEffectiveStar / starDistanceWeight 헬퍼** — `weight = max(0, 1 - |chart★ - baseStar| / STAR_DISTANCE_W)`, W=3.
