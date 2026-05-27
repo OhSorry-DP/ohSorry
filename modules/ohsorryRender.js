@@ -30,7 +30,7 @@
 // ============================================================
 
 window.OhsorryRender = {
-  VERSION: '0.0.361',
+  VERSION: '0.0.362',
 
   // 진행률 UI — core 의 onProgress 콜백에서 호출
   showProgress: function (msg, pct) {
@@ -530,8 +530,9 @@ window.OhsorryRender = {
         };
         window.__dp_rerollAndRender = rerenderRecStage;
 
-        // 약점보완 (weakness) UI 옵션 상태 — 모드/곡수/FLIP/손/강도 토글. 변경 시 window.__dp_rerollWeakness(opts) 호출.
-        const weaknessOpts = { mode: 'all', topN: 5, flipOn: true, handMode: 'both', strength: 1 };
+        // 약점보완 (weakness) UI 옵션 상태 — 모드/곡수/FLIP/손/강도/zasa 범위 토글. 변경 시 window.__dp_rerollWeakness(opts) 호출.
+        //   zasaMin / zasaMax 기본값 11.6 ~ 12.7 (lv12 zasa 분포 중심). input 비우면 undefined → 해당 방향 필터 해제.
+        const weaknessOpts = { mode: 'all', topN: 5, flipOn: true, handMode: 'both', strength: 1, zasaMin: 11.6, zasaMax: 12.7 };
         const rerenderWeakness = () => {
           if (typeof window.__dp_rerollWeakness !== 'function') return;
           const newRecs = window.__dp_rerollWeakness({ ...weaknessOpts, recLevelMode });
@@ -572,6 +573,17 @@ window.OhsorryRender = {
           weaknessOpts.strength = s;
           rerenderWeakness();
           document.querySelectorAll('.wk-strength-opt').forEach(b => b.classList.toggle('active', String(b.dataset.s) === String(s)));
+        };
+        // zasa 범위 input — 빈 문자열/NaN 이면 undefined (필터 미적용). number 면 buildWeaknessRecs 에서 AND 결합.
+        window.__dp_weakness_setZasaMin = (v) => {
+          const n = parseFloat(v);
+          weaknessOpts.zasaMin = isNaN(n) ? undefined : n;
+          rerenderWeakness();
+        };
+        window.__dp_weakness_setZasaMax = (v) => {
+          const n = parseFloat(v);
+          weaknessOpts.zasaMax = isNaN(n) ? undefined : n;
+          rerenderWeakness();
         };
 
         const renderRec = (label, recs, color, stage) => {
@@ -666,6 +678,16 @@ window.OhsorryRender = {
                 <option value="2">강도 2</option>
                 <option value="3">강도 3</option>
               </select>
+              <span style="font-size:11px;color:#555">☆</span>
+              <input type="number" class="wk-zasa-min" min="5.9" max="12.7" step="0.1" value="11.6" placeholder="5.9"
+                style="width:48px;padding:1px 4px;font-size:11px;border:1px solid #ced4da;border-radius:3px;background:#fff;color:#555"
+                onclick="event.stopPropagation();" onmousedown="event.stopPropagation();" onkeydown="event.stopPropagation();"
+                oninput="event.stopPropagation();window.__dp_weakness_setZasaMin(this.value);">
+              <span style="font-size:11px;color:#555">~</span>
+              <input type="number" class="wk-zasa-max" min="5.9" max="12.7" step="0.1" value="12.7" placeholder="12.7"
+                style="width:48px;padding:1px 4px;font-size:11px;border:1px solid #ced4da;border-radius:3px;background:#fff;color:#555"
+                onclick="event.stopPropagation();" onmousedown="event.stopPropagation();" onkeydown="event.stopPropagation();"
+                oninput="event.stopPropagation();window.__dp_weakness_setZasaMax(this.value);">
             </div>
           ` : '';
           const summaryLabel = stage === 'weakness'

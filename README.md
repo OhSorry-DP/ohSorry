@@ -309,6 +309,10 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### 2026-05-27 — 약점보완 zasa 범위 입력 (calcOhsorryCore v0.0.367 / ohsorryRender v0.0.362)
+- **calcOhsorryCore v0.0.367** ([modules/calcOhsorryCore.js](modules/calcOhsorryCore.js)) — `buildWeaknessRecs` opts 에 `zasaMin` / `zasaMax` 추가. number 일 때만 적용, 기존 `topClearZasa` 상한 + ★ 거리 cutoff 와 **AND 결합** (모두 통과해야 풀 진입). 초기 호출 default `11.6 ~ 12.7` (lv12 zasa 분포 중심).
+- **ohsorryRender v0.0.362** ([modules/ohsorryRender.js](modules/ohsorryRender.js)) — 약점보완 한 줄 UI 에 `☆ [number] ~ [number]` input 두 칸 추가 (step 0.1, value 11.6 / 12.7). `__dp_weakness_setZasaMin` / `__dp_weakness_setZasaMax` setter, `weaknessOpts.zasaMin/Max` 초기값 11.6 / 12.7. input 비우면 NaN → undefined → 해당 방향 필터 해제 (자동 cutoff 만 동작).
+
 ### 2026-05-27 — 추천 ★ 거리 cutoff 안전망 + EC fallback 보호 (calcOhsorryCore v0.0.366)
 - v0.0.364 의 ★ 거리 cutoff (weight=0 곡 풀 제외) 가 baseStar 가 매우 작거나 풀이 협소한 사용자에서 추천을 통째로 비워버리는 문제 수정.
 - **EC fallback (recBaseStar==null) 케이스 cutoff 끔** — OSR 미산정 신규 유저는 `EC_FALLBACK_BASE = 0.3` 으로 EC 만 계산되는데, ★ 거리 3 cutoff 때문에 lv11/12 풀이 통째로 빠지던 문제. `buildRecs` 호출 시 `useCutoff: false` 전달.

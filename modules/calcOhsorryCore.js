@@ -34,7 +34,7 @@
 //   wrapperVersion: wrapper 자기 버전 (예: 'v3.3.6') — supabase version 컬럼은
 //                   `${wrapperVersion}-core${CORE_VERSION_SHORT}` 조합 (예: 'v3.3.6-core335')
 window.OhsorryCore = {
-  VERSION: '0.0.366',
+  VERSION: '0.0.367',
   compute: async (opts) => {
   opts = opts || {};
   const mode = opts.mode || 'own';
@@ -42,7 +42,7 @@ window.OhsorryCore = {
   let dbData = opts.dbData || null;
   const rivalToken = opts.rivalToken || null;
   const wrapperVersion = opts.wrapperVersion || 'unknown';
-  const CORE_VERSION_SHORT = '0.0.366'.replace(/^0\.0\./, '');  // '346'
+  const CORE_VERSION_SHORT = '0.0.367'.replace(/^0\.0\./, '');  // '346'
   const dbVersionString = `${wrapperVersion}-core${CORE_VERSION_SHORT}`;
   dbData = dbData || null;
   // -------- 0. ereter 데이터 로드 (Gist 에서 자동 fetch) --------
@@ -1549,6 +1549,9 @@ window.OhsorryCore = {
     const topN = (opts && typeof opts.topN === 'number') ? opts.topN : 5;
     const strength = (opts && typeof opts.strength === 'number' && opts.strength >= 1) ? opts.strength : 1;
     const offset = (strength - 1) * topN;
+    // 사용자 지정 zasa 범위 — number 일 때만 적용. AND 결합 — topClearZasa 상한 / ★ 거리 cutoff 와 함께 모두 통과해야 풀 진입.
+    const zasaMin = (opts && typeof opts.zasaMin === 'number') ? opts.zasaMin : null;
+    const zasaMax = (opts && typeof opts.zasaMax === 'number') ? opts.zasaMax : null;
     const vecL = userVec.__vecL;
     const vecR = userVec.__vecR;
     // ★ 상한 — 사용자가 EC 이상 클리어한 차트의 zasaLevel 최댓값 (= "지금 칠 수 있는 최고 난이도").
@@ -1629,6 +1632,9 @@ window.OhsorryCore = {
         if (topClearZasa > 0 && typeof e.level === 'number' && e.level > topClearZasa) continue;
         // ★ 거리 cutoff — baseStar 와 ±STAR_DISTANCE_W 밖이면 풀 제외 (점진학습 정렬은 그대로 bestTotal asc).
         if (starDistanceWeight(e.level, baseStar) <= 0) continue;
+        // 사용자 지정 zasa 범위 — number 일 때만 추가 필터 (AND 결합).
+        if (zasaMin != null && typeof e.level === 'number' && e.level < zasaMin) continue;
+        if (zasaMax != null && typeof e.level === 'number' && e.level > zasaMax) continue;
         const dv = typeof e.exh === 'number' ? e.exh : (typeof e.hc === 'number' ? e.hc : e.level);
         // user 가 친 곡이면 lamp / djLevel / exScore 채움 (안 친 곡은 null)
         const uc = userChartByKey.get(norm(title) + '|' + diff);
@@ -1672,7 +1678,7 @@ window.OhsorryCore = {
   }
   // 약점보완 — userVec.__vecL/__vecR 있어야 동작. default (FLIP on + 양손 통합, 합산 mode, top 5). UI 토글로 변경 가능.
   //   recLevelMode (lv12 / lv11+12 / all) 와 무관 — 약점보완은 자체 ★ 상한 (topClearZasa) + 거리 cutoff 로 좁힘.
-  recsWeakness.push(...buildWeaknessRecs(recBaseStar, { flipOn: true, handMode: 'both', mode: 'all', topN: 5, strength: 1 }));
+  recsWeakness.push(...buildWeaknessRecs(recBaseStar, { flipOn: true, handMode: 'both', mode: 'all', topN: 5, strength: 1, zasaMin: 11.6, zasaMax: 12.7 }));
   // window.__dp_rerollWeakness(opts) — ohsorryRender UI 토글에서 호출. opts: { flipOn, handMode, mode, topN, strength }
   window.__dp_rerollWeakness = (opts) => buildWeaknessRecs(recBaseStar, opts || {});
   console.log(`[step2] 추천곡: EC ${recsEC.length}, HC ${recsHC.length}, EXH ${recsEXH.length}, 약점보완 ${recsWeakness.length}`);
