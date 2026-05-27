@@ -309,6 +309,17 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### 2026-05-27 — 약점보완 알고리즘 zasa bin 기반 재설계 — calcOhsorryCore v0.0.369
+- **알고리즘 교체** — 기존 (calcWeakness 잔차 × FEATS dot product 매치) → **zasa 0.1 단위 bin 안 사용자 평균 rate 대비 deficit 기반**.
+  - 사용자가 친 곡 (rate>0) 만 풀 — 안 친 곡은 bin 평균 + 추천 풀 둘 다 제외.
+  - `binMean(bk)` = zasa 0.1 단위 bin 의 사용자 EX rate 평균. bin 곡 < 10 이면 양쪽 이웃 bin (±0.1, ±0.2, ... ±3.0 까지) 결합.
+  - `deficit = binMean - rate`. deficit > 0 (bin 평균보다 못 친 곡) 만 풀 진입.
+  - 곡 top 3 feature 추출 (7 feature 안에서) — 표시/태그 용. mode 'all' 풀은 단일 풀 (분류 X).
+- **강도 토글 의미 변경** — 1=소(작은 deficit, 살짝 부족) / 2=중(median 부근) / 3=대(큰 deficit, 큰 약점). pool deficit asc 정렬 후 startIdx 위치 결정.
+- **mode (all/CHARGE/SCRATCH/SOF-LAN)** — 기존 그대로. 단일 mode 도 동일 알고리즘 (그 feature raw pt 강한 곡만 풀).
+- **[modules/calcOhsorryCore.js](modules/calcOhsorryCore.js) v0.0.369** — `FEATURE_SCORES_URL` fetch 추가 (`featureScoresMap`). `buildWeaknessRecs` 재구현 (1단계 candidates 수집 → 2단계 bin 평균 → 3단계 deficit 풀 + top3 분류 → 4단계 강도 위치 slice → 5단계 `_matchByHand` 배치추천 라벨 표시용). 잔차 × dot product 매치 (`chartWeaknessMatchByHand`/`chartWeaknessMatch8Way` 호출) 약점보완에서 제거.
+- 효과: 약점보완 추천이 "fluffy 잔차" 가 아닌 "구체적 곡 EX rate" 기준 → 어떤 곡 어떻게 못 쳤는지 직관적. zasa lv 비슷한 곡끼리 비교라 lv 별 편차 영향 없음.
+
 ### 2026-05-27 — 8 배치 추천 (mirror + flip 조합) — calcOhsorryCore v0.0.368 / ohsorryRender v0.0.364
 - 추천 곡 옆에 배치 라벨 표시 (`M/-`, `-/M`, `M/M`, `F`, `F M/-`, `F -/M`, `F M/M`). 정규(N/N) 면 라벨 없음. 8 배치 중 best 의 라벨이 핑크 배지로 노출.
 - **[modules/calcWeakness.js](modules/calcWeakness.js)** — `MIRROR_STEMS` (STAIR_UP/DN + K1~K7), `applyMirror` (UP↔DN swap, DENSITY reverse), 새 18 dim vec 산출 (residual × m1/m2 가중평균), `chartStrengthMatch8Way` + `chartWeaknessMatch8Way` (정규+mirror+flip 조합 8 배치 평가).

@@ -42,7 +42,7 @@ window.OhsorryCore = {
   let dbData = opts.dbData || null;
   const rivalToken = opts.rivalToken || null;
   const wrapperVersion = opts.wrapperVersion || 'unknown';
-  const CORE_VERSION_SHORT = '0.0.368'.replace(/^0\.0\./, '');  // '346'
+  const CORE_VERSION_SHORT = '0.0.369'.replace(/^0\.0\./, '');  // '346'
   const dbVersionString = `${wrapperVersion}-core${CORE_VERSION_SHORT}`;
   dbData = dbData || null;
   // -------- 0. ereter 데이터 로드 (Gist 에서 자동 fetch) --------
@@ -225,6 +225,8 @@ window.OhsorryCore = {
   //   calcWeakness.js: 유저 차트 점수 + patterns → 약점/강점 벡터 + chartStrengthMatch helper.
   //   추천에 영향 — sample15 정렬을 강점 매치 desc 로 (기존 count desc 대신).
   const PATTERNS_URL = GIST_RAW + '/patterns-all-slim.json';
+  // feature-scores-slim.json — 차트별 28 feature quantile score (0~100). 약점보완 bin 평균 비교 + top 3 feature 분류용.
+  const FEATURE_SCORES_URL = GIST_RAW + '/feature-scores-slim.json';
   const CALC_WEAKNESS_URL = GIST_RAW + '/calcWeakness.js';
   // rate-reference-slim.json — 3550명 ereter-fetched 평균 EX rate (estEc/Hc/Exh × 0.5 bucket, isotonic monotonic).
   //   calcWeakness 에 rateRef 전달 시 absolute reference 기준 잔차 분석 → 사용자간 vec 직접 비교 가능.
@@ -340,13 +342,22 @@ window.OhsorryCore = {
   }
 
   // 패턴 데이터 + weakness 모듈 fetch (실패 시 추천 가중치 없이 진행, 기존 정렬 fallback)
-  let patternsMap = null, weaknessLib = null, rateRefData = null;
+  let patternsMap = null, weaknessLib = null, rateRefData = null, featureScoresMap = null;
   try {
     const { data: pData, source: pSrc } = await loadWithCache(PATTERNS_URL, 'ohSorry:patterns', true);
     patternsMap = pData;
     console.log(`[step2] patterns-all-slim.json ${Object.keys(patternsMap).length}곡 로드 (${pSrc})`);
   } catch (e) {
     console.warn('[step2] patterns-all-slim.json 로드 실패 (가중치 비활성):', e.message);
+  }
+  // feature-scores-slim.json — 약점보완 bin 평균 + top 3 feature 분류용. 실패해도 다른 기능 영향 없음.
+  try {
+    const { data: fsData, source: fsSrc } = await loadWithCache(FEATURE_SCORES_URL, 'ohSorry:featureScores', true);
+    featureScoresMap = fsData;
+    const cnt = (fsData && fsData.scores) ? Object.keys(fsData.scores).length : 0;
+    console.log(`[step2] feature-scores-slim.json ${cnt}곡 로드 (${fsSrc})`);
+  } catch (e) {
+    console.warn('[step2] feature-scores-slim.json 로드 실패 (약점보완 새 알고리즘 비활성):', e.message);
   }
   try {
     const { data: wSrc, source: wSrcType } = await loadWithCache(CALC_WEAKNESS_URL, 'ohSorry:libWeakness', false);
@@ -1563,10 +1574,21 @@ window.OhsorryCore = {
     for (const d in weaknessLib.DIFF2CHART) CHART2DIFF_REC[weaknessLib.DIFF2CHART[d]] = d;
   }
   // recLevelMode 인자는 받지 않음 — 약점보완은 일반 추천 lv 토글 무관 (자체 ★ 상한 + 거리 cutoff).
+  // 새 약점보완 알고리즘 (2026-05-27~) — zasa 0.1 단위 bin 안의 사용자 평균 rate 대비 deficit 기반.
+  //   1. 사용자가 친 곡 (rate>0) 만 풀에 진입 — 안 친 곡은 bin 평균 + 추천 풀 둘 다 제외 (사용자 수준 안에서만 추천)
+  //   2. zasa 0.1 단위 bin 의 사용자 EX rate 평균 — bin 곡 < MIN_BIN_N 이면 이웃 bin 결합 (양쪽 ±0.1 씩 확장)
+  //   3. deficit = bin 평균 rate - 사용자 rate. deficit > 0 곡들 (= 그 bin 평균보다 못 친 곡) 만 약점 풀
+  //   4. mode 별 풀 필터 — 'all' 은 7 feature (NOTES/CHORD/PEAK/PHRASE/JACK/TRILL/RAND) 의 raw pt 필터,
+  //                       단일 mode (CHARGE/SCRATCH/SOF-LAN) 는 그 feature 강한 곡만
+  //   5. deficit asc 정렬 + 강도 1/2/3 위치 — 1=소(앞, 살짝 부족) / 2=중(중간 median) / 3=대(뒤, 큰 약점)
+  //   6. 곡의 top 3 feature (7 feature 안) 추출 — 표시/태그 용. mode 'all' 풀 분류는 곡 자체 (한 풀)
+  //   7. _matchByHand — 배치추천 라벨 (8 way best) 표시용. 정렬 영향 X.
+  const MIN_BIN_N = 10;
   const buildWeaknessRecs = (baseStar, opts) => {
     if (!userVec || !userVec.__vecL || !userVec.__vecR) return [];
-    if (!weaknessLib || !(weaknessLib.chartWeaknessMatch8Way || weaknessLib.chartWeaknessMatchByHand)) return [];
     if (!patternsMap) return [];
+    const fsScores = featureScoresMap && featureScoresMap.scores;
+    if (!fsScores) return [];  // 새 알고리즘은 feature-scores-slim 필수
     if (baseStar == null) baseStar = 11;
     const mode = (opts && opts.mode) || 'all';
     const feats = WEAKNESS_MODE_FEATS[mode] || WEAKNESS_FEATS;
@@ -1574,14 +1596,9 @@ window.OhsorryCore = {
     const handMode = (opts && opts.handMode) || 'both';
     const topN = (opts && typeof opts.topN === 'number') ? opts.topN : 5;
     const strength = (opts && typeof opts.strength === 'number' && opts.strength >= 1) ? opts.strength : 1;
-    const offset = (strength - 1) * topN;
-    // 사용자 지정 zasa 범위 — number 일 때만 적용. AND 결합 — topClearZasa 상한 / ★ 거리 cutoff 와 함께 모두 통과해야 풀 진입.
     const zasaMin = (opts && typeof opts.zasaMin === 'number') ? opts.zasaMin : null;
     const zasaMax = (opts && typeof opts.zasaMax === 'number') ? opts.zasaMax : null;
-    const vecL = userVec.__vecL;
-    const vecR = userVec.__vecR;
-    // ★ 상한 — 사용자가 EC 이상 클리어한 차트의 zasaLevel 최댓값 (= "지금 칠 수 있는 최고 난이도").
-    //   ereterMap 우선 (level), 없으면 ratingMap.zasaLevel. 클리어 안 한 사용자는 0 → 상한 없음 (모두 통과).
+    // ★ 상한
     let topClearZasa = 0;
     for (const c of allCharts) {
       if (typeof c.lampNum !== 'number' || c.lampNum < WEAKNESS_CLEAR_LAMP) continue;
@@ -1595,11 +1612,11 @@ window.OhsorryCore = {
       }
       if (zasa != null && zasa > topClearZasa) topClearZasa = zasa;
     }
-    // user charts (eagate / dbData) lookup map — lamp / djLevel / exScore 가져오기용
     const userChartByKey = new Map();
     for (const c of allCharts) userChartByKey.set(norm(c.title || '') + '|' + c.diff, c);
-    const items = [];
-    // patternsMap 의 모든 (sid, cn) 쌍 순회 — user 가 안 친 곡도 포함.
+
+    // 1단계 — 후보 풀 수집 (사용자 친 곡 + mode 필터 + zasa lookup + ★ 상한 / 거리 / 범위 필터 통과)
+    const candidates = [];
     for (const sid in patternsMap) {
       const sm = patternsMap[sid];
       if (!sm || !sm.c) continue;
@@ -1610,36 +1627,28 @@ window.OhsorryCore = {
         if (!diff) continue;
         const chartPt = sm.c[cn];
         const gameLevel = chartPt.lv;
-        // recLevelMode (lv12 / lv11+12 / all) — 일반 추천 (EC/HC/EXH) 토글이라 약점보완은 무시.
-        //   약점보완 풀은 topClearZasa 상한 + ★ 거리 cutoff 로 자체 좁힘.
-        // mode 별 raw pt 필터.
-        //   합산 (all): SOF-LAN raw>0 / CHARGE raw>0 / SCRATCH raw≥6.35(p70) 제외 (순수 7 feature 곡만)
-        //   단일 모드 (CHARGE/SCRATCH/SOF-LAN): 그 feature 가 있는 (또는 강한) 곡만 통과 (반대 필터)
-        {
-          const ptL_pre = chartPt.p1 || {};
-          const ptR_pre = chartPt.p2 || {};
-          const soflanAvg = ((ptL_pre['SOF-LAN'] || 0) + (ptR_pre['SOF-LAN'] || 0)) / 2;
-          const chargeAvg = ((ptL_pre.CHARGE || 0) + (ptR_pre.CHARGE || 0)) / 2;
-          const scratchAvg = ((ptL_pre.SCRATCH || 0) + (ptR_pre.SCRATCH || 0)) / 2;
-          if (mode === 'all') {
-            if (soflanAvg > 0) continue;
-            if (chargeAvg > 0) continue;
-            if (scratchAvg >= 6.35) continue;
-          } else if (mode === 'CHARGE')   { if (chargeAvg <= 0) continue; }
-          else if (mode === 'SCRATCH')    { if (scratchAvg < 6.35) continue; }
-          else if (mode === 'SOF-LAN')    { if (soflanAvg <= 0) continue; }
-        }
-        // 약점 매치 — 새 8 배치 우선, 옛 gist 면 옛 2 배치 fallback.
-        //   flipOn 토글: ON → 8 배치 (mirror+flip 모두), OFF → 정규 N/N 강제 (mirrorOn=false, flipOn=false).
-        let w;
-        if (weaknessLib.chartWeaknessMatch8Way) {
-          w = weaknessLib.chartWeaknessMatch8Way(chartPt, userVec,
-            { feats, handMode, flipOn, mirrorOn: flipOn });
-        } else {
-          w = weaknessLib.chartWeaknessMatchByHand(chartPt, vecL, vecR, { feats, flipOn, handMode });
-        }
-        if (!w || w.bestTotal <= 0) continue;
-        // 차트 메타 (★, est) — ereterMap 우선, 없으면 ratingMap zasa 추정. 둘 다 없으면 gameLevel 평균으로 fallback.
+        // 사용자 친 곡만 (안 친 곡은 둘 다 제외)
+        const uc = userChartByKey.get(norm(title) + '|' + diff);
+        if (!uc) continue;
+        const exScore = uc.exScore;
+        const noteCount = uc.noteCount;
+        if (typeof exScore !== 'number' || exScore <= 0) continue;
+        if (typeof noteCount !== 'number' || noteCount <= 0) continue;
+        const rate = (exScore / (noteCount * 2)) * 100;
+        // mode 별 raw pt 필터 (기존 동일)
+        const ptL_pre = chartPt.p1 || {};
+        const ptR_pre = chartPt.p2 || {};
+        const soflanAvg = ((ptL_pre['SOF-LAN'] || 0) + (ptR_pre['SOF-LAN'] || 0)) / 2;
+        const chargeAvg = ((ptL_pre.CHARGE || 0) + (ptR_pre.CHARGE || 0)) / 2;
+        const scratchAvg = ((ptL_pre.SCRATCH || 0) + (ptR_pre.SCRATCH || 0)) / 2;
+        if (mode === 'all') {
+          if (soflanAvg > 0) continue;
+          if (chargeAvg > 0) continue;
+          if (scratchAvg >= 6.35) continue;
+        } else if (mode === 'CHARGE')   { if (chargeAvg <= 0) continue; }
+        else if (mode === 'SCRATCH')    { if (scratchAvg < 6.35) continue; }
+        else if (mode === 'SOF-LAN')    { if (soflanAvg <= 0) continue; }
+        // 차트 zasa lookup
         let e = ereterMap.get(norm(title) + '|' + diff);
         if (!e || e.level == null) {
           const r = ratingMap.get(norm(title) + '|' + diff);
@@ -1652,50 +1661,128 @@ window.OhsorryCore = {
               ec_n: r.nEcCleared || 0, hc_n: r.nHcCleared || 0, exh_n: r.nExhCleared || 0,
             };
           } else if (typeof zasaAvgByGameLv[gameLevel] === 'number') {
-            // fallback — 해당 gameLevel 의 zasaLevel 평균. ec/hc/exh 는 추정 안 함 (null).
-            e = {
-              level: zasaAvgByGameLv[gameLevel],
-              ec: null, hc: null, exh: null,
-              ec_n: 0, hc_n: 0, exh_n: 0,
-            };
+            e = { level: zasaAvgByGameLv[gameLevel], ec: null, hc: null, exh: null, ec_n: 0, hc_n: 0, exh_n: 0 };
           } else continue;
         }
-        // ★ 상한 — 차트 zasaLevel (e.level) 이 topClearZasa 이하인 곡만 통과.
-        //   topClearZasa = 0 (= 클리어 차트 없음) 이면 상한 없음 (모두 통과).
-        if (topClearZasa > 0 && typeof e.level === 'number' && e.level > topClearZasa) continue;
-        // ★ 거리 cutoff — baseStar 와 ±STAR_DISTANCE_W 밖이면 풀 제외 (점진학습 정렬은 그대로 bestTotal asc).
+        if (typeof e.level !== 'number') continue;
+        if (topClearZasa > 0 && e.level > topClearZasa) continue;
         if (starDistanceWeight(e.level, baseStar) <= 0) continue;
-        // 사용자 지정 zasa 범위 — number 일 때만 추가 필터 (AND 결합).
-        if (zasaMin != null && typeof e.level === 'number' && e.level < zasaMin) continue;
-        if (zasaMax != null && typeof e.level === 'number' && e.level > zasaMax) continue;
-        const dv = typeof e.exh === 'number' ? e.exh : (typeof e.hc === 'number' ? e.hc : e.level);
-        // user 가 친 곡이면 lamp / djLevel / exScore 채움 (안 친 곡은 null)
-        const uc = userChartByKey.get(norm(title) + '|' + diff);
-        items.push({
-          title: title, chart: diff, level: e.level,
-          ec: e.ec, hc: e.hc, exh: e.exh,
-          ec_n: e.ec_n, hc_n: e.hc_n, exh_n: e.exh_n,
-          diffValue: dv,
-          currentLamp: uc ? uc.lamp : null,
-          margin: baseStar - dv,
-          gameLevel: gameLevel,
-          _weaknessScore: w.bestTotal,
-          // _matchByHand 형식 통일 (strength wrapper 와 동일). 8 way 결과의 best 객체에서 L/R/flip/mL/mR 노출.
-          _matchByHand: w.best ? {
-            bestTotal: w.bestTotal, bestLabel: w.bestLabel, best: w.best,
-            L: w.best.L, R: w.best.R,
-            flip: w.best.flip, mL: w.best.mL, mR: w.best.mR,
-            total: w.best.total,
-            results: w.results,
-          } : w,
-          _category: 'weakness',
+        if (zasaMin != null && e.level < zasaMin) continue;
+        if (zasaMax != null && e.level > zasaMax) continue;
+        // feature score lookup (top 3 분류용)
+        const songFs = fsScores[sid];
+        const featScores = songFs && songFs[cn];
+        if (!featScores) continue;
+        candidates.push({
+          sid, cn, title, diff, chartPt,
+          zasa: e.level, gameLevel, e, uc, rate, featScores,
+          dv: typeof e.exh === 'number' ? e.exh : (typeof e.hc === 'number' ? e.hc : e.level),
         });
       }
     }
-    // 정렬: bestTotal asc (양수 작은 부터 = 약점 조금씩 드러나는 곡부터, 점진학습).
-    // 강도 offset = (strength-1) × topN — slice(offset, offset+topN) 로 다음 단계 곡 노출.
-    items.sort((a, b) => a._weaknessScore - b._weaknessScore);
-    const top = items.slice(offset, offset + topN);
+
+    // 2단계 — zasa 0.1 bin 별 사용자 rate 합/카운트 산출
+    const binMap = {};
+    for (const c of candidates) {
+      const bk = (Math.round(c.zasa * 10) / 10).toFixed(1);
+      if (!binMap[bk]) binMap[bk] = { sum: 0, n: 0 };
+      binMap[bk].sum += c.rate;
+      binMap[bk].n += 1;
+    }
+    // bin 곡 < MIN_BIN_N 이면 이웃 bin 결합 — 양쪽 ±0.1 씩 확장하면서 누적, n >= MIN_BIN_N 되면 멈춤.
+    function binMeanFor(targetBk) {
+      let sum = 0, n = 0;
+      const seen = {};
+      function add(bk) {
+        if (seen[bk]) return false;
+        seen[bk] = true;
+        if (binMap[bk]) { sum += binMap[bk].sum; n += binMap[bk].n; return true; }
+        return false;
+      }
+      const t = (Math.round(targetBk * 10) / 10);
+      add(t.toFixed(1));
+      let step = 1;
+      while (n < MIN_BIN_N && step <= 30) {
+        const lo = (t - step * 0.1);
+        const hi = (t + step * 0.1);
+        const a1 = add((Math.round(lo * 10) / 10).toFixed(1));
+        const a2 = add((Math.round(hi * 10) / 10).toFixed(1));
+        if (!a1 && !a2) {
+          // 양쪽 모두 빈 bin — 다음 step 으로 (zasa 분포 띄엄띄엄일 수 있음)
+        }
+        step += 1;
+      }
+      return n > 0 ? sum / n : null;
+    }
+    for (const c of candidates) {
+      c.binMean = binMeanFor(c.zasa);
+      c.deficit = (c.binMean != null) ? (c.binMean - c.rate) : 0;
+    }
+
+    // 3단계 — deficit > 0 (bin 평균보다 못 친 곡) 만 풀.
+    //   top 3 feature 분류 — 7 feature 안에서. 표시용 + mode 'all' 풀의 hashtag 활용.
+    const pool = [];
+    for (const c of candidates) {
+      if (c.deficit <= 0) continue;
+      // top 3 feature (7 feature subset 에서) 추출 — 단일 mode 도 같은 계산 (정보용)
+      const arr = [];
+      for (let fi = 0; fi < WEAKNESS_FEATS.length; fi++) {
+        const f = WEAKNESS_FEATS[fi];
+        const s = c.featScores[f];
+        if (typeof s !== 'number' || s <= 0) continue;
+        arr.push({ f, s });
+      }
+      arr.sort((a, b) => b.s - a.s);
+      c.top3 = arr.slice(0, 3).map((x) => x.f);
+      pool.push(c);
+    }
+
+    // 4단계 — deficit asc 정렬 + 강도 1/2/3 위치
+    pool.sort((a, b) => a.deficit - b.deficit);
+    const P = pool.length;
+    let startIdx;
+    if (strength === 1) startIdx = 0;
+    else if (strength >= 3) startIdx = Math.max(0, P - topN);
+    else startIdx = Math.max(0, Math.floor((P - topN) / 2));  // 강도 2 = 중간
+    const slice = pool.slice(startIdx, startIdx + topN);
+
+    // 5단계 — items 변환 + _matchByHand (8 way best 라벨) + tags/hashtags
+    const items = [];
+    for (const c of slice) {
+      items.push({
+        title: c.title, chart: c.diff, level: c.zasa,
+        ec: c.e.ec, hc: c.e.hc, exh: c.e.exh,
+        ec_n: c.e.ec_n, hc_n: c.e.hc_n, exh_n: c.e.exh_n,
+        diffValue: c.dv,
+        currentLamp: c.uc ? c.uc.lamp : null,
+        margin: baseStar - c.dv,
+        gameLevel: c.gameLevel,
+        _weaknessScore: c.deficit,
+        _weaknessDeficit: c.deficit,
+        _weaknessBinMean: c.binMean,
+        _weaknessRate: c.rate,
+        _weaknessTop3: c.top3,
+        _category: 'weakness',
+      });
+    }
+    // _matchByHand — 8 way best 라벨 (표시용, 정렬 영향 X)
+    if (weaknessLib && weaknessLib.chartStrengthMatch8Way) {
+      for (let i = 0; i < items.length; i++) {
+        const r = items[i];
+        const c = slice[i];
+        const w8 = weaknessLib.chartStrengthMatch8Way(c.chartPt, userVec,
+          { feats, handMode, flipOn, mirrorOn: flipOn });
+        if (w8 && w8.best) {
+          r._matchByHand = {
+            bestTotal: w8.bestTotal, bestLabel: w8.bestLabel, best: w8.best,
+            L: w8.best.L, R: w8.best.R,
+            flip: w8.best.flip, mL: w8.best.mL, mR: w8.best.mR,
+            total: w8.best.total, results: w8.results,
+          };
+        }
+      }
+    }
+    const top = items;
     for (const r of top) {
       if (r._tags === undefined) r._tags = computeChartTags(r);
       if (r._hashtags === undefined) r._hashtags = computeRecHashtags(r);
