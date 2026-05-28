@@ -141,7 +141,7 @@ window.OhsorryDb = (function () {
     let totalFetched = 0;
     while (true) {
       const url = SUPABASE_URL +
-        `/rest/v1/songs?select=song_id,title,ac&order=song_id.asc&limit=${pageSize}&offset=${offset}`;
+        `/rest/v1/songs?select=song_id,title,ac,legen&order=song_id.asc&limit=${pageSize}&offset=${offset}`;
       const res = await fetch(url, { headers: HEADERS });
       if (!res.ok) throw new Error(`songs fetch 실패 HTTP ${res.status}`);
       const rows = await res.json();
@@ -149,7 +149,7 @@ window.OhsorryDb = (function () {
         if (!r.title) continue;
         const k = normTitle(r.title);
         if (!k) continue;
-        const entry = { song_id: r.song_id, title: r.title, ac: r.ac };
+        const entry = { song_id: r.song_id, title: r.title, ac: r.ac, legen: r.legen };
         if (!byNorm.has(k)) byNorm.set(k, []);
         byNorm.get(k).push(entry);
         // Ø/ø 곡은 eagate 표기가 일관되지 않음 — 'O' 알파벳 alias 도 등록
@@ -579,11 +579,12 @@ window.OhsorryDb = (function () {
   }
 
   return {
-    VERSION: '0.0.407',
+    VERSION: '0.0.408',
     upsertUserProfile: upsertUserProfile,
     upsertUserChartScores: upsertUserChartScores,
     uploadResult: uploadResult,
     fetchUserProfile: fetchUserProfile,
     fetchServiceStatus: fetchServiceStatus,
+    getSongsByNorm: getSongsCache,  // Map<normKey, [{ song_id, title, ac, legen }]> — INF/AC 차트 단위 필터링용
   };
 })();

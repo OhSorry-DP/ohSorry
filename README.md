@@ -441,6 +441,14 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### 2026-05-29 — INF 유저 연습곡 추천 차트 단위 정확 필터 (legen 비트맵) — calcOhsorryCore v0.0.384 / dbConn v0.0.408
+- 직전 v0.0.382 의 곡 단위 (charts_json title set) 필터는 곡은 INF 수록인데 LEG 차트만 미수록인 케이스 (예: `鏡像都市` — `ac=3 legen=0`) 를 못 거르던 한계.
+- fix: ohSorryWeb [api.js](../ohSorryWeb/modules/api.js) `makeChartSeriesChecker` 와 동등한 차트 단위 비트맵 검사 ohSorry 본체에도 적용.
+  - **[dbConn](modules/dbConn.js)** — songsCache fetch 의 select 에 `legen` 컬럼 추가 + cache entry 에 포함. `getSongsByNorm()` 외부 export 신설 (`Map<normKey, [{ song_id, title, ac, legen }]>`).
+  - **[calcOhsorryCore](modules/calcOhsorryCore.js)** — `buildWeaknessRecs` 정의 직전 compute scope 에 `isInfChartInSeries(title, chartName)` 헬퍼 정의. INF 유저 (`isInfData` or `iidx_id` 첫 글자 알파벳) 면 `OhsorryDb.getSongsByNorm()` 결과로 `chartName === 'DP_LEG'/'SP_LEG'` → `songs.legen & 2`, 그 외 → `songs.ac & 2` 검사. songs 캐시 fetch 실패 시 charts_json title set fallback (곡 단위).
+  - candidate loop 안 검사 위치를 `cn` (chartName) 루프 안으로 이동 → 차트 단위 정확 차단.
+- 효과: 곡은 INF 수록인데 LEG 만 미수록인 케이스도 정확히 제외. AC 유저 경로는 isInfUser=false 라 fetch / 필터 모두 skip — 기존 동작 그대로 유지.
+
 ### 2026-05-28 — 연습곡 기본 ☆ 범위 −0.1 회귀 fix (EC 이상으로 인정) — calcOhsorryCore v0.0.383
 - 증상: 12.4 까지 깬 유저의 기본 범위 max 가 12.3 으로, 12.6 유저는 12.5 로 −0.1 낮게 잡힘.
 - 원인: 직전 v0.0.381 의 `practiceZasaDefault` 가 `WEAKNESS_CLEAR_LAMP` (= 4, NC 이상) 기준으로 topClearZasa 산정 → EC 만 한 12.4 / 12.6 곡이 누락되어 다음 NC 곡이 max 로 채택.

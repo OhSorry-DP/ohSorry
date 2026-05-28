@@ -42,7 +42,7 @@ window.OhsorryCore = {
   let dbData = opts.dbData || null;
   const rivalToken = opts.rivalToken || null;
   const wrapperVersion = opts.wrapperVersion || 'unknown';
-  const CORE_VERSION_SHORT = '0.0.380'.replace(/^0\.0\./, '');  // '346'
+  const CORE_VERSION_SHORT = '0.0.384'.replace(/^0\.0\./, '');  // '346'
   const dbVersionString = `${wrapperVersion}-core${CORE_VERSION_SHORT}`;
   dbData = dbData || null;
   // -------- 0. ereter 데이터 로드 (Gist 에서 자동 fetch) --------
@@ -1681,6 +1681,35 @@ window.OhsorryCore = {
   if (weaknessLib && weaknessLib.DIFF2CHART) {
     for (const d in weaknessLib.DIFF2CHART) CHART2DIFF_REC[weaknessLib.DIFF2CHART[d]] = d;
   }
+  // INF 유저 — supabase songs.ac/legen 비트맵으로 차트 단위 INF 수록 여부 정확 필터.
+  //   chartName === 'DP_LEG'/'SP_LEG' 면 legen 컬럼, 그 외는 ac 컬럼. INF 비트 = 2.
+  //   songsByNorm 못 가져오면 (= OhsorryDb 미로드 / fetch 실패) fallback 으로 allCharts title set 매칭 (곡 단위).
+  //   AC 유저는 isInfUser=false → fetch / 필터 모두 skip (기존 동작 유지).
+  const isInfUser = isInfData || (profile && profile.iidxId && /^[A-Za-z]/.test(String(profile.iidxId).replace(/-/g, '')));
+  let songsByNorm = null;
+  if (isInfUser && window.OhsorryDb && typeof window.OhsorryDb.getSongsByNorm === 'function') {
+    try {
+      songsByNorm = await window.OhsorryDb.getSongsByNorm();
+    } catch (err) {
+      console.warn('[step2] songs cache fetch 실패 — INF 필터 title fallback:', err && err.message);
+    }
+  }
+  const infTitleSet = isInfUser
+    ? new Set(allCharts.filter((c) => c && c.title).map((c) => norm(c.title)))
+    : null;
+  const isInfChartInSeries = (title, chartName) => {
+    if (!isInfUser) return true;
+    if (songsByNorm) {
+      const cands = songsByNorm.get(norm(title));
+      if (!cands || cands.length === 0) return false;
+      const isLeg = chartName === 'DP_LEG' || chartName === 'SP_LEG';
+      return cands.some((c) => {
+        const v = isLeg ? c.legen : c.ac;
+        return typeof v === 'number' && (v & 2) !== 0;
+      });
+    }
+    return infTitleSet.has(norm(title));
+  };
   // 연습곡 기본 범위는 zasa 11.6~12.7. DP12/DP11+ 클리어 범위 토글과 독립적으로 ☆ 입력값만 따른다.
   // 연습곡 알고리즘 (2026-05-27~) — 복습곡 + 신규 패턴곡 + 실전 연습곡 혼합.
   //   - '건반'은 순수 건반 7 feature 만 사용하며 CHARGE / SCRATCH / SOF-LAN 은 제외.
@@ -1724,17 +1753,6 @@ window.OhsorryCore = {
     const userChartByKey = new Map();
     for (const c of allCharts) userChartByKey.set(norm(c.title || '') + '|' + c.diff, c);
 
-    // INF 유저 — candidate 곡을 사용자 charts_json (= INF 수록곡) title 집합으로 제한.
-    // 서열표 (ohsorryShelf) 의 INF 분기와 같은 정신: charts_json 안 곡만 base. INF 미수록곡이 추천에 뜨던 회귀 차단.
-    const isInfUser = isInfData || (profile && profile.iidxId && /^[A-Za-z]/.test(String(profile.iidxId).replace(/-/g, '')));
-    let infTitleSet = null;
-    if (isInfUser) {
-      infTitleSet = new Set();
-      for (const c of allCharts) {
-        if (c && c.title) infTitleSet.add(norm(c.title));
-      }
-    }
-
     // 1단계 — 후보 풀 수집 (친 곡 + 안 친 곡 모두, mode 별 특수 패턴 분리)
     const candidates = [];
     for (const sid in patternsMap) {
@@ -1742,10 +1760,11 @@ window.OhsorryCore = {
       if (!sm || !sm.c) continue;
       const title = sm.t || '';
       if (!title) continue;
-      if (infTitleSet && !infTitleSet.has(norm(title))) continue;
       for (const cn in sm.c) {
         const diff = CHART2DIFF_REC[cn];
         if (!diff) continue;
+        // INF 유저 — 차트 단위 (LEG 차트는 legen, 그 외는 ac 컬럼) 정확 필터. AC 유저는 isInfChartInSeries 가 항상 true.
+        if (!isInfChartInSeries(title, cn)) continue;
         const chartPt = sm.c[cn];
         const gameLevel = chartPt.lv;
         const ptL_pre = chartPt.p1 || {};
