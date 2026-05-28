@@ -441,6 +441,17 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### 2026-05-28 — 연습곡 기본 ☆ 범위 −0.1 회귀 fix (EC 이상으로 인정) — calcOhsorryCore v0.0.383
+- 증상: 12.4 까지 깬 유저의 기본 범위 max 가 12.3 으로, 12.6 유저는 12.5 로 −0.1 낮게 잡힘.
+- 원인: 직전 v0.0.381 의 `practiceZasaDefault` 가 `WEAKNESS_CLEAR_LAMP` (= 4, NC 이상) 기준으로 topClearZasa 산정 → EC 만 한 12.4 / 12.6 곡이 누락되어 다음 NC 곡이 max 로 채택.
+- fix: `practiceZasaDefault` IIFE 안의 lampNum 비교를 `>= 3` (EC 이상, 사용자 인지의 "깼다") 으로 변경. `WEAKNESS_CLEAR_LAMP` 상수 자체는 `buildWeaknessRecs` 의 다른 안전장치 용도 (절벽 상한 + uc.lampNum 검사) 라 NC 기준 그대로 유지.
+
+### 2026-05-28 — INF 유저 연습곡 추천에서 INF 미수록곡 차단 — calcOhsorryCore v0.0.382
+- 증상: INF 유저 (`iidx_id` 첫 글자 알파벳 또는 `dbData.series === 'INF'`) 의 연습곡 추천 (`buildWeaknessRecs`) 에 AC 전용 곡이 섞여 나오던 회귀.
+- 원인: candidate 풀이 `patternsMap` 전체 (= AC + INF + 미수록 모두) — `allCharts` 에 없는 곡 (사용자가 안 친 신규 패턴곡) 도 의도적으로 포함하기 때문에 INF 미수록도 자연스럽게 후보로 들어감.
+- fix: 서열표 ([ohsorryShelf](modules/ohsorryShelf.js)) 의 INF 분기 정신 (`charts_json` 안 곡만 base) 을 그대로 차용. INF 유저면 `allCharts` 의 title 들을 `norm()` 한 `Set` 만들어, candidate loop 진입 직후 `infTitleSet.has(norm(title))` 통과 못 한 곡 skip. AC 유저 / 게스트 모드는 `infTitleSet === null` 로 기존 동작 유지.
+- 한계: 곡 단위 필터링이라 곡은 INF 수록인데 LEG 차트만 미수록인 케이스는 못 거름 (ohSorryWeb 의 `songs.legen` 비트맵 같은 차트 단위 데이터가 본체에는 없음). 추후 [dbConn](modules/dbConn.js) songsCache 에 `legen` 추가 + export 하면 정확화 가능.
+
 ### 2026-05-28 — 연습곡 기본 ☆ 범위 = [topClearZasa−1, topClearZasa] — calcOhsorryCore v0.0.381
 - 기존: `practiceZasaDefault` 가 게임레벨 (`maxClearGameLevel`) 기준 4단계 하드코딩 (12+→11.6~12.7 등).
 - 변경: 사용자가 EC 이상 클리어한 차트 중 zasa 최고값 (`topClearZasa`) 을 먼저 구해 `{ min: topClearZasa − 1, max: topClearZasa }` 반환. 게임레벨이 같아도 사용자별 실제 클리어 zasa 에 정확히 붙음.

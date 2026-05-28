@@ -1648,10 +1648,12 @@ window.OhsorryCore = {
   const WEAKNESS_FEATS = ['NOTES', 'CHORD', 'PEAK', 'PHRASE', 'JACK', 'TRILL', 'RAND'];
   const WEAKNESS_CLEAR_LAMP = 4;   // EC 이상 (lampNum >= 4) 을 "클리어" 로 봄 — topClearZasa 산정 기준
   const practiceZasaDefault = (() => {
-    // 사용자가 EC 이상 클리어한 차트들 중 zasa 최고값 → [max-1.0, max] 범위. 클리어 이력 없으면 게임레벨 기반 fallback.
+    // 사용자가 EC 이상 (lampNum >= 3, 사용자 인지의 "깼다") 클리어한 차트들 중 zasa 최고값 → [max-1.0, max] 범위.
+    //   WEAKNESS_CLEAR_LAMP (= 4, NC 이상) 는 buildWeaknessRecs 의 안전장치용 — 여기와는 의미가 다름.
+    //   클리어 이력 없으면 게임레벨 기반 fallback.
     let topClearZasa = 0;
     for (const c of allCharts) {
-      if (typeof c.lampNum !== 'number' || c.lampNum < WEAKNESS_CLEAR_LAMP) continue;
+      if (typeof c.lampNum !== 'number' || c.lampNum < 3) continue;
       const k0 = norm(c.title || '') + '|' + c.diff;
       const e0 = ereterMap.get(k0);
       let zasa = null;
@@ -1722,6 +1724,17 @@ window.OhsorryCore = {
     const userChartByKey = new Map();
     for (const c of allCharts) userChartByKey.set(norm(c.title || '') + '|' + c.diff, c);
 
+    // INF 유저 — candidate 곡을 사용자 charts_json (= INF 수록곡) title 집합으로 제한.
+    // 서열표 (ohsorryShelf) 의 INF 분기와 같은 정신: charts_json 안 곡만 base. INF 미수록곡이 추천에 뜨던 회귀 차단.
+    const isInfUser = isInfData || (profile && profile.iidxId && /^[A-Za-z]/.test(String(profile.iidxId).replace(/-/g, '')));
+    let infTitleSet = null;
+    if (isInfUser) {
+      infTitleSet = new Set();
+      for (const c of allCharts) {
+        if (c && c.title) infTitleSet.add(norm(c.title));
+      }
+    }
+
     // 1단계 — 후보 풀 수집 (친 곡 + 안 친 곡 모두, mode 별 특수 패턴 분리)
     const candidates = [];
     for (const sid in patternsMap) {
@@ -1729,6 +1742,7 @@ window.OhsorryCore = {
       if (!sm || !sm.c) continue;
       const title = sm.t || '';
       if (!title) continue;
+      if (infTitleSet && !infTitleSet.has(norm(title))) continue;
       for (const cn in sm.c) {
         const diff = CHART2DIFF_REC[cn];
         if (!diff) continue;
