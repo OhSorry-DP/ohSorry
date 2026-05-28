@@ -1648,6 +1648,21 @@ window.OhsorryCore = {
   const WEAKNESS_FEATS = ['NOTES', 'CHORD', 'PEAK', 'PHRASE', 'JACK', 'TRILL', 'RAND'];
   const WEAKNESS_CLEAR_LAMP = 4;   // EC 이상 (lampNum >= 4) 을 "클리어" 로 봄 — topClearZasa 산정 기준
   const practiceZasaDefault = (() => {
+    // 사용자가 EC 이상 클리어한 차트들 중 zasa 최고값 → [max-1.0, max] 범위. 클리어 이력 없으면 게임레벨 기반 fallback.
+    let topClearZasa = 0;
+    for (const c of allCharts) {
+      if (typeof c.lampNum !== 'number' || c.lampNum < WEAKNESS_CLEAR_LAMP) continue;
+      const k0 = norm(c.title || '') + '|' + c.diff;
+      const e0 = ereterMap.get(k0);
+      let zasa = null;
+      if (e0 && typeof e0.level === 'number') zasa = e0.level;
+      else {
+        const r0 = ratingMap.get(k0);
+        if (r0 && typeof r0.zasaLevel === 'number') zasa = r0.zasaLevel;
+      }
+      if (zasa != null && zasa > topClearZasa) topClearZasa = zasa;
+    }
+    if (topClearZasa > 0) return { min: +(topClearZasa - 1).toFixed(1), max: topClearZasa };
     if (maxClearGameLevel >= 12) return { min: 11.6, max: 12.7 };
     if (maxClearGameLevel >= 11) return { min: 10.0, max: 12.1 };
     if (maxClearGameLevel >= 10) return { min: 8.0, max: 10.9 };

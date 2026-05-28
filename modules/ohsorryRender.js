@@ -1,4 +1,4 @@
-// ohsorryRender.js — 오소리 결과 렌더 모듈 (v0.0.377)
+// ohsorryRender.js — 오소리 결과 렌더 모듈 (v0.0.378)
 //
 // calcOhsorryCore.compute() 가 반환한 result 객체를 받아 화면 패널 + 추천곡 + supabase upload.
 // 본체 / 라이벌 wrapper 가 fetch + eval 해서 사용.
@@ -548,7 +548,7 @@ window.OhsorryRender = {
         };
         window.__dp_rerollAndRender = rerenderRecStage;
 
-        // 연습곡 (weakness) UI 옵션 상태 — 기본 ☆ 범위는 core 가 최대 클리어 게임레벨 기준으로 계산.
+        // 연습곡 (weakness) UI 옵션 상태 — 기본 ☆ 범위는 core 가 사용자 최대 클리어 zasa 기준 [max-1, max] 로 계산 (없으면 게임레벨 fallback).
         const practiceDefault = result.practiceZasaDefault || { min: 11.6, max: 12.7 };
         const weaknessOpts = { mode: 'all', topN: 5, flipOn: true, handMode: 'both', strength: 1, zasaMin: practiceDefault.min, zasaMax: practiceDefault.max };
         const rerenderWeakness = () => {
@@ -857,10 +857,10 @@ window.OhsorryRender = {
         };
 
         return recModeToggle + recLevelToggle + [
+          renderRec('연습곡', topWeakness, '#ff6b9d', 'weakness'),
           renderRec('EASY',    topEC,  '#52a447', 'ec'),
           renderRec('HARD',    topHC,  '#dc3545', 'hc'),
           renderRec('EX-HARD', topEXH, '#d4a017', 'exh'),
-          renderRec('연습곡', topWeakness, '#ff6b9d', 'weakness'),
         ].join('');
       })()}
       </div>

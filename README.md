@@ -441,6 +441,15 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### 2026-05-28 — 연습곡 기본 ☆ 범위 = [topClearZasa−1, topClearZasa] — calcOhsorryCore v0.0.381
+- 기존: `practiceZasaDefault` 가 게임레벨 (`maxClearGameLevel`) 기준 4단계 하드코딩 (12+→11.6~12.7 등).
+- 변경: 사용자가 EC 이상 클리어한 차트 중 zasa 최고값 (`topClearZasa`) 을 먼저 구해 `{ min: topClearZasa − 1, max: topClearZasa }` 반환. 게임레벨이 같아도 사용자별 실제 클리어 zasa 에 정확히 붙음.
+- fallback: 클리어 이력이 없어 `topClearZasa === 0` 이면 기존 게임레벨 기반 4단계 fallback 유지 (신규 유저용).
+- float 정밀도: `+(topClearZasa − 1).toFixed(1)` 로 정리 → `.5999...` 같은 부동소수 오차 차단.
+
+### 2026-05-28 — 추천곡 순서 변경 (연습곡 → EASY → HARD → EX-HARD) — ohsorryRender v0.0.378
+- 사용자 요청 — 연습곡 추천이 클리어 추천 (EC/HC/EXH) 위로 올라오도록 [ohsorryRender.js](modules/ohsorryRender.js) `renderRec` 호출 순서 재배치.
+
 ### 2026-05-28 — README 추천곡 섹션 현재 동작에 맞춰 다시 작성
 - 옛 설명 (3-pool 2:5:3 / 도전 offset 동적 / 클리어 인구 top 10 + 랜덤 5 셔플) → 현 코드 (effectiveBase + d 기반 풀 / `_clearScore` 8-component 가중합 / cleanup 50/50 다양성 보정 / slot 분배 4:4:2 또는 EXH 8:1:1).
 - _clearType (#한끗 / #점수도전 / #검증곡 / #적합) 분류 의미 + low 모드 + 토글 옵션 + 차트 표시 (prefix / 곡명 색 조건) 정리.
