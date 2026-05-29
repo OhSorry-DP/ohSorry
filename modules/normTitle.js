@@ -46,6 +46,8 @@
     'Xlo': 'Xlø',                            // ereter 'Xlo' → textage 'Xlø' (Ø → O 알파벳 변형)
     'VOID': 'VØID',                          // ereter 'VOID' → textage 'VØID' (Ø → O 알파벳 변형)
     'CROSSROAD ～Left Story～': 'CROSSROAD',  // eagate 부제 표기 → songs 'CROSSROAD' (같은 곡)
+    'Space Battleship S4TO': 'Space Battleship S4TØ',  // eagate '일반 O' → textage 'Ø' (U+00D8) — 'Ø' 가 norm 에서 '0' 으로 바뀌어 'O' 와 매칭 실패
+    'メテオラ-meteor-': 'メテオラ -meteor-',  // eagate Reflux 공백 없는 표기 → textage 공백 있는 표기 (안전망 — norm 공백제거가 이미 처리하지만 cache stale 케이스 대응)
   };
 
   // 동명이곡 (norm 후 같은 키, raw 만 다른) → 강제 norm 키 분리.
@@ -160,7 +162,7 @@
   }
 
   return {
-    VERSION: '0.0.5',
+    VERSION: '0.0.6',
     norm: norm,
     denorm: denorm,
   };
