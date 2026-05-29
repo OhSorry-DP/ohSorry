@@ -173,6 +173,27 @@ window.OhsorryDb = (function () {
     return byNorm;
   }
 
+  // textage-meta lookup — norm(title) → textage_song_id Map. 한 번 빌드 후 cache.
+  //   ensure_song 호출 시 p_textage_song_id 전달 → ON CONFLICT (textage_song_id) 로 옛 row 와 자동 통합.
+  //   supabase songs cache 가 stale 한 경우에도 textage-meta 가 fresh 면 매칭 가능.
+  //   cache miss (textage-meta 자체 없음) 면 null 반환 — 기존 동작 (textage_song_id null 로 INSERT).
+  let textageByTitle = null;
+  function getTextageByTitle() {
+    if (textageByTitle !== null) return textageByTitle;
+    const meta = (typeof window !== 'undefined' && window.__ohsorryLibCache && window.__ohsorryLibCache.textage) || null;
+    if (!meta || !meta.songs) { textageByTitle = new Map(); return textageByTitle; }
+    const m = new Map();
+    for (const sid in meta.songs) {
+      const e = meta.songs[sid];
+      if (!e || !e.title) continue;
+      const k = normTitle(e.title);
+      if (!k) continue;
+      if (!m.has(k)) m.set(k, sid);   // 같은 키 중복 시 첫 번째 우선 (parseTextage 가 LEGGENDARIA 분리 entry skip)
+    }
+    textageByTitle = m;
+    return textageByTitle;
+  }
+
   // normKey 후보 array + played_version → song_id 단일 선택
   //   played_version 0 = INF (ac & 2), > 0 = AC (ac & 1)
   //   - 후보 1개면 그대로
@@ -303,12 +324,18 @@ window.OhsorryDb = (function () {
           //   ac 비트 (1=AC, 2=INF) 결정: playedVersion 0=INF, 그 외=AC.
           //   LEGGENDARIA 차트면 legen 비트만, 그 외는 ac 비트만 set.
           //   RPC 실패 (SQL 미적용 / 권한 X) 시 graceful — 기존처럼 unmatched skip.
+          //
+          // textage-meta lookup 으로 textage_song_id 찾기 — supabase songs cache 가 stale 한 경우라도
+          // textage-meta 에 그 곡이 있으면 textage_song_id 전달 → ensure_song 의 ON CONFLICT (textage_song_id)
+          // 분기로 옛 row 와 자동 통합 (= series_no=99 새 row 생성 안 됨).
           const isLeg = r.diff === 'LEGGENDARIA';
           const acBit = playedVersion === 0 ? 2 : 1;
+          const txMap = getTextageByTitle();
+          const txId = txMap ? (txMap.get(normTitle(r.title)) || null) : null;
           try {
             const ensured = await callRpc('ensure_song', {
               p_title: r.title,
-              p_textage_song_id: null,
+              p_textage_song_id: txId,
               p_ac:    isLeg ? null : acBit,
               p_legen: isLeg ? acBit : null,
             });
