@@ -441,6 +441,12 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### 2026-05-29 — 시리즈 폴더 fetch 시 songs.series_no 자동 갱신 — eagateFetch / dbConn v0.0.409
+- 사전 조건: ohSorryAdmin `sql/migrate_20260529_bump_song_series.sql` 적용 (`bump_song_series(int[], int)` RPC).
+- [eagateFetch.js](modules/eagateFetch.js) `parseSeriesDoc(doc, seriesNo)` — chart entry 에 `seriesNo` 필드 (= eamuse `list` value + 1, 1~33 = ohSorryWeb `series-name.json` 키와 일치) 채움. `collectBySeries` 의 호출 측이 `sn + 1` 전달.
+- [dbConn.js](modules/dbConn.js) `upsertUserChartScores` — row 의 `seriesNo` 가 있으면 song_id 별로 시리즈 그룹 모음. score upsert 완료 후 시리즈마다 `bump_song_series(p_song_ids, p_series_no)` 호출 → 그 곡들의 `songs.series_no` 를 명시값으로 무조건 덮어쓰기. 실패해도 graceful (score upsert 자체는 성공으로 처리, `console.warn` 만 출력).
+- 효과: 시리즈 폴더 전곡 fetch 한 번이면 eamuse 시리즈 분류 = DB series_no 가 정정됨. 옛 textage VER 기반 시드와 새 series-name.json 매핑 (1~33) 의 시프트 차이도 자동 보정. ohSorryWeb 플레이데이터 탭의 시리즈 폴더 그룹화가 정확해짐.
+
 ### 2026-05-29 — INF 유저 연습곡 추천 차트 단위 정확 필터 (legen 비트맵) — calcOhsorryCore v0.0.384 / dbConn v0.0.408
 - 직전 v0.0.382 의 곡 단위 (charts_json title set) 필터는 곡은 INF 수록인데 LEG 차트만 미수록인 케이스 (예: `鏡像都市` — `ac=3 legen=0`) 를 못 거르던 한계.
 - fix: ohSorryWeb [api.js](../ohSorryWeb/modules/api.js) `makeChartSeriesChecker` 와 동등한 차트 단위 비트맵 검사 ohSorry 본체에도 적용.

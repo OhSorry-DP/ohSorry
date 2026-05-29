@@ -108,7 +108,9 @@
   //   곡 row 하나 = <td> 안에 <a class="music_info"> 곡명 + <div class="series-info">.
   //   series-info 안에 5개 <div class="score-cel"> (BEGINNER/NORMAL/HYPER/ANOTHER/LEGGENDARIA).
   // 곡 하나당 차트 5개를 만들되 — 시리즈 페이지엔 게임레벨(★) 정보가 없으므로 gameLevel=null.
-  function parseSeriesDoc(doc) {
+  // seriesNo (선택) — 그 시리즈의 새 매핑 번호 (eamuse list value + 1, 1~33). chart entry 에 channel 채움.
+  //   dbConn 이 score upsert 후 시리즈별 song_id 모아 bump_song_series RPC 로 songs.series_no 갱신.
+  function parseSeriesDoc(doc, seriesNo) {
     const out = { charts: [] };
     const DIFF_NAMES = ['BEGINNER', 'NORMAL', 'HYPER', 'ANOTHER', 'LEGGENDARIA'];
     const rows = doc.querySelectorAll('div.series-all table tr');
@@ -154,6 +156,7 @@
           lampNum,
           lamp: LAMP_NAMES[lampNum] || null,
           gameLevel: null,  // 시리즈 페이지엔 레벨 정보 없음 — textage 로 역추정
+          seriesNo: typeof seriesNo === 'number' ? seriesNo : null,  // 이 차트가 어느 시리즈 폴더에서 나왔는지 (dbConn 의 series_no 갱신용)
         });
       });
     });
@@ -308,7 +311,9 @@
         }
         const html = await res.text();
         const doc = new DOMParser().parseFromString(html, 'text/html');
-        parsed = parseSeriesDoc(doc);
+        // eamuse list value (sn = 0~32) → 새 series_no 매핑 (sn + 1 = 1~33).
+        //   ohSorryWeb 의 series-name.json 키와 일치 (1=1st&substream, 33=Sparkle Shower 등).
+        parsed = parseSeriesDoc(doc, sn + 1);
       } catch (e) {
         if (sn === 0) {
           console.error('[eagateFetch] 첫 시리즈 fetch 실패:', e);

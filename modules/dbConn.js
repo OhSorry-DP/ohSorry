@@ -281,6 +281,9 @@ window.OhsorryDb = (function () {
       // 동명이곡 (다른 song_id) 은 키가 다르므로 둘 다 유지됨.
       // 같은 PK 중복 (입력 데이터 자체 중복) 만 best ex_score 로 합침.
       const dedup = new Map();
+      // 시리즈 폴더 fetch 시 r.seriesNo (= eamuse list+1, 1~33) 가 채워짐.
+      // song_id 별로 시리즈 그룹 모음 → score upsert 후 bump_song_series RPC 로 songs.series_no 갱신.
+      const seriesGroups = new Map();  // seriesNo (int) → Set<songId>
       let unmatched = 0;
       let invalidDiff = 0;
       let invalidVersion = 0;
@@ -328,6 +331,12 @@ window.OhsorryDb = (function () {
             continue;
           }
         }
+        // 시리즈 폴더 fetch 시 채워진 seriesNo (1~33) 를 song_id 별로 모음.
+        if (typeof r.seriesNo === 'number' && r.seriesNo > 0) {
+          let set = seriesGroups.get(r.seriesNo);
+          if (!set) { set = new Set(); seriesGroups.set(r.seriesNo, set); }
+          set.add(songId);
+        }
         const lampInt = r.lamp != null && LAMP_MAP[r.lamp] != null ? LAMP_MAP[r.lamp] : null;
         const exScore = r.ex_score != null ? Number(r.ex_score) : null;
         const newRow = {
@@ -366,6 +375,24 @@ window.OhsorryDb = (function () {
       }
       await callRpc('upsert_scores', { p_rows: scoreRows });
       console.log(`[OhsorryDb] scores upsert: ${scoreRows.length}건 (전체 ${rows.length}건 중, dedup 후)`);
+      // 시리즈 폴더 fetch 모드일 때만 — songs.series_no 갱신 (eamuse 시리즈 분류 = 신뢰 출처).
+      // 시리즈마다 RPC 1번 (배치). 실패해도 score upsert 자체는 성공이므로 fire-and-forget 로깅만.
+      let seriesBumped = 0;
+      for (const [seriesNo, songIdSet] of seriesGroups) {
+        try {
+          const updated = await callRpc('bump_song_series', {
+            p_song_ids: Array.from(songIdSet),
+            p_series_no: seriesNo,
+          });
+          const n = typeof updated === 'number' ? updated : parseInt(updated, 10);
+          if (Number.isFinite(n)) seriesBumped += n;
+        } catch (e) {
+          console.warn(`[OhsorryDb] bump_song_series(seriesNo=${seriesNo}) 실패 (skip): ${e.message}`);
+        }
+      }
+      if (seriesGroups.size > 0) {
+        console.log(`[OhsorryDb] songs.series_no 갱신: ${seriesBumped}건 (${seriesGroups.size}시리즈)`);
+      }
       return { ok: true, unmatched, inserted: scoreRows.length, autoEnsured };
     } catch (e) {
       return { ok: false, error: e.message };
