@@ -441,6 +441,10 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### 2026-05-29 — calcOhsorryCore v0.0.386 — layoutMap key 를 raw title 로 변경 (norm 불일치 해소)
+- v0.0.385 의 `__pdLayoutMap[norm(c.title) + '|' + c.diff]` 가 ohSorryWeb 의 `normFnPd(window.OhsorryNorm.norm, 강한 norm)` 와 매칭 안 됨 — ohSorry compute 안의 `norm` (line 384) 은 간이 norm (lowercase + 공백 제거) 이고 ohSorryWeb 은 OhsorryNorm 의 강한 norm 이라 두 결과가 다름.
+- fix: key 를 raw title (`c.title + '|' + c.diff`) 로 변경. ohSorryWeb 도 같은 키로 lookup.
+
 ### 2026-05-29 — calcOhsorryCore v0.0.385 — 추천 풀 배치 라벨을 result.layoutMap 으로 export
 - ohSorryWeb 의 PlayData 탭에서 "배치 ON" 토글 시 NOTES 컬럼에 best 배치 라벨 (예: `M/-`, `F M/N`) 을 표시할 수 있도록 compute 의 closure 에 `__pdLayoutMap` 추가.
   - compute body 시작부에 `const __pdLayoutMap = {}` 선언.

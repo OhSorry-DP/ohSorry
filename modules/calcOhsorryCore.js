@@ -42,11 +42,12 @@ window.OhsorryCore = {
   let dbData = opts.dbData || null;
   const rivalToken = opts.rivalToken || null;
   const wrapperVersion = opts.wrapperVersion || 'unknown';
-  const CORE_VERSION_SHORT = '0.0.385'.replace(/^0\.0\./, '');  // '346'
+  const CORE_VERSION_SHORT = '0.0.386'.replace(/^0\.0\./, '');  // '346'
   const dbVersionString = `${wrapperVersion}-core${CORE_VERSION_SHORT}`;
   dbData = dbData || null;
   // 추천 풀의 chart 마다 c.layoutLabel (= w8.bestLabel) 가 채워지면 이 closure map 에도 동시에 기록.
-  // ohSorryWeb 의 PlayData 탭이 result.layoutMap 으로 활용 — norm(title) + '|' + diff 키.
+  // ohSorryWeb 의 PlayData 탭이 result.layoutMap 으로 활용 — raw title + '|' + diff 키
+  //   (norm 함수가 ohSorry 간이 / ohSorryWeb 강한 norm 으로 달라 매칭 실패 방지).
   const __pdLayoutMap = {};
   // -------- 0. ereter 데이터 로드 (Gist 에서 자동 fetch) --------
   // ereter.net 데이터는 Gist 에 ereter-data.json 으로 올려둔 걸 가져옵니다.
@@ -1927,7 +1928,7 @@ window.OhsorryCore = {
         c.layoutGain = c.bestTotal - c.layoutBaseTotal;
         c.layoutLabel = w8 ? (w8.bestLabel || '') : '';
         if (c.title && c.diff && c.layoutLabel) {
-          __pdLayoutMap[norm(c.title) + '|' + c.diff] = c.layoutLabel;
+          __pdLayoutMap[c.title + '|' + c.diff] = c.layoutLabel;
         }
         c.layoutAssistScore = clamp((c.bestTotal + 12) / 24, 0, 1);
         c.layoutGainScore = clamp(c.layoutGain / 8, 0, 1);
