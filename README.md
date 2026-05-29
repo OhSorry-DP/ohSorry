@@ -441,6 +441,13 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### 2026-05-29 — calcOhsorryCore v0.0.385 — 추천 풀 배치 라벨을 result.layoutMap 으로 export
+- ohSorryWeb 의 PlayData 탭에서 "배치 ON" 토글 시 NOTES 컬럼에 best 배치 라벨 (예: `M/-`, `F M/N`) 을 표시할 수 있도록 compute 의 closure 에 `__pdLayoutMap` 추가.
+  - compute body 시작부에 `const __pdLayoutMap = {}` 선언.
+  - 추천 풀 (`pool`) 의 chart 마다 `c.layoutLabel = w8.bestLabel` 채울 때 `__pdLayoutMap[norm(c.title) + '|' + c.diff] = c.layoutLabel` 동시에 기록.
+  - result 객체에 `layoutMap: __pdLayoutMap` 추가.
+- 한계: 추천 풀에 들어간 chart 만 (= patternScore > 0). 모든 chart 는 아님. ohSorryWeb 에서 비어있는 chart 는 `-` 로 fallback.
+
 ### 2026-05-29 — 시리즈 폴더 fetch 시 songs.series_no 자동 갱신 — eagateFetch / dbConn v0.0.409
 - 사전 조건: ohSorryAdmin `sql/migrate_20260529_bump_song_series.sql` 적용 (`bump_song_series(int[], int)` RPC).
 - [eagateFetch.js](modules/eagateFetch.js) `parseSeriesDoc(doc, seriesNo)` — chart entry 에 `seriesNo` 필드 (= eamuse `list` value + 1, 1~33 = ohSorryWeb `series-name.json` 키와 일치) 채움. `collectBySeries` 의 호출 측이 `sn + 1` 전달.

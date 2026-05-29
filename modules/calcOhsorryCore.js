@@ -42,9 +42,12 @@ window.OhsorryCore = {
   let dbData = opts.dbData || null;
   const rivalToken = opts.rivalToken || null;
   const wrapperVersion = opts.wrapperVersion || 'unknown';
-  const CORE_VERSION_SHORT = '0.0.384'.replace(/^0\.0\./, '');  // '346'
+  const CORE_VERSION_SHORT = '0.0.385'.replace(/^0\.0\./, '');  // '346'
   const dbVersionString = `${wrapperVersion}-core${CORE_VERSION_SHORT}`;
   dbData = dbData || null;
+  // 추천 풀의 chart 마다 c.layoutLabel (= w8.bestLabel) 가 채워지면 이 closure map 에도 동시에 기록.
+  // ohSorryWeb 의 PlayData 탭이 result.layoutMap 으로 활용 — norm(title) + '|' + diff 키.
+  const __pdLayoutMap = {};
   // -------- 0. ereter 데이터 로드 (Gist 에서 자동 fetch) --------
   // ereter.net 데이터는 Gist 에 ereter-data.json 으로 올려둔 걸 가져옵니다.
   // 형식: { extractedAt: "ISO 일시", source, count, charts: [...] }
@@ -1231,12 +1234,12 @@ window.OhsorryCore = {
 
   // 추천 row 전용 hashtag 배열 계산 — ohsorryRender 가 hover/toast 에 그대로 표시.
   //   순서: [카테고리(필수), FLIP+N(있을 때), 한손위주(편차 30%+), pattern feature top 3]
-  const CATEGORY_TAG_MAP = { hard: '강도전', easy: '약도전', cleanup: '정리곡' };
+  const CATEGORY_TAG_MAP = { hard: '#어려움', easy: '#도전', cleanup: '' };
   const PRACTICE_TAG_MAP = { review: '복습', pattern: '패턴연습', score: '점수회복', practical: '실전연습' };
   const HAND_BIAS_THRESHOLD = 0.3;
   const computeRecHashtags = (r) => {
     const tags = [];
-    if (r._category && CATEGORY_TAG_MAP[r._category]) tags.push('#' + CATEGORY_TAG_MAP[r._category]);
+    if (r._category && CATEGORY_TAG_MAP[r._category]) tags.push(CATEGORY_TAG_MAP[r._category]);
     if (r._clearScore != null) {
       if (r._clearScore >= 0.72) tags.push('#가능성높음');
       else if (r._clearScore < 0.45) tags.push('#도전권');
@@ -1923,6 +1926,9 @@ window.OhsorryCore = {
         c.layoutBaseTotal = normal ? layoutKey(normal) : c.bestTotal;
         c.layoutGain = c.bestTotal - c.layoutBaseTotal;
         c.layoutLabel = w8 ? (w8.bestLabel || '') : '';
+        if (c.title && c.diff && c.layoutLabel) {
+          __pdLayoutMap[norm(c.title) + '|' + c.diff] = c.layoutLabel;
+        }
         c.layoutAssistScore = clamp((c.bestTotal + 12) / 24, 0, 1);
         c.layoutGainScore = clamp(c.layoutGain / 8, 0, 1);
         c.layoutPracticeScore = clamp((-c.layoutBaseTotal) / 12, 0, 1);
@@ -2185,6 +2191,7 @@ window.OhsorryCore = {
     weaknessLib,
     norm, SERIES, shelfLib,
     dbPayload, chartScoreRows,
+    layoutMap: __pdLayoutMap,   // ohSorryWeb PlayData 탭 — (norm(title) + '|' + diff) → bestLabel
   };
 
   // ohsorryRender 모듈은 wrapper 가 미리 fetch 해서 window.OhsorryRender 로 노출했다고 가정.
