@@ -564,17 +564,38 @@ window.OhsorryDb = (function () {
     const scores = fsData.scores;
     const songsMeta = textageMeta.songs;
 
-    const res = await fetch(SUPABASE_URL + '/rest/v1/rpc/make_grid_data', {
-      method: 'POST', headers: HEADERS,
-      body: JSON.stringify({ p_iidx_id: iidxId }),
-    });
-    if (!res.ok) throw new Error('make_grid_data HTTP ' + res.status);
-    const rows = await res.json();
-    if (!Array.isArray(rows) || rows.length === 0) return null;
+    // PostgREST RPC 는 기본 max_rows=1000. plays 많은 유저는 한 번에 다 못 받으므로
+    //   ?limit=&offset= 페이지네이션 (ohSorryWeb api.js / backfill-pattern-score.js 와 동일 패턴).
+    const pageSize = 1000;
+    const rows = [];
+    let offset = 0;
+    for (;;) {
+      const res = await fetch(
+        SUPABASE_URL + `/rest/v1/rpc/make_grid_data?limit=${pageSize}&offset=${offset}`,
+        {
+          method: 'POST', headers: HEADERS,
+          body: JSON.stringify({ p_iidx_id: iidxId }),
+        },
+      );
+      if (!res.ok) throw new Error('make_grid_data HTTP ' + res.status);
+      const page = await res.json();
+      if (!Array.isArray(page) || page.length === 0) break;
+      rows.push(...page);
+      if (page.length < pageSize) break;
+      offset += pageSize;
+    }
+    if (rows.length === 0) return null;
 
     const DIFF_INT_TO_FEATURE_KEY = { 1: 'DP_NOR', 2: 'DP_HYP', 3: 'DP_ANO', 4: 'DP_LEG' };
     const DIFF_INT_TO_NOTES_KEY   = { 1: 'DN', 2: 'DH', 3: 'DA', 4: 'DX' };
-    const FEATS = ['NOTES', 'CHORD', 'PEAK', 'CHARGE', 'SCRATCH', 'SOF-LAN', 'PHRASE', 'JACK', 'TRILL', 'RAND'];
+    // 28 dim — mirror-invariant 10 + mirror 9 × L/R 18. user_ohsorry_radars 의 모든 컬럼.
+    //   migration_mirror_features.sql (2026-05-27) 에서 18 dim 컬럼 추가됨 — upsert_user_feature_score 도 29 인자.
+    const FEATS = [
+      'NOTES', 'CHORD', 'PEAK', 'CHARGE', 'SCRATCH', 'SOF-LAN', 'PHRASE', 'JACK', 'TRILL', 'RAND',
+      'STAIR_UP_L', 'STAIR_UP_R', 'STAIR_DN_L', 'STAIR_DN_R',
+      'K1_L', 'K1_R', 'K2_L', 'K2_R', 'K3_L', 'K3_R',
+      'K4_L', 'K4_R', 'K5_L', 'K5_R', 'K6_L', 'K6_R', 'K7_L', 'K7_R',
+    ];
 
     const pointsByFeat = {};
     for (const f of FEATS) pointsByFeat[f] = [];
@@ -614,7 +635,8 @@ window.OhsorryDb = (function () {
   }
 
   // 오소리 피쳐 스코어 upsert — user_ohsorry_radars (play_style=1, DP).
-  // RPC 인자명 (p_os_*) 은 옛 시그니처 유지 (DB RPC 내부에서 컬럼 매핑).
+  // RPC 시그니처: migration_mirror_features.sql 의 29 인자 (text + 28 numeric).
+  //   기존 10 dim (mirror-invariant) + 신규 18 dim (mirror 9 × L/R) — 모두 보내야 PostgREST 가 매칭.
   async function callUpsertFeatureScore(iidxId, vec) {
     const numOrNull = (v) => typeof v === 'number' && isFinite(v) ? v : null;
     await callRpc('upsert_user_feature_score', {
@@ -629,11 +651,22 @@ window.OhsorryDb = (function () {
       p_os_jack:    numOrNull(vec.JACK),
       p_os_trill:   numOrNull(vec.TRILL),
       p_os_rand:    numOrNull(vec.RAND),
+      p_os_stair_up_l: numOrNull(vec.STAIR_UP_L),
+      p_os_stair_up_r: numOrNull(vec.STAIR_UP_R),
+      p_os_stair_dn_l: numOrNull(vec.STAIR_DN_L),
+      p_os_stair_dn_r: numOrNull(vec.STAIR_DN_R),
+      p_os_k1_l: numOrNull(vec.K1_L), p_os_k1_r: numOrNull(vec.K1_R),
+      p_os_k2_l: numOrNull(vec.K2_L), p_os_k2_r: numOrNull(vec.K2_R),
+      p_os_k3_l: numOrNull(vec.K3_L), p_os_k3_r: numOrNull(vec.K3_R),
+      p_os_k4_l: numOrNull(vec.K4_L), p_os_k4_r: numOrNull(vec.K4_R),
+      p_os_k5_l: numOrNull(vec.K5_L), p_os_k5_r: numOrNull(vec.K5_R),
+      p_os_k6_l: numOrNull(vec.K6_L), p_os_k6_r: numOrNull(vec.K6_R),
+      p_os_k7_l: numOrNull(vec.K7_L), p_os_k7_r: numOrNull(vec.K7_R),
     });
   }
 
   return {
-    VERSION: '0.0.408',
+    VERSION: '0.0.410',
     upsertUserProfile: upsertUserProfile,
     upsertUserChartScores: upsertUserChartScores,
     uploadResult: uploadResult,

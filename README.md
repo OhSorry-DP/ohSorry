@@ -441,6 +441,16 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### 2026-05-30 — dbConn v0.0.410 / calcWeakness — upsert_user_feature_score 28 dim 시그니처 매칭 + make_grid_data 페이지네이션
+- 증상: 본체 업로드 후 분석탭 percentile / 막대그래프가 안 보이는 유저 다수. 04290300 (MURI ★2.6) 등 188 유저 중 11명 `user_ohsorry_radars` 빈 row.
+- 원인: 2026-05-27 [migration_mirror_features.sql](../ohSorryAdmin/sql/migration_mirror_features.sql) 로 `user_ohsorry_radars` 에 18 dim (STAIR_UP/DN_L/R + K1~K7 손별) 추가 + `upsert_user_feature_score` RPC 시그니처 11 → 29 인자로 확장. dbConn 의 `callUpsertFeatureScore` 가 옛 11 인자만 보내서 PostgREST 가 함수 매칭 실패 (`PGRST202`) → `uploadResult` step 5 의 `try/catch` 가 console.warn 으로 묻음 → row 가 빈 채로 남음.
+- fix [dbConn.js](modules/dbConn.js) (v0.0.410):
+  - `computePatternScoreVec` 의 `FEATS` 10 → 28 (STAIR_UP_L/R, STAIR_DN_L/R, K1_L/R ~ K7_L/R 18 dim 추가).
+  - `callUpsertFeatureScore` 인자 11 → 29 (`p_os_stair_up_l/r`, `p_os_stair_dn_l/r`, `p_os_k1_l/r ~ p_os_k7_l/r`).
+  - `make_grid_data` RPC 페이지네이션 추가 — PostgREST 기본 max_rows=1000 이라 plays 많은 유저 (예: 04290300 의 2049 row) 의 vec 가 부정확하던 문제. `?limit=&offset=` 으로 모든 row fetch (ohSorryWeb / backfill-pattern-score.js 와 동일 패턴).
+- fix [calcWeakness.js](modules/calcWeakness.js): `UPSERT_FEATS` (28 dim) 신규 변수 추가, `computePatternScoreVec` 가 그것만 사용. 기존 `FEATS` (10) 는 `avgPt` / 약점 계산 등 양손 평균 흐름이 그대로 써야 해서 분리 — 그 함수들엔 영향 없음. INFOhSorry 도 같은 gist `calcWeakness.js` 를 쓰므로 lib 갱신만으로 28 dim vec 자동 적용.
+- 짝 변경: INFOhSorry v0.0.66 (`Analysis.tsx upsertFeatureScore` 29 인자), [backfill-pattern-score.js](../ohSorryRating/scripts/backfill-pattern-score.js) (`make_grid_data` 페이지네이션 + 28 dim 일괄 백필 — 188 유저 / 177 채워짐).
+
 ### 2026-05-30 — calcOhsorryCore v0.0.388 — textage 캐시 raw 호환 (시리즈 해시태그 robust)
 - 증상: ohSorryWeb 의 PlayData 탭 진입 후 추천곡에 `#시리즈명` 안 보임.
 - 원인: ohSorryWeb 의 `populatePlayData` 가 textage-meta 의 raw 전체 (`{generatedAt, count, songs}`) 를 `window.__ohsorryLibCache.textage` 로 set. calcOhsorryCore 는 `.songs` 직접 (= 곡 id → entry Map) 가정 → `Object.keys` 가 `['generatedAt', 'count', 'songs']` 3개만 → `textageSeriesByNorm` Map 비어있음.

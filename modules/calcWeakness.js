@@ -29,6 +29,14 @@
 })(function () {
   // FEATS — mirror-invariant 10 feature. 양손 평균/vecL/vecR 흐름.
   var FEATS = ['NOTES', 'CHORD', 'PEAK', 'CHARGE', 'SCRATCH', 'SOF-LAN', 'PHRASE', 'JACK', 'TRILL', 'RAND'];
+  // UPSERT_FEATS — supabase user_ohsorry_radars 의 28 dim 컬럼 (mirror-invariant 10 + mirror 9 × L/R 18).
+  //   computePatternScoreVec 에서만 사용 — FEATS (10) 만 쓰면 옛 시그니처라 RPC 매칭 실패.
+  //   다른 함수 (avgPt/약점 계산 등) 는 FEATS 그대로 사용 (chart pt 양손 평균 흐름).
+  var UPSERT_FEATS = FEATS.concat([
+    'STAIR_UP_L', 'STAIR_UP_R', 'STAIR_DN_L', 'STAIR_DN_R',
+    'K1_L', 'K1_R', 'K2_L', 'K2_R', 'K3_L', 'K3_R',
+    'K4_L', 'K4_R', 'K5_L', 'K5_R', 'K6_L', 'K6_R', 'K7_L', 'K7_R',
+  ]);
   // MIRROR_FEATS — mirror 적용 시 변하는 9 feature × 손별 분리 (18 dim).
   //   patterns-all-slim 의 m1/m2 에 저장된 STAIR_UP/STAIR_DN/DENSITY[k1~k7] 와 매칭.
   //   user vec 의 dim 이름: STAIR_UP_L, STAIR_UP_R, STAIR_DN_L, STAIR_DN_R, K1_L, K1_R, ..., K7_L, K7_R
@@ -558,8 +566,9 @@
   //   4. score=0 인 (feature, chart) 쌍은 제외
   //   5. feature 별 points desc 정렬 → top N → 가중치 (1~5위=1.0, 6~30위=0.90~0.05 선형 감소) 가중합
   //
-  // return: { NOTES, CHORD, PEAK, CHARGE, SCRATCH, 'SOF-LAN', PHRASE, JACK, TRILL, RAND }
+  // return: { NOTES, ..., RAND, STAIR_UP_L/R, STAIR_DN_L/R, K1_L/R ... K7_L/R }  (28 dim)
   //   값 범위 ~0~1500 (이론 max = maxScoreByFeat). null 입력 시 null 반환.
+  //   28 dim = supabase user_ohsorry_radars 컬럼 + upsert_user_feature_score 29 인자 매칭.
   var SKILL_WEIGHTS = (function () {
     var ws = [];
     for (var i = 0; i < 5; i++) ws.push(1.0);
@@ -583,9 +592,10 @@
       var t = opts.patternsMap[sid] && opts.patternsMap[sid].t;
       if (t) titleToSid[normFn(t)] = sid;
     }
-    // 각 feature 별 points 수집
+    // 각 feature 별 points 수집 — 28 dim (mirror-invariant 10 + mirror 9 × L/R 18).
+    //   supabase upsert_user_feature_score 의 29 인자 시그니처와 매칭.
     var pointsByFeat = {};
-    for (var fi = 0; fi < FEATS.length; fi++) pointsByFeat[FEATS[fi]] = [];
+    for (var fi = 0; fi < UPSERT_FEATS.length; fi++) pointsByFeat[UPSERT_FEATS[fi]] = [];
     for (var ci = 0; ci < opts.charts.length; ci++) {
       var c = opts.charts[ci];
       if (!c || typeof c.exScore !== 'number' || c.exScore <= 0) continue;
@@ -599,8 +609,8 @@
       var chartScores = songScores[cn];
       if (!chartScores) continue;
       var scoreRate = c.exScore / (c.noteCount * 2);
-      for (var fi2 = 0; fi2 < FEATS.length; fi2++) {
-        var f = FEATS[fi2];
+      for (var fi2 = 0; fi2 < UPSERT_FEATS.length; fi2++) {
+        var f = UPSERT_FEATS[fi2];
         var s = chartScores[f];
         if (typeof s !== 'number' || s <= 0) continue;
         pointsByFeat[f].push(s * scoreRate);
@@ -608,8 +618,8 @@
     }
     // feature 별 top N 가중합
     var vec = {};
-    for (var fi3 = 0; fi3 < FEATS.length; fi3++) {
-      var f3 = FEATS[fi3];
+    for (var fi3 = 0; fi3 < UPSERT_FEATS.length; fi3++) {
+      var f3 = UPSERT_FEATS[fi3];
       var top = pointsByFeat[f3].sort(function (a, b) { return b - a; }).slice(0, topN);
       var acc = 0;
       for (var ti = 0; ti < top.length; ti++) acc += top[ti] * SKILL_WEIGHTS[ti];
