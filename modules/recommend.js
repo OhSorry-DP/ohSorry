@@ -30,7 +30,7 @@
 })(function () {
   'use strict';
 
-  var VERSION = '0.0.1';
+  var VERSION = '0.0.2';
 
   // 차트 패턴 hashtag — 그 곡의 강한 top 3 feature → 한국어 약어.
   //   추천 row hover / 토스트에 "#동치 #계단 #밀도" 식으로 표시.
@@ -651,10 +651,14 @@
                      : strength === 2 ? ((zasaMin + zasaMax) / 2)
                      : (zasaMin + rangeW * 0.35);
       // 상한 안전장치 — 클리어 최고점보다 너무 위만 제외.
+      //   topClearZasa   : HC 이상(lampNum>=WEAKNESS_CLEAR_LAMP) 클리어 최고 zasa.
+      //   ecTopClearZasa : EC 이상(lampNum>=3) 클리어 최고 zasa.
+      //   하드캡 = max(topClearZasa + 0.5, ecTopClearZasa) — 하드클 +0.5 또는 EC클 최고까지 허용.
       var topClearZasa = 0;
+      var ecTopClearZasa = 0;
       for (var ci = 0; ci < allCharts.length; ci++) {
         var c = allCharts[ci];
-        if (typeof c.lampNum !== 'number' || c.lampNum < WEAKNESS_CLEAR_LAMP) continue;
+        if (typeof c.lampNum !== 'number' || c.lampNum < 3) continue;
         var k0 = normFn(c.title || '') + '|' + c.diff;
         var e0 = ereterMap.get(k0);
         var zasa = null;
@@ -663,8 +667,12 @@
           var r0 = ratingMap.get(k0);
           if (r0 && typeof r0.zasaLevel === 'number') zasa = r0.zasaLevel;
         }
-        if (zasa != null && zasa > topClearZasa) topClearZasa = zasa;
+        if (zasa == null) continue;
+        if (zasa > ecTopClearZasa) ecTopClearZasa = zasa;
+        if (c.lampNum >= WEAKNESS_CLEAR_LAMP && zasa > topClearZasa) topClearZasa = zasa;
       }
+      // 하드캡 — HC클 +0.5 와 EC클 최고 중 큰 값. HC 클리어 이력 없으면(topClearZasa=0) 미적용.
+      var zasaHardCap = Math.max(topClearZasa + 0.5, ecTopClearZasa);
       var userChartByKey = new Map();
       for (var ci2 = 0; ci2 < allCharts.length; ci2++) {
         var cc = allCharts[ci2];
@@ -718,7 +726,7 @@
             } else continue;
           }
           if (typeof e.level !== 'number') continue;
-          if (topClearZasa > 0 && e.level > topClearZasa + 0.5) continue;
+          if (topClearZasa > 0 && e.level > zasaHardCap) continue;
           if (zasaMin != null && e.level < zasaMin) continue;
           if (zasaMax != null && e.level > zasaMax) continue;
           var songFs = fsScores[sid];
