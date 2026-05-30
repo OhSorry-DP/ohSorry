@@ -441,6 +441,9 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### 2026-05-30 — ohsorryRender 추천 영역 카드 순서 (연습곡 마지막으로)
+- [ohsorryRender.js](modules/ohsorryRender.js) — 기존: `연습곡 → EASY → HARD → EX-HARD`. 변경: `EASY → HARD → EX-HARD → 연습곡`. INFOhSorry v0.0.67 의 RecCard 4번째 = 연습곡과 순서 통일.
+
 ### 2026-05-30 — recommend.js 신규 모듈 분리 + 로딩 스피너 + 해시태그 토스트 테마 분기
 - **recommend.js (신규, gist)** — calcOhsorryCore 의 추천 관련 함수 약 850 line 을 별도 모듈로 분리. UMD wrapper 로 `window.OhsorryRecommend.createContext(deps)` 패턴.
   - 분리 함수: `chartStrengthMatch` / `chartStrengthMatchByHand` / `computeChartTags` / `computeRecHashtags` / `buildPools` / `buildRecs` / `buildWeaknessRecs` + `setLayoutMode` / `getLayoutMode` 토글.

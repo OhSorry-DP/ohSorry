@@ -857,10 +857,10 @@ window.OhsorryRender = {
         };
 
         return recModeToggle + recLevelToggle + [
-          renderRec('연습곡', topWeakness, '#ff6b9d', 'weakness'),
           renderRec('EASY',    topEC,  '#52a447', 'ec'),
           renderRec('HARD',    topHC,  '#dc3545', 'hc'),
           renderRec('EX-HARD', topEXH, '#d4a017', 'exh'),
+          renderRec('연습곡', topWeakness, '#ff6b9d', 'weakness'),
         ].join('');
       })()}
       </div>
