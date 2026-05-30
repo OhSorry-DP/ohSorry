@@ -441,6 +441,15 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### 2026-05-30 — calcOhsorryCore v0.0.387 — 추천곡 해시태그에 `#시리즈명` 추가
+- 효과: 추천 row hover/토스트의 해시태그에 그 곡이 수록된 시리즈명 (예: `#EPOLIS`, `#INFINITAS`, `#1st&substream`) 이 카테고리 (`#어려움` 등) 다음, FLIP/한손위주 앞에 추가됨.
+- 흐름:
+  - `SERIES_NAME_URL` 상수 추가 — gist `30c3ba6.../series-name.json` (`{ "99":"NEW", "98":"INFINITAS", "33":"...", ..., "1":"..." }`).
+  - 0.56 단계에서 series-name.json fetch + `window.__ohsorryLibCache.seriesNames` memory 캐시 (zasa/textage 와 동일 패턴).
+  - 1단계 (곡명 정규화) 직후 `textageSeriesByNorm` Map 빌드 — `textageSongs.<id>.series_no` (parseTextage 가 채움) 를 `norm(title)` 키로 인덱싱.
+  - `computeRecHashtags(r)` 안에서 `textageSeriesByNorm.get(norm(r.title))` → `seriesNames[String(series_no)]` lookup. 미매핑/실패 시 skip.
+- 사전 조건: ohSorryAdmin `parseTextage` v2026-05-30 (`metaSongs[id].series_no` 필드 채움) + textage-meta gist 재업로드. 옛 textage-meta (series_no 필드 없음) 로는 시리즈 태그가 모든 row 에 안 붙음.
+
 ### 2026-05-29 — calcOhsorryCore v0.0.386 — layoutMap key 를 raw title 로 변경 (norm 불일치 해소)
 - v0.0.385 의 `__pdLayoutMap[norm(c.title) + '|' + c.diff]` 가 ohSorryWeb 의 `normFnPd(window.OhsorryNorm.norm, 강한 norm)` 와 매칭 안 됨 — ohSorry compute 안의 `norm` (line 384) 은 간이 norm (lowercase + 공백 제거) 이고 ohSorryWeb 은 OhsorryNorm 의 강한 norm 이라 두 결과가 다름.
 - fix: key 를 raw title (`c.title + '|' + c.diff`) 로 변경. ohSorryWeb 도 같은 키로 lookup.

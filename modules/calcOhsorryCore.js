@@ -42,7 +42,7 @@ window.OhsorryCore = {
   let dbData = opts.dbData || null;
   const rivalToken = opts.rivalToken || null;
   const wrapperVersion = opts.wrapperVersion || 'unknown';
-  const CORE_VERSION_SHORT = '0.0.386'.replace(/^0\.0\./, '');  // '346'
+  const CORE_VERSION_SHORT = '0.0.387'.replace(/^0\.0\./, '');  // '346'
   const dbVersionString = `${wrapperVersion}-core${CORE_VERSION_SHORT}`;
   dbData = dbData || null;
   // 추천 풀의 chart 마다 c.layoutLabel (= w8.bestLabel) 가 채워지면 이 closure map 에도 동시에 기록.
@@ -61,6 +61,9 @@ window.OhsorryCore = {
   const ZASA_DATA_URL = 'https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw/zasa-data.json';
   // textage 채보 메타 — 채보별 총 노트 수 (notes.DN/DH/DA/DX). noteCount 보강 + missCount 계산용.
   const TEXTAGE_DATA_URL = 'https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw/textage-meta.json';
+  // series-name.json — series_no(int) → 시리즈명(string) 매핑. 추천곡 해시태그 시리즈명 라벨용.
+  //   gist 30c3ba6 (service-status.json 과 같은 운영 gist). DB songs 에는 series 컬럼 없음.
+  const SERIES_NAME_URL = 'https://gist.githubusercontent.com/OhSorry-DP/30c3ba6f87df9847291c42ea216a8d2a/raw/series-name.json';
   const CACHE_KEY = 'ereter_dp_diff_v4';
   const CACHE_TTL_MS = 24 * 60 * 60 * 1000;  // 24시간
 
@@ -209,6 +212,27 @@ window.OhsorryCore = {
     }
   } catch (e) {
     console.warn('[step2] textage fetch 실패 (무시 가능):', e.message);
+  }
+
+  // -------- 0.56. series-name fetch (선택, 실패해도 무시) --------
+  // series_no(int) → 시리즈명(string). 추천곡 해시태그에 `#1st&substream` 식으로 노출.
+  //   textage-meta.songs.<id>.series_no (parseTextage 가 채움) → series-name lookup.
+  let seriesNames = null;
+  if (window.__ohsorryLibCache.seriesNames) {
+    seriesNames = window.__ohsorryLibCache.seriesNames;
+    console.log(`[step2] series-name ${Object.keys(seriesNames).length}개 (memory cache hit)`);
+  } else try {
+    const res = await fetch(SERIES_NAME_URL + '?t=' + Date.now(), { cache: 'no-store' });
+    if (res.ok) {
+      const raw = await res.json();
+      if (raw && typeof raw === 'object') {
+        seriesNames = raw;
+        window.__ohsorryLibCache.seriesNames = seriesNames;
+        console.log(`[step2] series-name ${Object.keys(seriesNames).length}개 로드`);
+      }
+    }
+  } catch (e) {
+    console.warn('[step2] series-name fetch 실패 (무시 가능):', e.message);
   }
 
   // -------- 0.6. ohSorryRating 데이터 + 외부 ★ 추정 lib fetch (localStorage 캐시) --------
@@ -430,6 +454,18 @@ window.OhsorryCore = {
   for (const c of ereterData) {
     if (!c.title || !c.diff) continue;
     ereterMap.set(norm(c.title) + '|' + c.diff, c);
+  }
+
+  // textage-meta lookup — norm(title) → series_no. 추천곡 해시태그 시리즈명 표기용.
+  //   parseTextage 가 metaSongs[id].series_no 채움 (substream/INFINITAS 매핑 반영 후).
+  const textageSeriesByNorm = new Map();
+  if (textageSongs) {
+    for (const id in textageSongs) {
+      const e = textageSongs[id];
+      if (!e || !e.title || typeof e.series_no !== 'number') continue;
+      const k = norm(e.title);
+      if (k && !textageSeriesByNorm.has(k)) textageSeriesByNorm.set(k, e.series_no);
+    }
   }
 
   // zasa 차트 인덱스 (ereter 와 같은 키 형식)
@@ -1241,6 +1277,12 @@ window.OhsorryCore = {
   const computeRecHashtags = (r) => {
     const tags = [];
     if (r._category && CATEGORY_TAG_MAP[r._category]) tags.push(CATEGORY_TAG_MAP[r._category]);
+    // 시리즈명 — textage-meta lookup. 미매핑/실패 시 skip.
+    if (seriesNames) {
+      const sno = textageSeriesByNorm.get(norm(r.title || ''));
+      const sname = sno != null ? seriesNames[String(sno)] : null;
+      if (sname) tags.push('#' + sname);
+    }
     if (r._clearScore != null) {
       if (r._clearScore >= 0.72) tags.push('#가능성높음');
       else if (r._clearScore < 0.45) tags.push('#도전권');
