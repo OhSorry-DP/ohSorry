@@ -42,7 +42,7 @@ window.OhsorryCore = {
   let dbData = opts.dbData || null;
   const rivalToken = opts.rivalToken || null;
   const wrapperVersion = opts.wrapperVersion || 'unknown';
-  const CORE_VERSION_SHORT = '0.0.387'.replace(/^0\.0\./, '');  // '346'
+  const CORE_VERSION_SHORT = '0.0.388'.replace(/^0\.0\./, '');  // '346'
   const dbVersionString = `${wrapperVersion}-core${CORE_VERSION_SHORT}`;
   dbData = dbData || null;
   // 추천 풀의 chart 마다 c.layoutLabel (= w8.bestLabel) 가 채워지면 이 closure map 에도 동시에 기록.
@@ -196,9 +196,12 @@ window.OhsorryCore = {
 
   // -------- 0.55. textage 채보 메타 fetch (선택, 실패해도 무시) --------
   // 채보별 총 노트 수 → charts 의 noteCount 보강 + missCount 계산 (noteCount - pgreat - great).
+  //   캐시 형식 호환 — ohSorryWeb 일부 경로가 raw 전체 (`{generatedAt, count, songs}`) 를 set
+  //   하는 케이스 보완. `.songs` 가 있으면 그것만 사용, 없으면 자체 (= 곡 id → entry Map).
   let textageSongs = null;
   if (window.__ohsorryLibCache.textage) {
-    textageSongs = window.__ohsorryLibCache.textage;
+    const cached = window.__ohsorryLibCache.textage;
+    textageSongs = (cached && cached.songs && typeof cached.songs === 'object') ? cached.songs : cached;
     console.log(`[step2] textage 채보 메타 ${Object.keys(textageSongs).length}곡 (memory cache hit)`);
   } else try {
     const res = await fetch(TEXTAGE_DATA_URL + '?t=' + Date.now(), { cache: 'no-store' });

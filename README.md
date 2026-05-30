@@ -441,6 +441,11 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### 2026-05-30 — calcOhsorryCore v0.0.388 — textage 캐시 raw 호환 (시리즈 해시태그 robust)
+- 증상: ohSorryWeb 의 PlayData 탭 진입 후 추천곡에 `#시리즈명` 안 보임.
+- 원인: ohSorryWeb 의 `populatePlayData` 가 textage-meta 의 raw 전체 (`{generatedAt, count, songs}`) 를 `window.__ohsorryLibCache.textage` 로 set. calcOhsorryCore 는 `.songs` 직접 (= 곡 id → entry Map) 가정 → `Object.keys` 가 `['generatedAt', 'count', 'songs']` 3개만 → `textageSeriesByNorm` Map 비어있음.
+- fix: calcOhsorryCore 의 0.55 단계 cache 처리에 형식 호환 추가 — `cached.songs && typeof cached.songs === 'object'` 면 그것만 사용. 두 형식 (raw / `.songs` 만) 모두 OK. ohSorryWeb 측도 별도로 `.songs` 만 캐시하도록 정정 (양쪽 fix).
+
 ### 2026-05-30 — calcOhsorryCore v0.0.387 — 추천곡 해시태그에 `#시리즈명` 추가
 - 효과: 추천 row hover/토스트의 해시태그에 그 곡이 수록된 시리즈명 (예: `#EPOLIS`, `#INFINITAS`, `#1st&substream`) 이 카테고리 (`#어려움` 등) 다음, FLIP/한손위주 앞에 추가됨.
 - 흐름:
