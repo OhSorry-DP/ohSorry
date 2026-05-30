@@ -441,6 +441,19 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### 2026-05-30 — recommend.js 신규 모듈 분리 + 로딩 스피너 + 해시태그 토스트 테마 분기
+- **recommend.js (신규, gist)** — calcOhsorryCore 의 추천 관련 함수 약 850 line 을 별도 모듈로 분리. UMD wrapper 로 `window.OhsorryRecommend.createContext(deps)` 패턴.
+  - 분리 함수: `chartStrengthMatch` / `chartStrengthMatchByHand` / `computeChartTags` / `computeRecHashtags` / `buildPools` / `buildRecs` / `buildWeaknessRecs` + `setLayoutMode` / `getLayoutMode` 토글.
+  - 자체 캡슐화: `FEAT_TAG_MAP` / `CATEGORY_TAG_MAP` / `PRACTICE_TAG_MAP` / `HAND_BIAS_THRESHOLD` / `WEAKNESS_FEATS` / `WEAKNESS_CLEAR_LAMP` / `WEAKNESS_MODE_FEATS` / `MIN_BIN_N` / `CHART2DIFF_REC` 상수 + `practiceZasaDefault` / `maxClearGameLevel` 자체 계산.
+  - 외부 노출: `practiceZasaDefault` / `maxClearGameLevel` 도 context 반환 객체에 포함 — ohsorryRender 가 `result.practiceZasaDefault` 로 UI 토글 기본값 사용.
+  - 효과: 추천 알고리즘 한 곳 (gist `recommend.js`) 에서만 관리. ohSorryWeb / INFOhSorry 등 외부 클라이언트가 calcOhsorryCore 전체 fetch 안 하고도 가벼운 추천 모듈만 fetch 가능.
+- **calcOhsorryCore (대규모 리팩토링)** — `RECOMMEND_URL` 상수 + `recommendLib` fetch (calcWeakness 옆) + `recommendCtx = recommendLib.createContext({userVec, weaknessLib, patternsMap, patternsTitleMap, normFn, seriesNames, textageSeriesByNorm, allCharts, ereterMap, ratingMap, zasaMap, zasaAvgByGameLv, featureScoresMap, isInfChartInSeries, pdLayoutMap: __pdLayoutMap})` 호출. 이식 함수 + 자체 상수 + dead code 제거. **2330 → 1520 line (~810 감소)**.
+  - 호출부 통과: `recsEC/HC/EXH.push(...recommendCtx.buildRecs(...))` / `recsWeakness.push(...recommendCtx.buildWeaknessRecs(...))` / `window.__dp_rerollWeakness` / `window.__dp_rerollRecs` 의 stage 별 `ctx.buildRecs` + `ctx.setLayoutMode`.
+  - result 객체의 `practiceZasaDefault` 는 `recommendCtx.practiceZasaDefault` 로 통과 (null 시 `{min:11.6, max:12.7}` fallback).
+- **로딩 스피너** — `compute` / `runFromDb` 시작 시 우측 상단 floating spinner ("오소리 분석 로딩 중..."), 끝 / 에러 시 자동 제거. eamuse 콘솔 직접 실행 시 진행 가시화.
+- **ohsorryRender.js — 해시태그 toast 테마 분기**: `location.hostname` 이 `eagate.573.jp` 면 투명 배경 + 진한 글자 (밝은 환경), 그 외 (ohSorryWeb / INFOhSorry) 는 기존 검은 배경 + 흰 글자 유지.
+- 짝 변경: gist `recommend.js` 신규 업로드, `calcOhsorryCore.js` / `ohsorryRender.js` 갱신. [ohSorryWeb 2026-05-30 로딩 스피너](../ohSorryWeb/README.md).
+
 ### 2026-05-30 — dbConn v0.0.410 / calcWeakness — upsert_user_feature_score 28 dim 시그니처 매칭 + make_grid_data 페이지네이션
 - 증상: 본체 업로드 후 분석탭 percentile / 막대그래프가 안 보이는 유저 다수. 04290300 (MURI ★2.6) 등 188 유저 중 11명 `user_ohsorry_radars` 빈 row.
 - 원인: 2026-05-27 [migration_mirror_features.sql](../ohSorryAdmin/sql/migration_mirror_features.sql) 로 `user_ohsorry_radars` 에 18 dim (STAIR_UP/DN_L/R + K1~K7 손별) 추가 + `upsert_user_feature_score` RPC 시그니처 11 → 29 인자로 확장. dbConn 의 `callUpsertFeatureScore` 가 옛 11 인자만 보내서 PostgREST 가 함수 매칭 실패 (`PGRST202`) → `uploadResult` step 5 의 `try/catch` 가 console.warn 으로 묻음 → row 가 빈 채로 남음.

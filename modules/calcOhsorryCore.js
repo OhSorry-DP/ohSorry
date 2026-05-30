@@ -33,9 +33,33 @@
 //   rivalToken: rival 모드 시 URL 의 rival 토큰 (옵션 — 본인 모드는 무시)
 //   wrapperVersion: wrapper 자기 버전 (예: 'v3.3.6') — supabase version 컬럼은
 //                   `${wrapperVersion}-core${CORE_VERSION_SHORT}` 조합 (예: 'v3.3.6-core335')
+// 콘솔에서 직접 실행 시 (eamuse 페이지 / 운영자 진단 / ohSorryWeb 사이드 카드 등) lib 로드 + step2 진행 동안
+// 사용자 가시화용 floating spinner. compute 시작 시 추가 → 끝 / 에러 시 제거.
+function __ohsorryShowSpinner() {
+  if (typeof document === 'undefined') return null;
+  const existing = document.getElementById('__ohsorry_loading_spinner');
+  if (existing) existing.remove();
+  if (!document.getElementById('__ohsorry_spin_style')) {
+    const styleEl = document.createElement('style');
+    styleEl.id = '__ohsorry_spin_style';
+    styleEl.textContent = '@keyframes __ohsorry_spin{to{transform:rotate(360deg)}}';
+    document.head.appendChild(styleEl);
+  }
+  const el = document.createElement('div');
+  el.id = '__ohsorry_loading_spinner';
+  el.style.cssText = 'position:fixed;top:12px;right:12px;z-index:2147483647;display:flex;align-items:center;gap:8px;background:rgba(20,23,28,0.92);color:#fff;padding:8px 14px;border-radius:6px;font-size:12.5px;font-family:system-ui,sans-serif;box-shadow:0 4px 12px rgba(0,0,0,.25)';
+  el.innerHTML = '<span style="display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,.25);border-top-color:#fff;border-radius:50%;animation:__ohsorry_spin .8s linear infinite"></span><span>오소리 분석 로딩 중...</span>';
+  document.body.appendChild(el);
+  return el;
+}
+function __ohsorryHideSpinner() {
+  document.getElementById('__ohsorry_loading_spinner')?.remove();
+}
+
 window.OhsorryCore = {
   VERSION: '0.0.367',
   compute: async (opts) => {
+  __ohsorryShowSpinner();
   opts = opts || {};
   const mode = opts.mode || 'own';
   const isRival = mode === 'rival';
@@ -262,6 +286,10 @@ window.OhsorryCore = {
   // rate-reference-slim.json — 3550명 ereter-fetched 평균 EX rate (estEc/Hc/Exh × 0.5 bucket, isotonic monotonic).
   //   calcWeakness 에 rateRef 전달 시 absolute reference 기준 잔차 분석 → 사용자간 vec 직접 비교 가능.
   const RATE_REF_URL = GIST_RAW + '/rate-reference-slim.json';
+  // recommend.js — 추천 관련 함수 모듈 (chartStrengthMatch / chartStrengthMatchByHand / computeChartTags /
+  //   computeRecHashtags / buildPools / buildRecs / buildWeaknessRecs).
+  //   calcOhsorryCore 가 이 모듈 호출하면 함수 본체는 단일 곳 (gist) 에서 관리 → ohSorryWeb / INFOhSorry 양쪽 reuse.
+  const RECOMMEND_URL = GIST_RAW + '/recommend.js';
 
   // 외부 lib 메모리 캐시 (페이지 lifetime 유지) — batch (라이벌 다수) 처리 시 두 번째부터 fetch skip
   if (!window.__ohsorryLibCache) window.__ohsorryLibCache = {};
@@ -374,6 +402,8 @@ window.OhsorryCore = {
 
   // 패턴 데이터 + weakness 모듈 fetch (실패 시 추천 가중치 없이 진행, 기존 정렬 fallback)
   let patternsMap = null, weaknessLib = null, rateRefData = null, featureScoresMap = null;
+  // recommendLib — window.OhsorryRecommend (recommend.js gist 로드 결과). createContext(deps) 호출용.
+  let recommendLib = null;
   try {
     const { data: pData, source: pSrc } = await loadWithCache(PATTERNS_URL, 'ohSorry:patterns', true);
     patternsMap = pData;
@@ -398,6 +428,16 @@ window.OhsorryCore = {
     console.log(`[step2] calcWeakness.js 로드 (${wSrcType})`);
   } catch (e) {
     console.warn('[step2] calcWeakness.js 로드 실패 (가중치 비활성):', e.message);
+  }
+  // recommend.js — 추천 함수 모듈. 실패 시 옛 내장 함수 fallback (인라인 정의 유지 — 점진적 마이그레이션).
+  try {
+    const { data: recSrc, source: recSrcType } = await loadWithCache(RECOMMEND_URL, 'ohSorry:libRecommend', false);
+    (new Function(recSrc))();
+    recommendLib = window.OhsorryRecommend;
+    if (!recommendLib) throw new Error('OhsorryRecommend global 등록 실패');
+    console.log(`[step2] recommend.js 로드 (${recSrcType}, v${recommendLib.VERSION})`);
+  } catch (e) {
+    console.warn('[step2] recommend.js 로드 실패 (인라인 추천 함수 fallback):', e.message);
   }
   // rate-reference — calcWeakness 의 absolute 잔차 분석용. 실패해도 self-relative 모드로 fallback.
   try {
@@ -1195,150 +1235,12 @@ window.OhsorryCore = {
     for (const f of weaknessLib.FEATS) vecLog[f] = +userVec[f].toFixed(2);
     console.log(`[step2] userVec (${userVec.__meta.matched}곡 매칭):`, vecLog);
   }
-  const chartStrengthMatch = (r) => {
-    if (!userVec || !weaknessLib) return 0;
-    const sid = patternsTitleMap[norm(r.title || '')];
-    if (!sid) return 0;
-    const cn = weaknessLib.DIFF2CHART[r.chart];
-    if (!cn || !patternsMap[sid] || !patternsMap[sid].c[cn]) return 0;
-    return weaknessLib.chartStrengthMatch(patternsMap[sid].c[cn], userVec);
-  };
-
-  // 손 분리 + FLIP 매치 — chart 의 p1/p2 와 vecL/vecR 각각 dot product, FLIP 배치도 같이 비교.
-  //   return: { L, R, total, max, flipL, flipR, flipTotal, flipMax, best:'normal'|'flip', bestTotal }
-  //   추천 정렬은 bestTotal desc — FLIP 으로 더 잘 맞는 곡도 같이 우선순위 결정.
-  //   weaknessLib 신규 함수 / __vecL / __vecR 모두 있어야 동작 (옛 gist 호환 위해 null 반환 fallback).
-  // 클리어 추천의 배치추천 토글 상태 (closure 변수, __dp_rerollRecs / __dp_setRecLayoutMode 가 갱신).
-  //   'on'  → 8 배치 best 평가 (mirror + flip 비교, default).
-  //   'off' → 정규 N/N 강제 (chartStrengthMatch8Way 에 flipOn=false / mirrorOn=false 전달).
-  let layoutModeForClear = 'on';
-  // 새 gist (chartStrengthMatch8Way 있음) 우선 — 8 배치 (N/N, M/-, -/M, M/M, F, F M/-, F -/M, F M/M) 평가.
-  // 옛 gist fallback — 2 배치 (normal / flip) 평가. return 형식 normalize 해서 _matchByHand 통일.
-  const chartStrengthMatchByHand = (r) => {
-    if (!userVec || !userVec.__vecL || !userVec.__vecR || !weaknessLib) return null;
-    const sid = patternsTitleMap[norm(r.title || '')];
-    if (!sid) return null;
-    const cn = weaknessLib.DIFF2CHART[r.chart];
-    if (!cn || !patternsMap[sid] || !patternsMap[sid].c[cn]) return null;
-    const chartC = patternsMap[sid].c[cn];
-    if (weaknessLib.chartStrengthMatch8Way) {
-      const w8Opts = layoutModeForClear === 'off' ? { flipOn: false, mirrorOn: false } : undefined;
-      const w8 = weaknessLib.chartStrengthMatch8Way(chartC, userVec, w8Opts);
-      if (!w8) return null;
-      return {
-        bestTotal: w8.bestTotal,
-        bestLabel: w8.bestLabel,
-        best: w8.best,
-        L: w8.best.L, R: w8.best.R,
-        flip: w8.best.flip, mL: w8.best.mL, mR: w8.best.mR,
-        total: w8.best.total,
-        results: w8.results,
-      };
-    }
-    // 옛 gist fallback
-    if (weaknessLib.chartStrengthMatchByHand) {
-      const w = weaknessLib.chartStrengthMatchByHand(chartC, userVec.__vecL, userVec.__vecR);
-      const isF = w.best === 'flip';
-      return {
-        bestTotal: w.bestTotal,
-        bestLabel: isF ? 'F' : '',
-        best: { flip: isF, mL: false, mR: false, label: isF ? 'F' : '', L: isF ? w.flipL : w.L, R: isF ? w.flipR : w.R, total: w.bestTotal },
-        L: isF ? w.flipL : w.L, R: isF ? w.flipR : w.R,
-        flip: isF, mL: false, mR: false,
-        total: w.bestTotal,
-        results: null,
-      };
-    }
-    return null;
-  };
-
-  // 차트 패턴 hashtag — 그 곡의 강한 top 3 feature (양손 평균 pt 큰 순) → 한국어 약어.
-  //   추천 row hover / 토스트에 "#동치 #계단 #밀도" 식으로 표시.
-  const FEAT_TAG_MAP = {
-    NOTES: '밀도', CHORD: '동치', PEAK: '순간밀도', CHARGE: '롱잡',
-    SCRATCH: '스크', 'SOF-LAN': '변속', PHRASE: '계단',
-    JACK: '축연타', TRILL: '트릴', RAND: '난타',
-  };
-  const FEAT_TAG_KEYS = Object.keys(FEAT_TAG_MAP);
-  const computeChartTags = (r) => {
-    if (!weaknessLib || !weaknessLib.avgPt) return [];
-    const sid = patternsTitleMap[norm(r.title || '')];
-    if (!sid) return [];
-    const cn = weaknessLib.DIFF2CHART[r.chart];
-    if (!cn || !patternsMap[sid] || !patternsMap[sid].c[cn]) return [];
-    const pt = weaknessLib.avgPt(patternsMap[sid].c[cn]);
-    const arr = FEAT_TAG_KEYS.map(f => ({ f, v: pt[f] || 0 }));
-    arr.sort((a, b) => b.v - a.v);
-    return arr.slice(0, 3).filter(x => x.v > 0).map(x => FEAT_TAG_MAP[x.f]);
-  };
-
-  // 추천 row 전용 hashtag 배열 계산 — ohsorryRender 가 hover/toast 에 그대로 표시.
-  //   순서: [카테고리(필수), FLIP+N(있을 때), 한손위주(편차 30%+), pattern feature top 3]
-  const CATEGORY_TAG_MAP = { hard: '#어려움', easy: '#도전', cleanup: '' };
-  const PRACTICE_TAG_MAP = { review: '복습', pattern: '패턴연습', score: '점수회복', practical: '실전연습' };
-  const HAND_BIAS_THRESHOLD = 0.3;
-  const computeRecHashtags = (r) => {
-    const tags = [];
-    if (r._category && CATEGORY_TAG_MAP[r._category]) tags.push(CATEGORY_TAG_MAP[r._category]);
-    // 시리즈명 — textage-meta lookup. 미매핑/실패 시 skip.
-    if (seriesNames) {
-      const sno = textageSeriesByNorm.get(norm(r.title || ''));
-      const sname = sno != null ? seriesNames[String(sno)] : null;
-      if (sname) tags.push('#' + sname);
-    }
-    if (r._clearScore != null) {
-      if (r._clearScore >= 0.72) tags.push('#가능성높음');
-      else if (r._clearScore < 0.45) tags.push('#도전권');
-      if (r._clearType === 'near-lamp') tags.push('#램프근접');
-      else if (r._clearType === 'score-ready') tags.push('#점수충분');
-      else if (r._clearType === 'popular') tags.push('#검증곡');
-    }
-    if (r._category === 'weakness') {
-      tags.push('#연습');
-      if (r._practiceType && PRACTICE_TAG_MAP[r._practiceType]) tags.push('#' + PRACTICE_TAG_MAP[r._practiceType]);
-    }
-    const m = r._matchByHand;
-    if (m) {
-      if (m.bestLabel) {
-        if (m.flip) tags.push('#FLIP');
-        if (m.mL && m.mR) tags.push('#쌍미러');
-        else if (m.mL) tags.push('#좌미러');
-        else if (m.mR) tags.push('#우미러');
-      }
-      // 한 손 위주 — best 배치의 |L−R| / max(L,R) ≥ 30%. 8 배치 wrapper 가 m.L/m.R 에 best 배치 값 노출.
-      const l = m.L || 0;
-      const rh = m.R || 0;
-      const mxLR = l > rh ? l : rh;
-      if (mxLR > 0 && Math.abs(l - rh) / mxLR >= HAND_BIAS_THRESHOLD) {
-        tags.push(l > rh ? '#왼손위주' : '#오른손위주');
-      }
-    }
-    // pattern feature top 3
-    const pt = r._tags || computeChartTags(r);
-    if (pt && pt.length > 0) for (const t of pt) tags.push('#' + t);
-    return tags;
-  };
+  // 추천 함수 (chartStrengthMatch / chartStrengthMatchByHand / computeChartTags / computeRecHashtags +
+  //   layoutModeForClear 토글 + FEAT_TAG_MAP / CATEGORY_TAG_MAP / PRACTICE_TAG_MAP / HAND_BIAS_THRESHOLD 상수)
+  //   는 recommend.js 모듈로 분리됨 (gist). recommendCtx 통해 호출.
 
   const recsEC = [], recsHC = [], recsEXH = [], recsWeakness = [];
-  const maxClearGameLevel = (() => {
-    let maxLv = 0;
-    for (const c of allCharts) {
-      if (typeof c.gameLevel === 'number' && typeof c.lampNum === 'number' && c.lampNum >= 3) {
-        if (c.gameLevel > maxLv) maxLv = c.gameLevel;
-      }
-    }
-    return maxLv;
-  })();
-
-  // Fisher-Yates shuffle
-  const shuffle = (arr) => {
-    const a = arr.slice();
-    for (let i = a.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [a[i], a[j]] = [a[j], a[i]];
-    }
-    return a;
-  };
+  // maxClearGameLevel / shuffle — recommend.js 로 분리 후 dead code 가 되어 제거.
 
   // 추천 풀 — 카테고리 (미도달 / 도달DJ미도달) × 분류 (hard / easy / cleanup).
   // 새 룰 (2026-05-27~) — stage 별 effectiveBase + d 기반:
@@ -1356,380 +1258,15 @@ window.OhsorryCore = {
   //     정리곡만 (cleanup) = [0, effectiveBase). dv ≥ effectiveBase → 풀 제외 (약/강도전 분류 없음)
   //
   //   d=0 (사용자가 effectiveBase 이상 클리어 없음) → 약/강도전 한 점으로 수렴 → 대부분 정리곡
-  const buildPools = (threshold, getDiffField, baseStar, recLevelMode, djMode) => {
-    const empty = { hard: [], easy: [], cleanup: [] };
-    const underLamp = { hard: [], easy: [], cleanup: [] };       // lampNum < threshold
-    const reached   = { hard: [], easy: [], cleanup: [] };       // lampNum >= threshold && !accuracyOK
-    if (baseStar == null) return { underLamp: empty, reached: empty };
-    const isLowLevelRec = recLevelMode === 'low';
-    let maxClearGameLevel = 0;
-    for (const c of allCharts) {
-      if (typeof c.gameLevel === 'number' && typeof c.lampNum === 'number' && c.lampNum >= 3) {
-        if (c.gameLevel > maxClearGameLevel) maxClearGameLevel = c.gameLevel;
-      }
-    }
-    const lowAllowedLevels = maxClearGameLevel >= 12 ? [10, 11, 12]
-      : maxClearGameLevel >= 11 ? [10, 11]
-      : [8, 9, 10];
-    const isEC = getDiffField === 'ec';
-    const isHC  = getDiffField === 'hc';
-    const isEXH = getDiffField === 'exh';
-    // 그 stage 클리어 한 차트들의 ★ 중 최댓값
-    let topClearStar = 0;
-    for (const c of allCharts) {
-      if (c.lampNum < threshold) continue;
-      const e0 = ereterMap.get(norm(c.title) + '|' + c.diff);
-      if (!e0 || typeof e0[getDiffField] !== 'number') continue;
-      if (e0[getDiffField] > topClearStar) topClearStar = e0[getDiffField];
-    }
-    // stage 별 effectiveBase + d 산정
-    const effectiveBase = isEC  ? (baseStar - 0.5)
-                        : isEXH ? (baseStar + 2)
-                        : baseStar;  // HC
-    const d = Math.max(0, topClearStar - effectiveBase);
-    // EC/HC: 정리곡 [0, effectiveBase) / 약도전 [effectiveBase, effectiveBase+0.7d) / 강도전 [effectiveBase+0.7d, topClearStar+0.3d]
-    // EXH:   정리곡만 [0, effectiveBase). dv ≥ effectiveBase → 풀 제외
-    const hardMin = effectiveBase + 0.7 * d;
-    const hardMax = topClearStar + 0.3 * d;
-    const easyMin = effectiveBase;
-    // stage 별 정확도 임계치 — EC: A 이상이면 OK / HC: AA 이상 / EXH: AAA 만
-    const accuracyOK = (djLv) => {
-      if (isEXH) return djLv === 'AAA';
-      if (isHC)  return djLv === 'AAA' || djLv === 'AA';
-      return djLv === 'AAA' || djLv === 'AA' || djLv === 'A';  // EC default
-    };
-    const reachedStageLamp = (lampN) => {
-      if (isEXH) return lampN >= 6;       // EX/FC/PFC + AAA 미도달
-      if (isHC)  return lampN === 5;      // HC + AA 미도달
-      return lampN === 3 || lampN === 4;  // EC/NC + A 미도달
-    };
-    for (const c of allCharts) {
-      if (isLowLevelRec && (c.gameLevel == null || !lowAllowedLevels.includes(c.gameLevel))) continue;
-      if (recLevelMode === 'lv12' && c.gameLevel !== 12) continue;
-      if (recLevelMode === 'lv11+12' && c.gameLevel !== 11 && c.gameLevel !== 12) continue;
-      const under = c.lampNum < threshold;
-      const reachedForDj = reachedStageLamp(c.lampNum);
-      // DJ레벨 미달 풀 제외 모드 — 클리어램프 미달 곡만 후보로 (램프 도달·DJ레벨 미달 곡 제외).
-      if (djMode === 'off' && !under) continue;
-      // 해당 stage 를 못 딴 곡 + 해당 stage 에서 DJ Level 미도달인 곡만 추천 후보.
-      // 예: EASY 추천에서 HC/EX/FC 는 제외, EXH 추천은 EX/FC/PFC 도 AAA 미도달이면 포함.
-      if (!under && !reachedForDj) continue;
-      if (reachedForDj && accuracyOK(c.djLevel)) continue;
-      if (reachedForDj && c.exScore === 0) continue;
-      let e = ereterMap.get(norm(c.title) + '|' + c.diff);
-      // c.gameLevel — allCharts 단계 textage meta 보강에서 채워진 game level.
-      //   prefix ("12A") 는 모든 차트에 표시 위해 c.gameLevel 그대로 사용.
-      //   ratingOnly flag — ereter 미등록 + ohSorryRating 만 등록된 차트 marker. 곡명 색깔 / tooltip "ereter 미등록" 표시 조건.
-      let gameLevel = (typeof c.gameLevel === 'number') ? c.gameLevel : null;
-      let ratingOnly = false;
-      if (!e || e.level == null) {
-        const r = ratingMap.get(norm(c.title) + '|' + c.diff);
-        if (r && typeof r.zasaLevel === 'number') {
-          e = {
-            level: r.zasaLevel,
-            ec: typeof r.estEc === 'number' ? r.estEc : null,
-            hc: typeof r.estHc === 'number' ? r.estHc : null,
-            exh: typeof r.estExh === 'number' ? r.estExh : null,
-            ec_n: r.nEcCleared || 0,
-            hc_n: r.nHcCleared || 0,
-            exh_n: r.nExhCleared || 0,
-          };
-          gameLevel = r.gameLevel ?? gameLevel;
-          ratingOnly = true;
-        } else if (isLowLevelRec && typeof c.gameLevel === 'number') {
-          const z = zasaMap.get(norm(c.title) + '|' + c.diff);
-          const lowLv = c.gameLevel;
-          const lowBase = lowLv === 8 ? 0.20 : lowLv === 9 ? 0.45 : 0.70;
-          e = {
-            level: z && typeof z.level === 'number' ? z.level : (typeof zasaAvgByGameLv[lowLv] === 'number' ? zasaAvgByGameLv[lowLv] : lowLv),
-            ec: lowBase,
-            hc: lowBase + 0.28,
-            exh: lowBase + 0.58,
-            ec_n: 0,
-            hc_n: 0,
-            exh_n: 0,
-            __lowFallback: true,
-          };
-          gameLevel = lowLv;
-          ratingOnly = true;
-        } else continue;
-      }
-      const dv = e[getDiffField];
-      if (typeof dv !== 'number') continue;
-      const item = {
-        title: c.title, chart: c.diff, level: e.level,
-        ec: e.ec, hc: e.hc, exh: e.exh,
-        ec_n: e.ec_n, hc_n: e.hc_n, exh_n: e.exh_n,
-        diffValue: dv, currentLamp: c.lamp,
-        margin: baseStar - dv,
-        gameLevel,
-        ratingOnly,
-        lampNum: c.lampNum,
-        djLevel: c.djLevel || null,
-        exScore: c.exScore,
-        noteCount: c.noteCount,
-        scoreRate: (typeof c.exScore === 'number' && typeof c.noteCount === 'number' && c.noteCount > 0)
-          ? (c.exScore / (c.noteCount * 2)) * 100
-          : null,
-        _hideDiffValue: !!e.__lowFallback,
-      };
-      // dv 기반 분류 (2026-05-27~) — stage 별 effectiveBase + hardMax 상한.
-      //   EC/HC: 정리곡 [0, easyMin) / 약도전 [easyMin, hardMin) / 강도전 [hardMin, hardMax]. dv > hardMax 풀 제외.
-      //   EXH:   정리곡만 [0, effectiveBase). dv ≥ effectiveBase 풀 제외.
-      let cls;
-      if (isLowLevelRec) {
-        if (c.gameLevel <= 8) cls = 'cleanup';
-        else if (c.gameLevel === 9) cls = 'easy';
-        else cls = 'hard';
-      } else if (isEXH) {
-        if (dv >= effectiveBase) continue;  // 약/강도전 분류 없음 — 풀 제외
-        cls = 'cleanup';
-      } else {
-        if (dv > hardMax) continue;  // 강도전 상한 초과 풀 제외
-        if (dv >= hardMin) cls = 'hard';
-        else if (dv >= easyMin) cls = 'easy';
-        else {
-          if (isEC && typeof e.hc === 'number' && e.hc < baseStar - 3) continue;  // 너무 쉬운 곡 제외
-          cls = 'cleanup';
-        }
-      }
-      item._category = cls;
-      (reachedForDj ? reached : underLamp)[cls].push(item);
-    }
-    return { underLamp, reached };
-  };
+  // buildPools — recommend.js 로 분리.
 
-  const buildRecs = (threshold, getDiffField, baseStar, recLevelMode, djMode) => {
-    const { underLamp, reached } = buildPools(threshold, getDiffField, baseStar, recLevelMode, djMode);
-    const countField = getDiffField + '_n';
-    const keyOf = r => (r.title || '') + '|' + r.chart;
-    const isLowLevelRec = recLevelMode === 'low';
-    const clamp01 = (v) => Math.max(0, Math.min(1, v));
-    const djRankScore = (djLv) => {
-      const m = { F: 0, E: 0.1, D: 0.2, C: 0.35, B: 0.5, A: 0.68, AA: 0.84, AAA: 1 };
-      return m[djLv] != null ? m[djLv] : 0;
-    };
-    const stageRateTarget = getDiffField === 'exh' ? 89 : getDiffField === 'hc' ? 82 : 74;
-    const stageRateWidth = getDiffField === 'exh' ? 10 : getDiffField === 'hc' ? 12 : 14;
-    const layoutKey = (m) => {
-      if (!m) return 0;
-      return typeof m.bestTotal === 'number' ? m.bestTotal : (m.total || 0);
-    };
-    const enrichClearCandidate = (r) => {
-      if (r._clearScore !== undefined) return r;
-      const diffFit = clamp01(1 - Math.abs(r.diffValue - baseStar) / (getDiffField === 'exh' ? 3.2 : 2.4));
-      const underGap = Math.max(0, threshold - (typeof r.lampNum === 'number' ? r.lampNum : 0));
-      const lampFit = r.lampNum >= threshold
-        ? 0.74
-        : clamp01(1 - (underGap - 1) / 4);
-      const rateFit = typeof r.scoreRate === 'number'
-        ? clamp01((r.scoreRate - (stageRateTarget - stageRateWidth)) / stageRateWidth)
-        : 0.35;
-      const countRaw = r[countField] || 0;
-      const countFit = clamp01(Math.log10(countRaw + 1) / 3);
-      const djFit = djRankScore(r.djLevel);
-      const layoutFit = r._matchByHand ? clamp01((layoutKey(r._matchByHand) + 12) / 24) : 0.5;
-      const layoutGain = r._matchByHand && Array.isArray(r._matchByHand.results)
-        ? layoutKey(r._matchByHand) - layoutKey(r._matchByHand.results.find((x) => !x.flip && !x.mL && !x.mR))
-        : 0;
-      const layoutGainFit = clamp01(layoutGain / 8);
-      const categoryBoost = r._category === 'cleanup' ? 0.10 : r._category === 'easy' ? 0.04 : -0.03;
-      r._layoutGain = layoutGain;
-      r._clearScore =
-        diffFit * 0.24 +
-        lampFit * 0.18 +
-        rateFit * 0.18 +
-        countFit * 0.14 +
-        layoutFit * 0.14 +
-        layoutGainFit * 0.06 +
-        djFit * 0.06 +
-        categoryBoost;
-      if (r.lampNum === threshold - 1 || (typeof r.scoreRate === 'number' && r.scoreRate >= stageRateTarget - 2)) r._clearType = 'near-lamp';
-      else if (typeof r.scoreRate === 'number' && r.scoreRate >= stageRateTarget - 5) r._clearType = 'score-ready';
-      else if (countFit >= 0.6) r._clearType = 'popular';
-      else r._clearType = 'fit';
-      return r;
-    };
-
-    // 카테고리 내 모든 분류 합쳐서 sample 15 — bestTotal desc top 15 (2026-05-27~).
-    //   풀 자체가 stage 별 effectiveBase 기준으로 ★ 범위 좁혀짐 → 추가 ★ 거리 감쇠 불필요.
-    //   정렬: bestTotal desc (사용자 강점 dot product). 동점 시 그 stage 클리어 count desc tiebreak.
-    //   1순위: 8 way / by-hand 매치 — vecL/vecR + 신규 gist
-    //   2순위: 양손 평균 매치 — 옛 fallback
-    //   3순위: count desc — userVec 자체 없을 때
-    //
-    // cleanup 50/50 보정 — sample15 안의 cleanup 분류 곡들 중 절반은 bestTotal 낮은 쪽 잘라내고
-    //   cleanup 풀 전체의 dv asc (= 그 stage 쉬운 곡 우선) 곡으로 교체. 한쪽만 우선하지 않고 다양성 확보.
-    const canUseByHand = !!(userVec && userVec.__vecL && userVec.__vecR && weaknessLib && (weaknessLib.chartStrengthMatch8Way || weaknessLib.chartStrengthMatchByHand));
-    const sample15 = (cat) => {
-      const pool = [...cat.hard, ...cat.easy, ...cat.cleanup];
-      for (const r of pool) {
-        if (r._matchByHand === undefined) r._matchByHand = canUseByHand ? chartStrengthMatchByHand(r) : null;
-        if (r._tags === undefined) r._tags = computeChartTags(r);
-        enrichClearCandidate(r);
-        if (r._hashtags === undefined) r._hashtags = computeRecHashtags(r);
-      }
-      const sortByBest = (a, b) => {
-        return ((b._clearScore || 0) - (a._clearScore || 0)) ||
-          ((b[countField] || 0) - (a[countField] || 0)) ||
-          (a.diffValue - b.diffValue);
-      };
-      const sortByMatch = (a, b) => {
-        const sa = chartStrengthMatch(a);
-        const sb = chartStrengthMatch(b);
-        return ((b._clearScore || 0) - (a._clearScore || 0)) || (sb - sa) || ((b[countField] || 0) - (a[countField] || 0));
-      };
-      let sorted;
-      if (canUseByHand) sorted = [...pool].sort(sortByBest);
-      else if (userVec)  sorted = [...pool].sort(sortByMatch);
-      else                sorted = [...pool].sort((a, b) => (b[countField] || 0) - (a[countField] || 0));
-
-      // 1차 top 15
-      let top15 = sorted.slice(0, 15);
-      // cleanup 분류 곡 50/50 교체 — sample 안의 cleanup 중 bestTotal 낮은 절반을 cleanup 풀의 dv asc top 으로 교체.
-      const cleanupKeys = new Set(cat.cleanup.map(keyOf));
-      const cleanupInTop = top15.filter((r) => cleanupKeys.has(keyOf(r)));
-      const halfCount = Math.floor(cleanupInTop.length / 2);
-      if (halfCount > 0) {
-        const cleanupSorted = (canUseByHand ? [...cleanupInTop].sort(sortByBest)
-                              : userVec ? [...cleanupInTop].sort(sortByMatch)
-                              : [...cleanupInTop]);
-        const toRemove = new Set(cleanupSorted.slice(-halfCount).map(keyOf));
-        top15 = top15.filter((r) => !toRemove.has(keyOf(r)));
-        const usedKeys = new Set(top15.map(keyOf));
-        const dvAscPool = [...cat.cleanup]
-          .filter((r) => !usedKeys.has(keyOf(r)))
-          .sort((a, b) => (a.diffValue || 0) - (b.diffValue || 0));
-        top15.push(...dvAscPool.slice(0, halfCount));
-      }
-      return top15;
-    };
-    const underSample = sample15(underLamp);
-    const reachedSample = sample15(reached);
-
-    // 분류 tag 부여 (sample 안에서 다시 hard/easy/cleanup 으로 그룹)
-    const tagged = (sample, cat) => {
-      const out = { hard: [], easy: [], cleanup: [] };
-      const allTagged = new Map();
-      ['hard', 'easy', 'cleanup'].forEach(cls => cat[cls].forEach(r => allTagged.set(keyOf(r), cls)));
-      for (const r of sample) {
-        const cls = allTagged.get(keyOf(r));
-        if (cls) out[cls].push(r);
-      }
-      return out;
-    };
-    const under = tagged(underSample, underLamp);
-    const reach = tagged(reachedSample, reached);
-
-    // 최종 추출 — 클리어 수 증가 목적이므로 목표 램프 미도달(underLamp)을 우선.
-    //   복습곡 포함(djMode=on)이어도 도달DJ미달(reached)은 최대 2곡만 섞고, 나머지는 "깰 수 있는데 안 깬 곡" 중심.
-    const used = new Set();
-    const picks = [];
-    const byClearScore = (arr) => [...arr].sort((a, b) => ((b._clearScore || 0) - (a._clearScore || 0)));
-    const takeFrom = (arr, n) => {
-      if (n <= 0) return 0;
-      let taken = 0;
-      for (const r of byClearScore(arr)) {
-        if (taken >= n || picks.length >= 10) break;
-        const k = keyOf(r);
-        if (used.has(k)) continue;
-        used.add(k);
-        picks.push(r);
-        taken += 1;
-      }
-      return taken;
-    };
-    if (isLowLevelRec) {
-      const underAll = [...under.cleanup, ...under.easy, ...under.hard];
-      const lowLevels = [...new Set(underAll.map((r) => r.gameLevel).filter((lv) => typeof lv === 'number'))].sort((a, b) => a - b);
-      const targetLv12 = lowLevels.includes(12) ? 1 : 0;
-      const mainLevels = lowLevels.filter((lv) => lv !== 12);
-      const perLevel = mainLevels.length > 0 ? Math.max(1, Math.floor((10 - targetLv12) / mainLevels.length)) : 10 - targetLv12;
-      for (const lv of mainLevels) takeFrom(underAll.filter((r) => r.gameLevel === lv), perLevel);
-      if (targetLv12 > 0) takeFrom(underAll.filter((r) => r.gameLevel === 12), 1);
-      if (picks.length < 10) takeFrom(underAll, 10 - picks.length);
-      if (djMode === 'on' && picks.length < 10) takeFrom([...reach.cleanup, ...reach.easy, ...reach.hard], 10 - picks.length);
-      return picks.sort((a, b) => (b._clearScore || 0) - (a._clearScore || 0));
-    }
-    const underTarget = djMode === 'on' ? 8 : 10;
-    const underSlots = getDiffField === 'exh'
-      ? [
-          { pool: under.cleanup, n: underTarget },
-          { pool: under.easy,    n: 1 },
-          { pool: under.hard,    n: 1 },
-        ]
-      : [
-          { pool: under.cleanup, n: underTarget >= 10 ? 4 : 3 },
-          { pool: under.easy,    n: underTarget >= 10 ? 4 : 3 },
-          { pool: under.hard,    n: 2 },
-        ];
-    let underTaken = 0;
-    for (const s of underSlots) underTaken += takeFrom(s.pool, Math.min(s.n, underTarget - underTaken));
-    if (underTaken < underTarget) {
-      underTaken += takeFrom([...under.cleanup, ...under.easy, ...under.hard], underTarget - underTaken);
-    }
-    if (djMode === 'on') {
-      takeFrom([...reach.cleanup, ...reach.easy, ...reach.hard], 10 - picks.length);
-    }
-    // 그래도 부족하면 전체 풀에서 clearScore 순으로 보충.
-    let need = 10 - picks.length;
-    if (need > 0) {
-      const allCands = [...underSample, ...reachedSample];
-      takeFrom(allCands, need);
-    }
-    return picks.sort((a, b) => (b._clearScore || 0) - (a._clearScore || 0));
-  };
+  // buildRecs — recommend.js 로 분리.
 
   // (2026-05-27~) buildExhRecs 제거 — EXH 도 buildRecs(6, 'exh') 새 룰로 통일.
   //   buildPools 의 effectiveBase = baseStar + 2, 정리곡만 (약/강도전 없음).
 
-  // 연습곡 추천 (2026-05-27~) — 패턴 점수 / 복습 필요도 / 난이도 적합도 / 배치 추천을 혼합.
-  //   topClearZasa 는 클리어 최고점보다 너무 높은 곡만 막는 안전장치로 사용.
-  //   대상 feature subset (mode 옵션):
-  //     'all' (default): NOTES/CHORD/PEAK/PHRASE/JACK/TRILL/RAND (건반 7개, SOF-LAN/SCRATCH/CHARGE 제외)
-  //     'CHARGE' / 'SCRATCH' / 'SOF-LAN': 단일 feature 전용
-  //   기타 opts:
-  //     flipOn   : true (default) / false — UI 토글. ON=8 배치 best, OFF=정규(N/N) 강제.
-  //                내부적으로 chartWeaknessMatch8Way 에 flipOn / mirrorOn 동시 전달 (둘 다 같이 ON/OFF).
-  //     handMode : 'both' (default) / 'left' / 'right' — 매치 점수 합계의 손 범위.
-  //     strength : 1 (default) / 2 / 3 ... — offset 단계. offset = (strength - 1) × topN, slice(offset, offset+topN).
-  //     topN     : 5 (default) / 10 / 20
-  const WEAKNESS_FEATS = ['NOTES', 'CHORD', 'PEAK', 'PHRASE', 'JACK', 'TRILL', 'RAND'];
-  const WEAKNESS_CLEAR_LAMP = 4;   // EC 이상 (lampNum >= 4) 을 "클리어" 로 봄 — topClearZasa 산정 기준
-  const practiceZasaDefault = (() => {
-    // 사용자가 EC 이상 (lampNum >= 3, 사용자 인지의 "깼다") 클리어한 차트들 중 zasa 최고값 → [max-1.0, max] 범위.
-    //   WEAKNESS_CLEAR_LAMP (= 4, NC 이상) 는 buildWeaknessRecs 의 안전장치용 — 여기와는 의미가 다름.
-    //   클리어 이력 없으면 게임레벨 기반 fallback.
-    let topClearZasa = 0;
-    for (const c of allCharts) {
-      if (typeof c.lampNum !== 'number' || c.lampNum < 3) continue;
-      const k0 = norm(c.title || '') + '|' + c.diff;
-      const e0 = ereterMap.get(k0);
-      let zasa = null;
-      if (e0 && typeof e0.level === 'number') zasa = e0.level;
-      else {
-        const r0 = ratingMap.get(k0);
-        if (r0 && typeof r0.zasaLevel === 'number') zasa = r0.zasaLevel;
-      }
-      if (zasa != null && zasa > topClearZasa) topClearZasa = zasa;
-    }
-    if (topClearZasa > 0) return { min: +(topClearZasa - 1).toFixed(1), max: topClearZasa };
-    if (maxClearGameLevel >= 12) return { min: 11.6, max: 12.7 };
-    if (maxClearGameLevel >= 11) return { min: 10.0, max: 12.1 };
-    if (maxClearGameLevel >= 10) return { min: 8.0, max: 10.9 };
-    return { min: 5.9, max: 10.0 };
-  })();
-  const WEAKNESS_MODE_FEATS = {
-    all:       WEAKNESS_FEATS,
-    CHARGE:    ['CHARGE'],
-    SCRATCH:   ['SCRATCH'],
-    'SOF-LAN': ['SOF-LAN'],
-  };
-  // CHART2DIFF — patternsMap chartName (DP_HYP 등) → diff 문자열 (HYPER 등). DIFF2CHART 의 역.
-  const CHART2DIFF_REC = {};
-  if (weaknessLib && weaknessLib.DIFF2CHART) {
-    for (const d in weaknessLib.DIFF2CHART) CHART2DIFF_REC[weaknessLib.DIFF2CHART[d]] = d;
-  }
+  // 연습곡 추천 (WEAKNESS_FEATS / WEAKNESS_CLEAR_LAMP / practiceZasaDefault / WEAKNESS_MODE_FEATS /
+  //   CHART2DIFF_REC) 는 recommend.js 모듈로 분리. recommendCtx 의 buildWeaknessRecs 통해 호출.
   // INF 유저 — supabase songs.ac/legen 비트맵으로 차트 단위 INF 수록 여부 정확 필터.
   //   chartName === 'DP_LEG'/'SP_LEG' 면 legen 컬럼, 그 외는 ac 컬럼. INF 비트 = 2.
   //   songsByNorm 못 가져오면 (= OhsorryDb 미로드 / fetch 실패) fallback 으로 allCharts title set 매칭 (곡 단위).
@@ -1759,345 +1296,28 @@ window.OhsorryCore = {
     }
     return infTitleSet.has(norm(title));
   };
+
+  // recommend.js 모듈 ctx — recommendLib 로드 성공 시 createContext 호출, 실패 시 null (옛 인라인 함수 fallback).
+  //   ctx 생성 시점: 모든 deps (patternsTitleMap / userVec / isInfChartInSeries / 등) 준비된 후.
+  //   다음 turn 부터 호출부를 ctx 통과로 점진적 교체 (chartStrengthMatch(r) → ctx.chartStrengthMatch(r)).
+  //   __pdLayoutMap 은 buildWeaknessRecs 가 layoutLabel 기록할 외부 객체로 전달 (옛 closure 동작 호환).
+  // eslint-disable-next-line no-unused-vars
+  const recommendCtx = recommendLib ? recommendLib.createContext({
+    userVec, weaknessLib,
+    patternsMap, patternsTitleMap, normFn: norm,
+    seriesNames, textageSeriesByNorm,
+    allCharts, ereterMap, ratingMap, zasaMap, zasaAvgByGameLv,
+    featureScoresMap,
+    isInfChartInSeries,
+    pdLayoutMap: __pdLayoutMap,
+  }) : null;
   // 연습곡 기본 범위는 zasa 11.6~12.7. DP12/DP11+ 클리어 범위 토글과 독립적으로 ☆ 입력값만 따른다.
   // 연습곡 알고리즘 (2026-05-27~) — 복습곡 + 신규 패턴곡 + 실전 연습곡 혼합.
   //   - '건반'은 순수 건반 7 feature 만 사용하며 CHARGE / SCRATCH / SOF-LAN 은 제외.
   //   - CHARGE / SCRATCH / SOF-LAN 은 전용 모드에서만 노출하고 서로 섞지 않음.
   //   - 안 친 곡도 후보에 넣어 "연습할 만한 신규 패턴곡"이 마르지 않게 함.
   //   - 이미 잘 친 곡(rate 95%+)은 제외하고, 평균보다 낮은 곡은 복습 점수를 더 줌.
-  const MIN_BIN_N = 10;
-  const buildWeaknessRecs = (baseStar, opts) => {
-    if (!userVec || !userVec.__vecL || !userVec.__vecR) return [];
-    if (!patternsMap) return [];
-    const fsScores = featureScoresMap && featureScoresMap.scores;
-    if (!fsScores) return [];  // 새 알고리즘은 feature-scores-slim 필수
-    if (baseStar == null) baseStar = 11;
-    const mode = (opts && opts.mode) || 'all';
-    const feats = WEAKNESS_MODE_FEATS[mode] || WEAKNESS_FEATS;
-    const flipOn = !(opts && opts.flipOn === false);
-    const handMode = (opts && opts.handMode) || 'both';
-    const topN = (opts && typeof opts.topN === 'number') ? opts.topN : 5;
-    const strength = (opts && typeof opts.strength === 'number' && opts.strength >= 1) ? opts.strength : 1;
-    const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
-    const zasaMin = (opts && typeof opts.zasaMin === 'number') ? opts.zasaMin : practiceZasaDefault.min;
-    const zasaMax = (opts && typeof opts.zasaMax === 'number') ? opts.zasaMax : practiceZasaDefault.max;
-    const rangeW = Math.max(0.1, zasaMax - zasaMin);
-    const targetZasa = strength >= 3 ? (zasaMax - rangeW * 0.2)
-                     : strength === 2 ? ((zasaMin + zasaMax) / 2)
-                     : (zasaMin + rangeW * 0.35);
-    // 상한은 절벽이 아니라 완만한 안전장치로 사용 — 클리어 최고점보다 너무 위만 제외.
-    let topClearZasa = 0;
-    for (const c of allCharts) {
-      if (typeof c.lampNum !== 'number' || c.lampNum < WEAKNESS_CLEAR_LAMP) continue;
-      const k0 = norm(c.title || '') + '|' + c.diff;
-      const e0 = ereterMap.get(k0);
-      let zasa = null;
-      if (e0 && typeof e0.level === 'number') zasa = e0.level;
-      else {
-        const r0 = ratingMap.get(k0);
-        if (r0 && typeof r0.zasaLevel === 'number') zasa = r0.zasaLevel;
-      }
-      if (zasa != null && zasa > topClearZasa) topClearZasa = zasa;
-    }
-    const userChartByKey = new Map();
-    for (const c of allCharts) userChartByKey.set(norm(c.title || '') + '|' + c.diff, c);
-
-    // 1단계 — 후보 풀 수집 (친 곡 + 안 친 곡 모두, mode 별 특수 패턴 분리)
-    const candidates = [];
-    for (const sid in patternsMap) {
-      const sm = patternsMap[sid];
-      if (!sm || !sm.c) continue;
-      const title = sm.t || '';
-      if (!title) continue;
-      for (const cn in sm.c) {
-        const diff = CHART2DIFF_REC[cn];
-        if (!diff) continue;
-        // INF 유저 — 차트 단위 (LEG 차트는 legen, 그 외는 ac 컬럼) 정확 필터. AC 유저는 isInfChartInSeries 가 항상 true.
-        if (!isInfChartInSeries(title, cn)) continue;
-        const chartPt = sm.c[cn];
-        const gameLevel = chartPt.lv;
-        const ptL_pre = chartPt.p1 || {};
-        const ptR_pre = chartPt.p2 || {};
-        const soflanAvg = ((ptL_pre['SOF-LAN'] || 0) + (ptR_pre['SOF-LAN'] || 0)) / 2;
-        const chargeAvg = ((ptL_pre.CHARGE || 0) + (ptR_pre.CHARGE || 0)) / 2;
-        const scratchAvg = ((ptL_pre.SCRATCH || 0) + (ptR_pre.SCRATCH || 0)) / 2;
-        if (mode === 'all') {
-          if (soflanAvg > 0) continue;
-          if (chargeAvg > 0) continue;
-          if (scratchAvg >= 6.35) continue;
-        } else if (mode === 'CHARGE') {
-          if (chargeAvg <= 0 || soflanAvg > 0 || scratchAvg >= 6.35) continue;
-        } else if (mode === 'SCRATCH') {
-          if (scratchAvg < 6.35 || chargeAvg > 0 || soflanAvg > 0) continue;
-        } else if (mode === 'SOF-LAN') {
-          if (soflanAvg <= 0 || chargeAvg > 0 || scratchAvg >= 6.35) continue;
-        }
-        // 차트 zasa lookup
-        let e = ereterMap.get(norm(title) + '|' + diff);
-        if (!e || e.level == null) {
-          const r = ratingMap.get(norm(title) + '|' + diff);
-          if (r && typeof r.zasaLevel === 'number') {
-            e = {
-              level: r.zasaLevel,
-              ec: typeof r.estEc === 'number' ? r.estEc : null,
-              hc: typeof r.estHc === 'number' ? r.estHc : null,
-              exh: typeof r.estExh === 'number' ? r.estExh : null,
-              ec_n: r.nEcCleared || 0, hc_n: r.nHcCleared || 0, exh_n: r.nExhCleared || 0,
-            };
-          } else if (typeof zasaAvgByGameLv[gameLevel] === 'number') {
-            e = { level: zasaAvgByGameLv[gameLevel], ec: null, hc: null, exh: null, ec_n: 0, hc_n: 0, exh_n: 0 };
-          } else continue;
-        }
-        if (typeof e.level !== 'number') continue;
-        if (topClearZasa > 0 && e.level > topClearZasa + 0.5) continue;
-        if (zasaMin != null && e.level < zasaMin) continue;
-        if (zasaMax != null && e.level > zasaMax) continue;
-        // feature score lookup (top 3 분류용)
-        const songFs = fsScores[sid];
-        const featScores = songFs && songFs[cn];
-        if (!featScores) continue;
-        const uc = userChartByKey.get(norm(title) + '|' + diff);
-        let rate = null;
-        if (uc && typeof uc.exScore === 'number' && uc.exScore > 0 && typeof uc.noteCount === 'number' && uc.noteCount > 0) {
-          rate = (uc.exScore / (uc.noteCount * 2)) * 100;
-        }
-        if (rate != null && rate >= 95) continue;
-        candidates.push({
-          sid, cn, title, diff, chartPt,
-          zasa: e.level, gameLevel, e, uc, rate, featScores,
-          dv: typeof e.exh === 'number' ? e.exh : (typeof e.hc === 'number' ? e.hc : e.level),
-        });
-      }
-    }
-
-    // 2단계 — 친 곡만으로 zasa bin 평균 산출. 안 친 곡은 복습 점수 대신 신규 보너스만 받음.
-    const binMap = {};
-    for (const c of candidates) {
-      if (c.rate == null) continue;
-      const bk = (Math.round(c.zasa * 10) / 10).toFixed(1);
-      if (!binMap[bk]) binMap[bk] = { sum: 0, n: 0 };
-      binMap[bk].sum += c.rate;
-      binMap[bk].n += 1;
-    }
-    // bin 곡 < MIN_BIN_N 이면 이웃 bin 결합 — 양쪽 ±0.1 씩 확장하면서 누적, n >= MIN_BIN_N 되면 멈춤.
-    function binMeanFor(targetBk) {
-      let sum = 0, n = 0;
-      const seen = {};
-      function add(bk) {
-        if (seen[bk]) return false;
-        seen[bk] = true;
-        if (binMap[bk]) { sum += binMap[bk].sum; n += binMap[bk].n; return true; }
-        return false;
-      }
-      const t = (Math.round(targetBk * 10) / 10);
-      add(t.toFixed(1));
-      let step = 1;
-      while (n < MIN_BIN_N && step <= 30) {
-        const lo = (t - step * 0.1);
-        const hi = (t + step * 0.1);
-        const a1 = add((Math.round(lo * 10) / 10).toFixed(1));
-        const a2 = add((Math.round(hi * 10) / 10).toFixed(1));
-        if (!a1 && !a2) {
-          // 양쪽 모두 빈 bin — 다음 step 으로 (zasa 분포 띄엄띄엄일 수 있음)
-        }
-        step += 1;
-      }
-      return n > 0 ? sum / n : null;
-    }
-    for (const c of candidates) {
-      c.binMean = binMeanFor(c.zasa);
-      c.deficit = (c.binMean != null && c.rate != null) ? (c.binMean - c.rate) : 0;
-    }
-
-    // 3단계 — 점수화. 약점 패턴만 강제하지 않고, 복습/신규/실전 연습을 섞는다.
-    const weakFeats = feats.filter((f) => (userVec[f] || 0) < 0);
-    const pool = [];
-    for (const c of candidates) {
-      const arr = [];
-      for (let fi = 0; fi < feats.length; fi++) {
-        const f = feats[fi];
-        const s = c.featScores[f];
-        if (typeof s !== 'number' || s <= 0) continue;
-        arr.push({ f, s });
-      }
-      arr.sort((a, b) => b.s - a.s);
-      c.top3 = arr.slice(0, 3).map((x) => x.f);
-      const patternScore = arr.length > 0 ? arr.slice(0, 3).reduce((a, x) => a + x.s, 0) / (Math.min(3, arr.length) * 100) : 0;
-      if (patternScore <= 0) continue;
-      let weakSignal = 0, weakWeight = 0;
-      for (const x of arr) {
-        const uv = userVec[x.f] || 0;
-        const w = Math.max(0, -uv);
-        weakSignal += (x.s / 100) * w;
-        weakWeight += w;
-      }
-      weakSignal = weakWeight > 0 ? clamp(weakSignal / weakWeight, 0, 1) : patternScore * 0.35;
-      const difficultyFit = clamp(1 - Math.abs(c.zasa - targetZasa) / Math.max(0.7, rangeW), 0, 1);
-      const deficitScore = c.deficit > 0 ? clamp(c.deficit / 12, 0, 1) : 0;
-      const played = c.rate != null;
-      const lampNeed = c.uc && typeof c.uc.lampNum === 'number' && c.uc.lampNum < WEAKNESS_CLEAR_LAMP ? 0.12 : 0;
-      const unplayedBonus = played ? 0 : 0.16;
-      const alreadyGoodPenalty = played && c.rate >= 90 ? 0.18 : 0;
-      let practiceType = 'practical';
-      if (played && c.deficit > 1) practiceType = 'review';
-      else if (!played) practiceType = 'pattern';
-      else if (lampNeed > 0 || (played && c.rate < 88)) practiceType = 'score';
-      c.practiceScore =
-        weakSignal * 0.32 +
-        patternScore * 0.18 +
-        difficultyFit * 0.22 +
-        deficitScore * 0.18 +
-        unplayedBonus +
-        lampNeed -
-        alreadyGoodPenalty;
-      c.practiceType = practiceType;
-      pool.push(c);
-    }
-
-    const layoutKey = (r) => {
-      if (!r) return 0;
-      if (handMode === 'left') return r.L || 0;
-      if (handMode === 'right') return r.R || 0;
-      return r.total || 0;
-    };
-
-    // 4단계 — 배치 추천 점수 반영. 8-way 결과로 정규 대비 개선폭과 손/레인 적합도를 같이 본다.
-    if (weaknessLib && weaknessLib.chartStrengthMatch8Way) {
-      for (const c of pool) {
-        const w8 = weaknessLib.chartStrengthMatch8Way(c.chartPt, userVec,
-          { feats, handMode, flipOn, mirrorOn: flipOn });
-        c._w8 = w8;
-        const normal = w8 && Array.isArray(w8.results) ? w8.results.find((r) => !r.flip && !r.mL && !r.mR) : null;
-        c.bestTotal = w8 && w8.best ? layoutKey(w8.best) : 0;
-        c.layoutBaseTotal = normal ? layoutKey(normal) : c.bestTotal;
-        c.layoutGain = c.bestTotal - c.layoutBaseTotal;
-        c.layoutLabel = w8 ? (w8.bestLabel || '') : '';
-        if (c.title && c.diff && c.layoutLabel) {
-          __pdLayoutMap[c.title + '|' + c.diff] = c.layoutLabel;
-        }
-        c.layoutAssistScore = clamp((c.bestTotal + 12) / 24, 0, 1);
-        c.layoutGainScore = clamp(c.layoutGain / 8, 0, 1);
-        c.layoutPracticeScore = clamp((-c.layoutBaseTotal) / 12, 0, 1);
-        c.practiceScore +=
-          c.layoutAssistScore * 0.08 +
-          c.layoutGainScore * 0.08 +
-          c.layoutPracticeScore * (strength >= 3 ? 0.08 : strength === 2 ? 0.05 : 0.03);
-      }
-    } else {
-      for (const c of pool) {
-        c.bestTotal = 0;
-        c.layoutBaseTotal = 0;
-        c.layoutGain = 0;
-      }
-    }
-    pool.sort((a, b) => (b.practiceScore - a.practiceScore) || (a.zasa - b.zasa));
-
-    const keyOf = (c) => c.title + '|' + c.diff;
-    const used = new Set();
-    const slice = [];
-    const takeType = (type, n) => {
-      for (const c of pool) {
-        if (slice.length >= topN || n <= 0) break;
-        if (c.practiceType !== type) continue;
-        const k = keyOf(c);
-        if (used.has(k)) continue;
-        used.add(k);
-        slice.push(c);
-        n -= 1;
-      }
-    };
-    takeType('review', Math.ceil(topN * 0.3));
-    takeType('pattern', Math.ceil(topN * 0.3));
-    takeType('score', Math.ceil(topN * 0.2));
-    takeType('practical', topN - slice.length);
-    for (const c of pool) {
-      if (slice.length >= topN) break;
-      const k = keyOf(c);
-      if (used.has(k)) continue;
-      used.add(k);
-      slice.push(c);
-    }
-
-    // 5단계 — items 변환 + _matchByHand (8 way best 라벨) + tags/hashtags
-    const items = [];
-    const nextDjTarget = (exScore, noteCount) => {
-      if (typeof exScore !== 'number' || typeof noteCount !== 'number' || noteCount <= 0) return null;
-      const maxEx = noteCount * 2;
-      const rankSteps = [
-        { lv: 'E',   rate: 2 / 9 },
-        { lv: 'D',   rate: 3 / 9 },
-        { lv: 'C',   rate: 4 / 9 },
-        { lv: 'B',   rate: 5 / 9 },
-        { lv: 'A',   rate: 6 / 9 },
-        { lv: 'AA',  rate: 7 / 9 },
-        { lv: 'AAA', rate: 8 / 9 },
-      ];
-      for (const s of rankSteps) {
-        const score = Math.ceil(maxEx * s.rate);
-        if (exScore < score) return { djLevel: s.lv, score, rate: (score / maxEx) * 100 };
-      }
-      return null;
-    };
-    for (const c of slice) {
-      const currentExScore = c.uc && typeof c.uc.exScore === 'number' ? c.uc.exScore : null;
-      const noteCount = c.uc && typeof c.uc.noteCount === 'number' ? c.uc.noteCount : null;
-      const djTarget = nextDjTarget(currentExScore, noteCount);
-      const targetRate = (() => {
-        if (typeof c.rate === 'number' && typeof c.binMean === 'number') {
-          const step = strength >= 3 ? 4 : strength === 2 ? 3 : 2;
-          return clamp(Math.max(c.rate + step, c.binMean - 1.5, djTarget ? djTarget.rate : 0), 0, 98);
-        }
-        if (typeof c.rate === 'number') return clamp(Math.max(c.rate + (strength >= 3 ? 4 : strength === 2 ? 3 : 2), djTarget ? djTarget.rate : 0), 0, 98);
-        if (typeof c.binMean === 'number') return clamp(c.binMean, 0, 98);
-        return null;
-      })();
-      const targetExScore = (() => {
-        if (targetRate == null || typeof noteCount !== 'number' || noteCount <= 0) return djTarget ? djTarget.score : null;
-        const rateScore = Math.round(noteCount * 2 * targetRate / 100);
-        return djTarget ? Math.max(rateScore, djTarget.score) : rateScore;
-      })();
-      const r = {
-        title: c.title, chart: c.diff, level: c.zasa,
-        ec: c.e.ec, hc: c.e.hc, exh: c.e.exh,
-        ec_n: c.e.ec_n, hc_n: c.e.hc_n, exh_n: c.e.exh_n,
-        diffValue: c.dv,
-        currentLamp: c.uc ? c.uc.lamp : null,
-        margin: baseStar - c.dv,
-        gameLevel: c.gameLevel,
-        _weaknessScore: c.bestTotal,
-        _weaknessBestTotal: c.bestTotal,
-        _weaknessDeficit: c.deficit,
-        _weaknessBinMean: c.binMean,
-        _weaknessRate: c.rate,
-        _weaknessTop3: c.top3,
-        _weaknessWeakFeats: weakFeats,
-        _practiceScore: c.practiceScore,
-        _practiceType: c.practiceType,
-        _targetRate: targetRate,
-        _targetExScore: targetExScore,
-        _targetDjLevel: djTarget ? djTarget.djLevel : null,
-        _currentExScore: currentExScore,
-        _layoutGain: c.layoutGain,
-        _layoutBaseTotal: c.layoutBaseTotal,
-        _category: 'weakness',
-      };
-      if (c._w8 && c._w8.best) {
-        r._matchByHand = {
-          bestTotal: c.bestTotal, bestLabel: c._w8.bestLabel, best: c._w8.best,
-          L: c._w8.best.L, R: c._w8.best.R,
-          flip: c._w8.best.flip, mL: c._w8.best.mL, mR: c._w8.best.mR,
-          total: c._w8.best.total, results: c._w8.results,
-        };
-      }
-      items.push(r);
-    }
-    const top = items;
-    for (const r of top) {
-      if (r._tags === undefined) r._tags = computeChartTags(r);
-      if (r._hashtags === undefined) r._hashtags = computeRecHashtags(r);
-    }
-    return top;
-  };
+  // MIN_BIN_N + buildWeaknessRecs — recommend.js 로 분리.
 
   // EC 는 실력값 없을 때 0.3 으로 fallback (저렙 진입자도 추천 받을 수 있게)
   // HC / EXH 는 실력값 없으면 빈 배열
@@ -2107,18 +1327,21 @@ window.OhsorryCore = {
   const REC_DJ_MODE_DEFAULT = 'off';
   const ecBase = recBaseStar != null ? recBaseStar : EC_FALLBACK_BASE;
   // EC fallback (recBaseStar==null, baseStar=0.3) 케이스는 ★ 거리 cutoff 끄기 — 안 그러면 lv11/12 풀이 통째로 컷됨.
-  recsEC.push(...buildRecs(3, 'ec', ecBase, REC_LEVEL_MODE_DEFAULT, REC_DJ_MODE_DEFAULT));
-  if (recBaseStar != null && recBaseStar >= 0.5) {
-    recsHC.push(...buildRecs(5, 'hc', recBaseStar, REC_LEVEL_MODE_DEFAULT, REC_DJ_MODE_DEFAULT));
-    recsEXH.push(...buildRecs(6, 'exh', recBaseStar, REC_LEVEL_MODE_DEFAULT, REC_DJ_MODE_DEFAULT));
+  // recommend.js 모듈 (recommendCtx) 의 buildRecs / buildWeaknessRecs 호출.
+  //   ctx 없으면 (recommend.js 로드 실패 시) 빈 배열 — 추천 비활성.
+  if (recommendCtx) {
+    recsEC.push(...recommendCtx.buildRecs(3, 'ec', ecBase, REC_LEVEL_MODE_DEFAULT, REC_DJ_MODE_DEFAULT));
+    if (recBaseStar != null && recBaseStar >= 0.5) {
+      recsHC.push(...recommendCtx.buildRecs(5, 'hc', recBaseStar, REC_LEVEL_MODE_DEFAULT, REC_DJ_MODE_DEFAULT));
+      recsEXH.push(...recommendCtx.buildRecs(6, 'exh', recBaseStar, REC_LEVEL_MODE_DEFAULT, REC_DJ_MODE_DEFAULT));
+    }
+    // 연습곡 — userVec.__vecL/__vecR 있어야 동작. 기본 ☆ 범위는 ctx 자체의 practiceZasaDefault 사용 (zasaMin/Max 생략 가능).
+    recsWeakness.push(...recommendCtx.buildWeaknessRecs(recBaseStar, {
+      flipOn: true, handMode: 'both', mode: 'all', topN: 5, strength: 1,
+    }));
   }
-  // 연습곡 — userVec.__vecL/__vecR 있어야 동작. 기본 ☆ 범위는 최대 클리어 게임레벨 기준으로 설정.
-  recsWeakness.push(...buildWeaknessRecs(recBaseStar, {
-    flipOn: true, handMode: 'both', mode: 'all', topN: 5, strength: 1,
-    zasaMin: practiceZasaDefault.min, zasaMax: practiceZasaDefault.max,
-  }));
   // window.__dp_rerollWeakness(opts) — ohsorryRender UI 토글에서 호출. opts: { flipOn, handMode, mode, topN, strength, zasaMin, zasaMax }
-  window.__dp_rerollWeakness = (opts) => buildWeaknessRecs(recBaseStar, opts || {});
+  window.__dp_rerollWeakness = (opts) => recommendCtx ? recommendCtx.buildWeaknessRecs(recBaseStar, opts || {}) : [];
   console.log(`[step2] 추천곡: EC ${recsEC.length}, HC ${recsHC.length}, EXH ${recsEXH.length}, 연습곡 ${recsWeakness.length}`);
 
   const topEC  = recsEC;
@@ -2130,15 +1353,16 @@ window.OhsorryCore = {
   // (panel 생성 후 클릭으로 재호출 → DOM 부분 업데이트)
   //   layoutMode — 'on'(default) 8 배치 best / 'off' 정규 N/N 강제. closure 의 layoutModeForClear 에 set 해서 chartStrengthMatchByHand 가 참조.
   window.__dp_rerollRecs = (stage, baseStarOverride, recLevelMode, djMode, layoutMode) => {
+    if (!recommendCtx) return [];
     const base = typeof baseStarOverride === 'number' ? baseStarOverride : recBaseStar;
     const lvMode = recLevelMode === 'lv12' ? 'lv12' : recLevelMode === 'low' ? 'low' : REC_LEVEL_MODE_DEFAULT;
     const dMode = djMode === 'on' ? 'on' : 'off';
-    layoutModeForClear = layoutMode === 'off' ? 'off' : 'on';
+    recommendCtx.setLayoutMode(layoutMode === 'off' ? 'off' : 'on');
     if ((stage === 'hc' || stage === 'exh') && base != null && base < 0.5) return [];
-    if (stage === 'exh') return base != null ? buildRecs(6, 'exh', base, lvMode, dMode) : [];
-    if (stage === 'hc')  return base != null ? buildRecs(5, 'hc', base, lvMode, dMode) : [];
+    if (stage === 'exh') return base != null ? recommendCtx.buildRecs(6, 'exh', base, lvMode, dMode) : [];
+    if (stage === 'hc')  return base != null ? recommendCtx.buildRecs(5, 'hc', base, lvMode, dMode) : [];
     // EC reroll 도 base==null 이면 EC_FALLBACK_BASE + ★ 거리 cutoff 끄기 (초기 계산과 동일).
-    if (stage === 'ec')  return buildRecs(3, 'ec', base != null ? base : EC_FALLBACK_BASE, lvMode, dMode);
+    if (stage === 'ec')  return recommendCtx.buildRecs(3, 'ec', base != null ? base : EC_FALLBACK_BASE, lvMode, dMode);
     return [];
   };
 
@@ -2232,7 +1456,9 @@ window.OhsorryCore = {
     recBaseMode, recBaseStar,
     recLevelModeDefault: REC_LEVEL_MODE_DEFAULT,
     recDjModeDefault: REC_DJ_MODE_DEFAULT,
-    practiceZasaDefault,
+    // recommend.js 의 context 에서 계산된 값 — ohsorryRender UI (연습곡 zasa 토글 기본값) 가 사용.
+    //   recommendLib 로드 실패 시 (recommendCtx=null) fallback 값.
+    practiceZasaDefault: recommendCtx ? recommendCtx.practiceZasaDefault : { min: 11.6, max: 12.7 },
     userVec,
     weaknessLib,
     norm, SERIES, shelfLib,
@@ -2248,6 +1474,7 @@ window.OhsorryCore = {
     console.error('[OhsorryCore] window.OhsorryRender 가 없습니다. wrapper 가 ohsorryRender.js 를 fetch 하지 않았을 수 있어요.');
   }
 
+  __ohsorryHideSpinner();
   return result;
   // compute: async (opts) => { ... } 의 본문 끝
   },
@@ -2258,6 +1485,7 @@ window.OhsorryCore = {
   // 추천곡 / 상세통계 / ★ 추정 비교 섹션은 빈 상태 (render 가 graceful 하게 일부만 그림).
   // dbPayload 는 null — 게스트 리드미는 supabase 재업로드 X.
   runFromDb: async (row, opts) => {
+    __ohsorryShowSpinner();
     opts = opts || {};
     const wrapperVersion = opts.wrapperVersion || 'light';
     const CORE_VERSION_SHORT = '0.0.344'.replace(/^0\.0\./, '');
@@ -2313,6 +1541,7 @@ window.OhsorryCore = {
     } else {
       console.error('[OhsorryCore.runFromDb] window.OhsorryRender 없음 — render 모듈 먼저 load 필요');
     }
+    __ohsorryHideSpinner();
     return result;
   },
 };

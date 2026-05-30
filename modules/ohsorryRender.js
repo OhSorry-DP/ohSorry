@@ -1137,11 +1137,16 @@ window.OhsorryRender = {
         if (!tags && !goal) return;
         const tagsRow = document.createElement('div');
         tagsRow.className = '__dp_rec_tags_row';
+        // 테마 분기 — eamuse 본체 (p.eagate.573.jp) 는 밝은 배경 페이지라 검은 배경 안 어울림. 투명 배경 + 진한 글자.
+        //   ohSorryWeb (vercel) / INFOhSorry 등 다른 호스트는 다크 배경 그대로 (#2a2a2a + 핑크).
+        const isLightHost = typeof location !== 'undefined' && /eagate\.573\.jp$/i.test(location.hostname);
+        const tagsBg = isLightHost ? 'transparent' : '#2a2a2a';
+        const goalColor = isLightHost ? '#495057' : '#fff';
         // !important — 호스트 페이지의 외부 CSS 가 text-decoration / color override 하는 것 방지.
-        tagsRow.setAttribute('style', 'display:flex!important;align-items:center!important;gap:8px!important;padding:3px 8px!important;background:#2a2a2a!important;color:#ff6b9d!important;font-size:10.5px!important;font-weight:600!important;line-height:1.3!important;text-decoration:none!important');
+        tagsRow.setAttribute('style', `display:flex!important;align-items:center!important;gap:8px!important;padding:3px 8px!important;background:${tagsBg}!important;color:#ff6b9d!important;font-size:10.5px!important;font-weight:600!important;line-height:1.3!important;text-decoration:none!important`);
         tagsRow.innerHTML =
           `<span style="min-width:0!important;overflow:hidden!important;text-overflow:ellipsis!important;white-space:nowrap!important">${escHtml(tags)}</span>` +
-          (goal ? `<span style="margin-left:auto!important;text-align:right!important;color:#fff!important;font-variant-numeric:tabular-nums!important;white-space:nowrap!important">${escHtml(goal)}</span>` : '');
+          (goal ? `<span style="margin-left:auto!important;text-align:right!important;color:${goalColor}!important;font-variant-numeric:tabular-nums!important;white-space:nowrap!important">${escHtml(goal)}</span>` : '');
         recItemEl.insertAdjacentElement('afterend', tagsRow);
       });
     }
