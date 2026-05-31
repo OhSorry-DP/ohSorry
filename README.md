@@ -441,13 +441,13 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
-### 2026-05-31 — recommend.js v0.0.2 — 연습곡 추천 상한을 EC클 최고까지 확장
-- 증상: 유저(예: 7930-1798)가 연습곡 추천이 특정 zasa(예: 11.4)에서 막혀 더 높은 곡이 안 나옴.
-- 원인: [recommend.js](modules/recommend.js) `buildWeaknessRecs` 의 하드캡이 `topClearZasa(HC 이상 클리어 최고) + 0.5` 단일 기준이라, EC클 최고가 그보다 높은 유저는 EC클 곡인데도 잘림.
-- fix [recommend.js](modules/recommend.js) (v0.0.2):
-  - 클리어 최고 zasa 계산 루프를 `lampNum >= 3` 으로 넓혀 `topClearZasa`(HC 이상, lampNum≥`WEAKNESS_CLEAR_LAMP`)와 `ecTopClearZasa`(EC 이상, lampNum≥3) 를 함께 산출.
-  - 하드캡 = `Math.max(topClearZasa + 0.5, ecTopClearZasa)` — 하드클 +0.5 **또는** EC클 최고 중 큰 값까지 허용. HC 클리어 이력 없으면(`topClearZasa=0`) 기존처럼 미적용.
-  - 범위만 손봄 — 토글 기본값(`practiceZasaDefault.max`)은 그대로라, 토글 max 를 올렸을 때 이 캡까지 추천됨.
+### 2026-05-31 — recommend.js v0.0.4 — 연습곡 추천 상한 로직 개선 (3건)
+- 증상: 유저별로 연습곡 추천 상한이 들쭉날쭉. `7930-1798` 은 11.4 에서 막히고(상한이 너무 낮음), `5812-0555`(11렙까지만 클리어) 는 12.7 까지 나옴(상한이 너무 높음).
+- fix [recommend.js](modules/recommend.js) (v0.0.2 → v0.0.4):
+  - **① EC클 최고까지 하드캡 확장** — `buildWeaknessRecs` 하드캡을 `topClearZasa(HC)+0.5` 단일 기준에서 `Math.max(topClearZasa+0.5, ecTopClearZasa)` 로. 클리어 최고 zasa 루프를 `lampNum>=3` 으로 넓혀 `topClearZasa`(HC 이상)·`ecTopClearZasa`(EC 이상)를 함께 산출. EC클 최고가 HC+0.5 보다 높은 유저도 EC클 곡까지 추천.
+  - **② 게임레벨 캡 추가** — 후보 곡 중 `gameLevel > maxClearGameLevel`(클리어 최고 게임레벨) 제외. 플레이만 하고 클리어 못한 상위 레벨이 상한을 끌어올리는 것 방지.
+  - **③ zasaMap fallback** — `topClearZasa`/`practiceZasaDefault` 계산이 ereter/rating 만 보고 `zasaMap`(sub-12, 11렙) 을 안 봐서, 11렙 곡만 클리어한 유저는 `topClearZasa=0` → 게임레벨 fallback(12.1/12.7) 로 빠짐. `zasaMap` fallback 추가로 11렙 클리어곡(예: Macho Gang zasa 11.8 — ereter/rating 엔 없고 zasaMap 에만 존재)도 인식 → 상한이 본인 클리어 zasa 로 정확히 잡힘.
+- 결과: 모든 유저가 "본인 실제 클리어 실력(게임레벨 + zasa)" 기준으로 일관된 상한을 받음.
 
 ### 2026-05-30 — ohsorryRender 추천 영역 카드 순서 (연습곡 마지막으로)
 - [ohsorryRender.js](modules/ohsorryRender.js) — 기존: `연습곡 → EASY → HARD → EX-HARD`. 변경: `EASY → HARD → EX-HARD → 연습곡`. INFOhSorry v0.0.67 의 RecCard 4번째 = 연습곡과 순서 통일.

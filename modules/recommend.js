@@ -30,7 +30,7 @@
 })(function () {
   'use strict';
 
-  var VERSION = '0.0.2';
+  var VERSION = '0.0.4';
 
   // 차트 패턴 hashtag — 그 곡의 강한 top 3 feature → 한국어 약어.
   //   추천 row hover / 토스트에 "#동치 #계단 #밀도" 식으로 표시.
@@ -134,6 +134,11 @@
         else {
           var r0 = ratingMap.get(k0);
           if (r0 && typeof r0.zasaLevel === 'number') zasa = r0.zasaLevel;
+          else {
+            // sub-12 (11렙 등) 차트는 ereter/rating 에 없고 zasaMap 에만 있음 — fallback 추가.
+            var z0 = zasaMap.get(k0);
+            if (z0 && typeof z0.level === 'number') zasa = z0.level;
+          }
         }
         if (zasa != null && zasa > topClearZasa) topClearZasa = zasa;
       }
@@ -666,6 +671,11 @@
         else {
           var r0 = ratingMap.get(k0);
           if (r0 && typeof r0.zasaLevel === 'number') zasa = r0.zasaLevel;
+          else {
+            // sub-12 (11렙 등) 차트는 ereter/rating 에 없고 zasaMap 에만 있음 — fallback 추가.
+            var z0 = zasaMap.get(k0);
+            if (z0 && typeof z0.level === 'number') zasa = z0.level;
+          }
         }
         if (zasa == null) continue;
         if (zasa > ecTopClearZasa) ecTopClearZasa = zasa;
@@ -726,6 +736,9 @@
             } else continue;
           }
           if (typeof e.level !== 'number') continue;
+          // 게임레벨 캡 — 클리어 최고 게임레벨(maxClearGameLevel) 초과 곡 제외.
+          //   플레이만 하고 클리어 못한 상위 레벨이 추천 상한을 끌어올리는 것 방지.
+          if (maxClearGameLevel > 0 && typeof gameLevel === 'number' && gameLevel > maxClearGameLevel) continue;
           if (topClearZasa > 0 && e.level > zasaHardCap) continue;
           if (zasaMin != null && e.level < zasaMin) continue;
           if (zasaMax != null && e.level > zasaMax) continue;
