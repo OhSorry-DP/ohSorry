@@ -441,6 +441,11 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### 2026-05-31 — ohsorryRender — 통계탭 난이도 선택에 ALL 추가 (gameLevel 1~12 막대)
+- 통계탭 "난이도 선택" 토글(DP12 / DP11)에 **ALL** 추가. DP12/DP11 동작은 그대로 보존.
+- ALL 모드: `computeStats('all')` 신설 — `allCharts` 를 **gameLevel 정수 1~12 별로 직접 집계** (zasa★ 매핑 / ereter·zasa 분모 보강 없이). 난이도별 램프·DJ LEVEL 막대가 zasa★ 가 아닌 `Lv1`~`Lv12` 단위로 표시. 분모 보강 소스 없는 저레벨은 `allCharts` 에 있는(플레이한) 곡만 집계.
+- 막대 행 체계가 모드별로 달라(zasa★ ↔ gameLevel) 부분 갱신 불가 → `__dp_setLvMode` 가 `#__dp_detail_filtered`(표+막대) 전체 재렌더. `details`(클리어 램프 / DJ LEVEL) 펼침 상태는 복원. `buildTable`/`buildBars`/`buildBarRow` 를 `stats`·`mode`·`key/label` 파라미터화.
+
 ### 2026-05-31 — recommend.js v0.0.9 — 추천 풀 + 계층 랜덤 추출 (리롤 변동성) + 연습곡 INF 미수록 제외 (notInINF)
 - **풀 + 계층 랜덤** — `buildRecs` 에 `opts.randomize`/`withPool`/`limit`/`poolSize` 추가. randomize 시 `_clearScore` 순 상위 30곡(연습곡 60곡) 풀을 3밴드(상위 4/중간 3/하위 3)로 나눠 밴드별 무작위 추출 → 리롤마다 곡 변동. 기존 5-인자 호출은 결정적 동작 100% 보존(하위호환).
   - 신규 `buildRecsWithPool(...) → { picked, pool }` (INFOhSorry 의 클리어 시 pool refill 용).

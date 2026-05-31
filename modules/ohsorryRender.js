@@ -896,6 +896,8 @@ window.OhsorryRender = {
             }
             return [...set].map(parseFloat).sort((a, b) => a - b);
           })();
+          // ALL 모드 막대 — zasa★ 가 아닌 gameLevel 정수 1~12 단위로 그림.
+          const GAME_LEVELS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
           const lampPalette = [
             { key: 'fc',  color: '#00aab2', label: 'FC' },
             { key: 'exh', color: '#ffcc44', label: 'EX-HARD' },
@@ -916,6 +918,45 @@ window.OhsorryRender = {
             { key: 'none',  color: '#e9ecef', label: 'NP' },
           ];
           const computeStats = (mode) => {
+            // ALL 모드 — gameLevel 1~12 전체 곡을 gameLevel 정수별로 집계 (zasa★ 매핑 / ereter·zasa 분모 보강 없이 allCharts 직접).
+            //   분모 보강 소스가 없는 저레벨은 allCharts 에 있는(플레이한) 곡만 집계됨.
+            if (mode === 'all') {
+              const clearTypeCount = { 'FULL COMBO': 0, 'EX HARD': 0, 'HARD': 0, 'CLEAR': 0, 'EASY': 0, 'ASSIST': 0, 'FAILED': 0, 'NO PLAY': 0 };
+              const djCount = {};
+              const lampStats = {};
+              const djStats = {};
+              for (const lv of GAME_LEVELS) {
+                lampStats[String(lv)] = { total: 0, fc: 0, exh: 0, hd: 0, cl: 0, ez: 0, as: 0, fa: 0, np: 0, played: 0 };
+                djStats[String(lv)]   = { total: 0, AAA: 0, AA: 0, A: 0, B: 0, C: 0, lower: 0, none: 0 };
+              }
+              for (const c of allCharts) {
+                if (clearTypeCount[c.lamp] !== undefined) clearTypeCount[c.lamp]++;
+                if (c.djLevel) djCount[c.djLevel] = (djCount[c.djLevel] || 0) + 1;
+                const k = c.gameLevel != null ? String(c.gameLevel) : null;
+                if (!k || !lampStats[k]) continue;
+                lampStats[k].total++;
+                djStats[k].total++;
+                if (c.lampNum >= 1) lampStats[k].played++;
+                if (c.lampNum === 7) lampStats[k].fc++;
+                else if (c.lampNum === 6) lampStats[k].exh++;
+                else if (c.lampNum === 5) lampStats[k].hd++;
+                else if (c.lampNum === 4) lampStats[k].cl++;
+                else if (c.lampNum === 3) lampStats[k].ez++;
+                else if (c.lampNum === 2) lampStats[k].as++;
+                else if (c.lampNum === 1) lampStats[k].fa++;
+                if (c.djLevel) {
+                  if (['AAA', 'AA', 'A', 'B', 'C'].includes(c.djLevel)) djStats[k][c.djLevel]++;
+                  else if (['D', 'E', 'F'].includes(c.djLevel)) djStats[k].lower++;
+                }
+              }
+              for (const lv of GAME_LEVELS) {
+                const k = String(lv);
+                lampStats[k].np = Math.max(0, lampStats[k].total - lampStats[k].played);
+                const s = djStats[k];
+                s.none = Math.max(0, s.total - (s.AAA + s.AA + s.A + s.B + s.C + s.lower));
+              }
+              return { clearTypeCount, djCount, lampStats, djStats };
+            }
             const isLv = (gl) => mode === 'lv12' ? gl === 12 : gl === 11;
             const charts = allCharts.filter(c => isLv(c.gameLevel));
             const clearTypeCount = { 'FULL COMBO': 0, 'EX HARD': 0, 'HARD': 0, 'CLEAR': 0, 'EASY': 0, 'ASSIST': 0, 'FAILED': 0, 'NO PLAY': 0 };
@@ -978,37 +1019,38 @@ window.OhsorryRender = {
             }
             return { clearTypeCount, djCount, lampStats, djStats };
           };
-          const statsByMode = { lv12: computeStats('lv12'), lv11: computeStats('lv11') };
+          const statsByMode = { lv12: computeStats('lv12'), lv11: computeStats('lv11'), all: computeStats('all') };
           window.__dp_statsByMode = statsByMode;
           const initStats = statsByMode['lv12'];
-          const buildTable = () => {
+          const buildTable = (stats) => {
             const rows = Math.max(lampOrder.length, djOrder.length);
             let html = '<table style="margin-bottom:8px"><tr><th colspan="2">CLEAR TYPE</th><th colspan="2">DJ LEVEL</th></tr>';
             for (let i = 0; i < rows; i++) {
               const l = lampOrder[i];
               const d = djOrder[i];
               html += '<tr>';
-              if (l) html += `<td style="color:${l.color};font-weight:600">${l.label}</td><td class="num" data-clear-type="${l.key}">${initStats.clearTypeCount[l.key] || 0} 곡</td>`;
+              if (l) html += `<td style="color:${l.color};font-weight:600">${l.label}</td><td class="num" data-clear-type="${l.key}">${stats.clearTypeCount[l.key] || 0} 곡</td>`;
               else html += '<td></td><td></td>';
-              if (d) html += `<td style="color:${d.color};font-weight:600">${d.key}</td><td class="num" data-dj-count="${d.key}">${initStats.djCount[d.key] || 0} 곡</td>`;
+              if (d) html += `<td style="color:${d.color};font-weight:600">${d.key}</td><td class="num" data-dj-count="${d.key}">${stats.djCount[d.key] || 0} 곡</td>`;
               else html += '<td></td><td></td>';
               html += '</tr>';
             }
             html += '</table>';
             return html;
           };
-          const buildBarRow = (lv, kind, palette, statsForLv) => {
-            const total = statsForLv.total;
+          const buildBarRow = (keyStr, labelStr, kind, palette, statsForLv) => {
+            const s = statsForLv || { total: 0 };
+            const total = s.total;
             const segHtml = palette.map(p => {
-              const count = statsForLv[p.key] || 0;
+              const count = s[p.key] || 0;
               const pct = total > 0 ? (count / total * 100).toFixed(2) : '0';
               const display = count > 0 ? '' : 'display:none;';
               return `<div data-seg="${p.key}" data-label="${p.label}" style="${display}background:${p.color};width:${pct}%;height:100%" title="${p.label}: ${count}곡"></div>`;
             }).join('');
             return `
-              <div data-bar-row="${lv.toFixed(1)}" data-bar-kind="${kind}"
+              <div data-bar-row="${keyStr}" data-bar-kind="${kind}"
                 style="display:${total === 0 ? 'none' : 'flex'};align-items:center;gap:6px;font-size:11px;line-height:1;margin-bottom:3px">
-                <span style="flex-shrink:0;width:34px;color:#666;font-variant-numeric:tabular-nums">★${lv.toFixed(1)}</span>
+                <span style="flex-shrink:0;width:34px;color:#666;font-variant-numeric:tabular-nums">${labelStr}</span>
                 <span data-total style="flex-shrink:0;width:24px;text-align:right;color:#888;font-variant-numeric:tabular-nums">${total}</span>
                 <div style="flex:1;height:12px;display:flex;border-radius:2px;overflow:hidden;background:#f5f5f5">${segHtml}</div>
               </div>`;
@@ -1020,47 +1062,33 @@ window.OhsorryRender = {
                 ${p.label}
               </span>`).join('')}
             </div>`;
-          const buildBars = () => {
+          const buildBars = (mode, stats) => {
+            const isAll = mode === 'all';
+            const barLevels = isAll ? GAME_LEVELS : levels;
+            const keyFn = isAll ? (lv => String(lv)) : (lv => lv.toFixed(1));
+            const labelFn = isAll ? (lv => 'Lv' + lv) : (lv => '★' + lv.toFixed(1));
             let h = '';
             h += `<details class="toggle" style="margin-top:8px"><summary style="font-weight:600;color:#212529">난이도 별 클리어 램프</summary>`;
             h += `<div style="margin-top:6px">${renderLegend(lampPalette)}`;
-            for (const lv of levels) h += buildBarRow(lv, 'lamp', lampPalette, initStats.lampStats[lv.toFixed(1)]);
+            for (const lv of barLevels) h += buildBarRow(keyFn(lv), labelFn(lv), 'lamp', lampPalette, stats.lampStats[keyFn(lv)]);
             h += `</div></details>`;
             h += `<details class="toggle" style="margin-top:6px"><summary style="font-weight:600;color:#212529">난이도 별 DJ LEVEL</summary>`;
             h += `<div style="margin-top:6px">${renderLegend(djPalette)}`;
-            for (const lv of levels) h += buildBarRow(lv, 'dj', djPalette, initStats.djStats[lv.toFixed(1)]);
+            for (const lv of barLevels) h += buildBarRow(keyFn(lv), labelFn(lv), 'dj', djPalette, stats.djStats[keyFn(lv)]);
             h += `</div></details>`;
             return h;
           };
           window.__dp_setLvMode = (mode) => {
             const stats = window.__dp_statsByMode && window.__dp_statsByMode[mode];
             if (!stats) return;
-            document.querySelectorAll('[data-clear-type]').forEach(el => {
-              const k = el.getAttribute('data-clear-type');
-              el.textContent = (stats.clearTypeCount[k] || 0) + ' 곡';
-            });
-            document.querySelectorAll('[data-dj-count]').forEach(el => {
-              const k = el.getAttribute('data-dj-count');
-              el.textContent = (stats.djCount[k] || 0) + ' 곡';
-            });
-            document.querySelectorAll('[data-bar-row]').forEach(row => {
-              const lv = row.getAttribute('data-bar-row');
-              const kind = row.getAttribute('data-bar-kind');
-              const s = (kind === 'lamp' ? stats.lampStats : stats.djStats)[lv];
-              if (!s) return;
-              const totalEl = row.querySelector('[data-total]');
-              if (totalEl) totalEl.textContent = String(s.total);
-              row.style.display = s.total === 0 ? 'none' : 'flex';
-              row.querySelectorAll('[data-seg]').forEach(seg => {
-                const key = seg.getAttribute('data-seg');
-                const count = s[key] || 0;
-                const pct = s.total > 0 ? (count / s.total * 100).toFixed(2) : '0';
-                seg.style.width = pct + '%';
-                seg.style.display = count > 0 ? '' : 'none';
-                const label = seg.getAttribute('data-label') || key;
-                seg.setAttribute('title', label + ': ' + count + '곡');
-              });
-            });
+            // 모드 전환 시 막대 행 체계가 달라(zasa★ ↔ gameLevel) 부분 갱신이 불가 → 표 + 막대 전체 재렌더.
+            //   사용자가 펼쳐둔 details(클리어 램프 / DJ LEVEL) 열림 상태는 순서 기준으로 복원.
+            const container = document.querySelector('#__dp_detail_filtered');
+            if (container) {
+              const opens = [...container.querySelectorAll('details.toggle')].map(d => d.open);
+              container.innerHTML = buildTable(stats) + buildBars(mode, stats);
+              container.querySelectorAll('details.toggle').forEach((d, i) => { if (opens[i]) d.open = true; });
+            }
             document.querySelectorAll('.dp-lv-toggle-btn').forEach(b => {
               const active = b.getAttribute('data-mode') === mode;
               b.classList.toggle('active', active);
@@ -1097,9 +1125,13 @@ window.OhsorryRender = {
                 <span class="dp-lv-toggle-btn" data-mode="lv11"
                   style="cursor:pointer;color:#888;font-weight:400"
                   onclick="window.__dp_setLvMode('lv11')">DP11</span>
+                <span style="color:#ccc">|</span>
+                <span class="dp-lv-toggle-btn" data-mode="all"
+                  style="cursor:pointer;color:#888;font-weight:400"
+                  onclick="window.__dp_setLvMode('all')">ALL</span>
               </div>
             </div>
-            <div id="__dp_detail_filtered">${buildTable()}${buildBars()}</div>
+            <div id="__dp_detail_filtered">${buildTable(initStats)}${buildBars('lv12', initStats)}</div>
           `;
         })()}
       </div>
