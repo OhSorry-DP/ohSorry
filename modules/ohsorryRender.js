@@ -526,7 +526,7 @@ window.OhsorryRender = {
                 <span class="rec-chart" style="color:${cColor}" title="${r.chart || ''}">${chartDisplay}</span>
                 <div class="rec-title rec-title-clickable" data-t="${escHtml(r.title)}" data-c="${escHtml(r.chart || '')}"${titleAttr}><span${titleStyle}>${escHtml(r.title)}</span><span style="color:#aaa;font-weight:400;margin-left:4px;font-size:10.5px">${r.currentLamp || ''}</span>${flipBadge}</div>
                 ${goalSpan}
-                <span class="rec-level" title="서열표 ☆">☆${r.level.toFixed(1)}</span>
+                <span class="rec-level" title="${r._hideZasa ? 'zasa 미등록' : '서열표 ☆'}">${r._hideZasa ? '☆--' : '☆' + r.level.toFixed(1)}</span>
               </div>
             `;
           }).join('');

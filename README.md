@@ -441,6 +441,12 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### 2026-05-31 — recommend.js v0.0.5 — 연습곡 zasa 실측 없는 곡 ☆ 미표기
+- 증상: 연습곡 추천에서 zasa 실측(ereter/rating/zasaMap)이 없는 곡에 게임레벨 평균(`zasaAvgByGameLv`) 임의값을 `☆11.x` 로 표시 — 실제 서열표 값이 아닌데 있는 것처럼 보임.
+- fix:
+  - [recommend.js](modules/recommend.js) — `zasaAvgByGameLv` 로 임의로 채운 `e` 에 `__lowFallback` 플래그, item 에 `_hideZasa` 전달. 임의 `level` 은 정렬/필터 계산용으론 유지 (추천 후보에서 빠지진 않음).
+  - [ohsorryRender.js](modules/ohsorryRender.js) — `_hideZasa` 면 `☆--` 로 미표기 (클리어 추천의 `★--` 와 통일), tooltip "zasa 미등록".
+
 ### 2026-05-31 — recommend.js v0.0.4 — 연습곡 추천 상한 로직 개선 (3건)
 - 증상: 유저별로 연습곡 추천 상한이 들쭉날쭉. `7930-1798` 은 11.4 에서 막히고(상한이 너무 낮음), `5812-0555`(11렙까지만 클리어) 는 12.7 까지 나옴(상한이 너무 높음).
 - fix [recommend.js](modules/recommend.js) (v0.0.2 → v0.0.4):

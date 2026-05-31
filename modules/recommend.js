@@ -30,7 +30,7 @@
 })(function () {
   'use strict';
 
-  var VERSION = '0.0.4';
+  var VERSION = '0.0.5';
 
   // 차트 패턴 hashtag — 그 곡의 강한 top 3 feature → 한국어 약어.
   //   추천 row hover / 토스트에 "#동치 #계단 #밀도" 식으로 표시.
@@ -732,7 +732,8 @@
                 ec_n: rr.nEcCleared || 0, hc_n: rr.nHcCleared || 0, exh_n: rr.nExhCleared || 0,
               };
             } else if (typeof zasaAvgByGameLv[gameLevel] === 'number') {
-              e = { level: zasaAvgByGameLv[gameLevel], ec: null, hc: null, exh: null, ec_n: 0, hc_n: 0, exh_n: 0 };
+              // zasa 실측 없음 — 게임레벨 평균으로 임의 채움 (정렬/필터 계산용). 표시는 미표기(__lowFallback).
+              e = { level: zasaAvgByGameLv[gameLevel], ec: null, hc: null, exh: null, ec_n: 0, hc_n: 0, exh_n: 0, __lowFallback: true };
             } else continue;
           }
           if (typeof e.level !== 'number') continue;
@@ -961,6 +962,7 @@
         }
         var r = {
           title: cs.title, chart: cs.diff, level: cs.zasa,
+          _hideZasa: !!(cs.e && cs.e.__lowFallback),  // zasa 실측 없이 게임레벨 평균으로 채운 곡 — ☆ 미표기.
           ec: cs.e.ec, hc: cs.e.hc, exh: cs.e.exh,
           ec_n: cs.e.ec_n, hc_n: cs.e.hc_n, exh_n: cs.e.exh_n,
           diffValue: cs.dv,
