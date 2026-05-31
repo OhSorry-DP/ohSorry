@@ -88,6 +88,8 @@ window.OhsorryCore = {
   // series-name.json — series_no(int) → 시리즈명(string) 매핑. 추천곡 해시태그 시리즈명 라벨용.
   //   gist 30c3ba6 (service-status.json 과 같은 운영 gist). DB songs 에는 series 컬럼 없음.
   const SERIES_NAME_URL = 'https://gist.githubusercontent.com/OhSorry-DP/30c3ba6f87df9847291c42ea216a8d2a/raw/series-name.json';
+  // service-status.json — 운영 toggle + notInINF (INF 미수록 차트 수동 제외 목록. songs.legen 미반영분 보강).
+  const SERVICE_STATUS_URL = 'https://gist.githubusercontent.com/OhSorry-DP/30c3ba6f87df9847291c42ea216a8d2a/raw/service-status.json';
   const CACHE_KEY = 'ereter_dp_diff_v4';
   const CACHE_TTL_MS = 24 * 60 * 60 * 1000;  // 24시간
 
@@ -1283,8 +1285,28 @@ window.OhsorryCore = {
   const infTitleSet = isInfUser
     ? new Set(allCharts.filter((c) => c && c.title).map((c) => norm(c.title)))
     : null;
+  // service-status.json 의 notInINF — INF 미수록 차트 수동 제외 목록 (songs.legen 미반영 / 캐시 실패 보강).
+  //   chartName(DP_NOR/HYP/ANO/LEG) → slot(DPN/DPH/DPA/DPL) 매핑 후 norm(title)|slot 로 매칭. 라이브·DB 모드 공통 적용.
+  const NOTINF_CN_TO_SLOT = { DP_NOR: 'DPN', DP_HYP: 'DPH', DP_ANO: 'DPA', DP_LEG: 'DPL', SP_NOR: 'SPN', SP_HYP: 'SPH', SP_ANO: 'SPA', SP_LEG: 'SPL' };
+  const notInInfSet = new Set();
+  try {
+    const ssRes = await fetch(SERVICE_STATUS_URL + '?t=' + Date.now(), { cache: 'no-store' });
+    if (ssRes.ok) {
+      const ss = await ssRes.json();
+      if (ss && Array.isArray(ss.notInINF)) {
+        for (const e of ss.notInINF) {
+          if (e && e.title && e.diff) notInInfSet.add(norm(e.title) + '|' + e.diff);
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[step2] service-status notInINF fetch 실패:', e && e.message);
+  }
   const isInfChartInSeries = (title, chartName) => {
     if (!isInfUser) return true;
+    // 수동 제외 목록 우선 — songs 데이터/캐시와 무관하게 무조건 제외 (legen 오류 / fallback 누수 보강).
+    const slot = NOTINF_CN_TO_SLOT[chartName];
+    if (slot && notInInfSet.has(norm(title) + '|' + slot)) return false;
     if (songsByNorm) {
       const cands = songsByNorm.get(norm(title));
       if (!cands || cands.length === 0) return false;
@@ -1330,18 +1352,20 @@ window.OhsorryCore = {
   // recommend.js 모듈 (recommendCtx) 의 buildRecs / buildWeaknessRecs 호출.
   //   ctx 없으면 (recommend.js 로드 실패 시) 빈 배열 — 추천 비활성.
   if (recommendCtx) {
-    recsEC.push(...recommendCtx.buildRecs(3, 'ec', ecBase, REC_LEVEL_MODE_DEFAULT, REC_DJ_MODE_DEFAULT));
+    // randomize:true — 후보 풀(EC/HC/EXH 30곡)에서 계층 랜덤 추출. 초기 렌더부터 매번 변동 (리롤과 동일 동작).
+    recsEC.push(...recommendCtx.buildRecs(3, 'ec', ecBase, REC_LEVEL_MODE_DEFAULT, REC_DJ_MODE_DEFAULT, { randomize: true }));
     if (recBaseStar != null && recBaseStar >= 0.5) {
-      recsHC.push(...recommendCtx.buildRecs(5, 'hc', recBaseStar, REC_LEVEL_MODE_DEFAULT, REC_DJ_MODE_DEFAULT));
-      recsEXH.push(...recommendCtx.buildRecs(6, 'exh', recBaseStar, REC_LEVEL_MODE_DEFAULT, REC_DJ_MODE_DEFAULT));
+      recsHC.push(...recommendCtx.buildRecs(5, 'hc', recBaseStar, REC_LEVEL_MODE_DEFAULT, REC_DJ_MODE_DEFAULT, { randomize: true }));
+      recsEXH.push(...recommendCtx.buildRecs(6, 'exh', recBaseStar, REC_LEVEL_MODE_DEFAULT, REC_DJ_MODE_DEFAULT, { randomize: true }));
     }
     // 연습곡 — userVec.__vecL/__vecR 있어야 동작. 기본 ☆ 범위는 ctx 자체의 practiceZasaDefault 사용 (zasaMin/Max 생략 가능).
     recsWeakness.push(...recommendCtx.buildWeaknessRecs(recBaseStar, {
-      flipOn: true, handMode: 'both', mode: 'all', topN: 5, strength: 1,
+      flipOn: true, handMode: 'both', mode: 'all', topN: 5, strength: 1, randomize: true,
     }));
   }
   // window.__dp_rerollWeakness(opts) — ohsorryRender UI 토글에서 호출. opts: { flipOn, handMode, mode, topN, strength, zasaMin, zasaMax }
-  window.__dp_rerollWeakness = (opts) => recommendCtx ? recommendCtx.buildWeaknessRecs(recBaseStar, opts || {}) : [];
+  //   randomize:true 강제 (리롤마다 60풀에서 계층 랜덤). opts 가 randomize 명시하면 그 값 우선.
+  window.__dp_rerollWeakness = (opts) => recommendCtx ? recommendCtx.buildWeaknessRecs(recBaseStar, Object.assign({ randomize: true }, opts || {})) : [];
   console.log(`[step2] 추천곡: EC ${recsEC.length}, HC ${recsHC.length}, EXH ${recsEXH.length}, 연습곡 ${recsWeakness.length}`);
 
   const topEC  = recsEC;
@@ -1359,10 +1383,10 @@ window.OhsorryCore = {
     const dMode = djMode === 'on' ? 'on' : 'off';
     recommendCtx.setLayoutMode(layoutMode === 'off' ? 'off' : 'on');
     if ((stage === 'hc' || stage === 'exh') && base != null && base < 0.5) return [];
-    if (stage === 'exh') return base != null ? recommendCtx.buildRecs(6, 'exh', base, lvMode, dMode) : [];
-    if (stage === 'hc')  return base != null ? recommendCtx.buildRecs(5, 'hc', base, lvMode, dMode) : [];
+    if (stage === 'exh') return base != null ? recommendCtx.buildRecs(6, 'exh', base, lvMode, dMode, { randomize: true }) : [];
+    if (stage === 'hc')  return base != null ? recommendCtx.buildRecs(5, 'hc', base, lvMode, dMode, { randomize: true }) : [];
     // EC reroll 도 base==null 이면 EC_FALLBACK_BASE + ★ 거리 cutoff 끄기 (초기 계산과 동일).
-    if (stage === 'ec')  return recommendCtx.buildRecs(3, 'ec', base != null ? base : EC_FALLBACK_BASE, lvMode, dMode);
+    if (stage === 'ec')  return recommendCtx.buildRecs(3, 'ec', base != null ? base : EC_FALLBACK_BASE, lvMode, dMode, { randomize: true });
     return [];
   };
 

@@ -30,7 +30,7 @@
 })(function () {
   'use strict';
 
-  var VERSION = '0.0.8';
+  var VERSION = '0.0.9';
 
   // 차트 패턴 hashtag — 그 곡의 강한 top 3 feature → 한국어 약어.
   //   추천 row hover / 토스트에 "#동치 #계단 #밀도" 식으로 표시.
@@ -46,6 +46,36 @@
   var CATEGORY_TAG_MAP = { hard: '#어려움', easy: '#도전', cleanup: '' };
   var PRACTICE_TAG_MAP = { review: '복습', pattern: '패턴연습', score: '점수회복', practical: '실전연습' };
   var HAND_BIAS_THRESHOLD = 0.3;
+
+  // 계층 랜덤 추출 — 점수순 ranked 배열을 bandCount 개 밴드로 나눠, 밴드별 할당 수만큼 무작위로 뽑음.
+  //   목적: 추천 풀(예: 30곡)에서 매번 조금씩 다른 N곡(예: 10곡) → 리롤 / "다시 뽑기" 변동성.
+  //   할당: 기본 균등 + 나머지는 상위 밴드부터 (상위권 약간 더 자주). 예) 30곡→10곡, 밴드3 = [4, 3, 3].
+  //   밴드가 작아 할당을 못 채우면 남은 곡(leftover)에서 보충. ranked.length <= n 이면 전부 반환.
+  function stratifiedSample(ranked, n, bandCount) {
+    bandCount = bandCount || 3;
+    if (!Array.isArray(ranked) || ranked.length <= n) return (ranked || []).slice();
+    var shuffleInPlace = function (a) {
+      for (var i = a.length - 1; i > 0; i--) {
+        var j = Math.floor(Math.random() * (i + 1));
+        var t = a[i]; a[i] = a[j]; a[j] = t;
+      }
+      return a;
+    };
+    var bandSize = Math.ceil(ranked.length / bandCount);
+    var base = Math.floor(n / bandCount);
+    var rem = n - base * bandCount;
+    var out = [];
+    var leftover = [];
+    for (var b = 0; b < bandCount; b++) {
+      var band = shuffleInPlace(ranked.slice(b * bandSize, (b + 1) * bandSize));
+      var alloc = base + (b < rem ? 1 : 0);  // 상위 밴드(작은 b)부터 나머지 +1
+      var k = Math.min(alloc, band.length);
+      out = out.concat(band.slice(0, k));
+      leftover = leftover.concat(band.slice(k));
+    }
+    if (out.length < n) out = out.concat(shuffleInPlace(leftover).slice(0, n - out.length));
+    return out;
+  }
 
   // ─── createContext — 추천 관련 함수들을 deps closure 안에 묶어 반환 ────────────
   //
@@ -432,8 +462,34 @@
     // 한 stage (EC / HC / EXH) 의 10개 추천곡 array 반환.
     //   buildPools 호출 → cleanup/easy/hard 분류 → 각 row enrich (clearScore / matchByHand / tags / hashtags)
     //   → sample15 (top 15 + cleanup 50/50 보정) → 최종 추출 (underTarget 우선, djMode='on' 면 reached 2곡 섞음)
-    function buildRecs(threshold, getDiffField, baseStar, recLevelMode, djMode) {
+    function buildRecs(threshold, getDiffField, baseStar, recLevelMode, djMode, opts) {
       var pools = buildPools(threshold, getDiffField, baseStar, recLevelMode, djMode);
+      // 풀 / 랜덤 옵션 (옵션 없으면 기존 결정적 동작 100% 보존):
+      //   opts.randomize  — true 면 풀에서 stratifiedSample 로 LIMIT 곡 추출 (리롤마다 변동).
+      //   opts.withPool   — true 면 { picked, pool } 반환 (INFOhSorry refill 용. pool = 나머지 후보).
+      //   opts.limit      — 표시 곡 수 (default 10).
+      //   opts.poolSize   — 후보 풀 크기 (default 30). randomize/withPool 일 때만 풀 확대.
+      opts = opts || {};
+      var LIMIT = typeof opts.limit === 'number' ? opts.limit : 10;
+      var RANDOMIZE = !!opts.randomize;
+      var WANT_POOL = !!opts.withPool;
+      var POOL_N = (RANDOMIZE || WANT_POOL) ? (typeof opts.poolSize === 'number' ? opts.poolSize : 30) : LIMIT;
+      var SAMPLE_SIZE = (RANDOMIZE || WANT_POOL) ? POOL_N : 15;
+      var FACTOR = POOL_N / 10;                                   // 슬롯 분배 수 스케일 (default 1 = 기존 그대로)
+      var slotN = function (x) { return Math.max(1, Math.round(x * FACTOR)); };
+      // 후보 모음(picks, 최대 POOL_N) → 점수순 정렬 → randomize 면 계층추출, withPool 이면 {picked,pool}.
+      var finalizeRecs = function (arr) {
+        var rankedArr = arr.slice().sort(function (a, b) { return (b._clearScore || 0) - (a._clearScore || 0); });
+        if (WANT_POOL) {
+          var pickedArr = RANDOMIZE ? stratifiedSample(rankedArr, LIMIT) : rankedArr.slice(0, LIMIT);
+          var pk = {};
+          for (var pj = 0; pj < pickedArr.length; pj++) pk[(pickedArr[pj].title || '') + '|' + pickedArr[pj].chart] = 1;
+          var poolArr = rankedArr.filter(function (r) { return !pk[(r.title || '') + '|' + r.chart]; });
+          return { picked: pickedArr, pool: poolArr };
+        }
+        if (RANDOMIZE) return stratifiedSample(rankedArr, LIMIT);
+        return rankedArr.slice(0, LIMIT);
+      };
       var underLamp = pools.underLamp;
       var reached = pools.reached;
       var countField = getDiffField + '_n';
@@ -514,7 +570,7 @@
         else if (userVec)  sorted = pool.slice().sort(sortByMatch);
         else               sorted = pool.slice().sort(function (a, b) { return (b[countField] || 0) - (a[countField] || 0); });
 
-        var top15 = sorted.slice(0, 15);
+        var top15 = sorted.slice(0, SAMPLE_SIZE);
         // cleanup 50/50 교체
         var cleanupKeys = new Set(cat.cleanup.map(keyOf));
         var cleanupInTop = top15.filter(function (r) { return cleanupKeys.has(keyOf(r)); });
@@ -565,7 +621,7 @@
         var taken = 0;
         var sortedArr = byClearScore(arr);
         for (var ai = 0; ai < sortedArr.length; ai++) {
-          if (taken >= n || picks.length >= 10) break;
+          if (taken >= n || picks.length >= POOL_N) break;
           var rr = sortedArr[ai];
           var k = keyOf(rr);
           if (used.has(k)) continue;
@@ -583,34 +639,35 @@
         )).sort(function (a, b) { return a - b; });
         var targetLv12 = lowLevels.indexOf(12) !== -1 ? 1 : 0;
         var mainLevels = lowLevels.filter(function (lv) { return lv !== 12; });
-        var perLevel = mainLevels.length > 0 ? Math.max(1, Math.floor((10 - targetLv12) / mainLevels.length)) : 10 - targetLv12;
+        var perLevel = mainLevels.length > 0 ? Math.max(1, Math.floor((POOL_N - targetLv12) / mainLevels.length)) : POOL_N - targetLv12;
         for (var li = 0; li < mainLevels.length; li++) {
           var lv = mainLevels[li];
           takeFrom(underAll.filter(function (r) { return r.gameLevel === lv; }), perLevel);
         }
-        if (targetLv12 > 0) takeFrom(underAll.filter(function (r) { return r.gameLevel === 12; }), 1);
-        if (picks.length < 10) takeFrom(underAll, 10 - picks.length);
-        if (djMode === 'on' && picks.length < 10) takeFrom(reach.cleanup.concat(reach.easy, reach.hard), 10 - picks.length);
-        return picks.sort(function (a, b) { return (b._clearScore || 0) - (a._clearScore || 0); });
+        if (targetLv12 > 0) takeFrom(underAll.filter(function (r) { return r.gameLevel === 12; }), slotN(1));
+        if (picks.length < POOL_N) takeFrom(underAll, POOL_N - picks.length);
+        if (djMode === 'on' && picks.length < POOL_N) takeFrom(reach.cleanup.concat(reach.easy, reach.hard), POOL_N - picks.length);
+        return finalizeRecs(picks);
       }
-      var underTarget = djMode === 'on' ? 8 : 10;
+      var underTargetBase = djMode === 'on' ? 8 : 10;
+      var underTarget = Math.round(underTargetBase * FACTOR);
       var underSlots = getDiffField === 'exh'
         ? [
             { pool: under.cleanup, n: underTarget },
-            { pool: under.easy,    n: 1 },
-            { pool: under.hard,    n: 1 },
+            { pool: under.easy,    n: slotN(1) },
+            { pool: under.hard,    n: slotN(1) },
           ]
         : getDiffField === 'ec'
         ? [
             // EC — 도전곡(hard) 비중 축소. easy 로 보충.
-            { pool: under.cleanup, n: underTarget >= 10 ? 4 : 3 },
-            { pool: under.easy,    n: underTarget >= 10 ? 5 : 4 },
-            { pool: under.hard,    n: 1 },
+            { pool: under.cleanup, n: slotN(underTargetBase >= 10 ? 4 : 3) },
+            { pool: under.easy,    n: slotN(underTargetBase >= 10 ? 5 : 4) },
+            { pool: under.hard,    n: slotN(1) },
           ]
         : [
-            { pool: under.cleanup, n: underTarget >= 10 ? 4 : 3 },
-            { pool: under.easy,    n: underTarget >= 10 ? 4 : 3 },
-            { pool: under.hard,    n: 2 },
+            { pool: under.cleanup, n: slotN(underTargetBase >= 10 ? 4 : 3) },
+            { pool: under.easy,    n: slotN(underTargetBase >= 10 ? 4 : 3) },
+            { pool: under.hard,    n: slotN(2) },
           ];
       var underTaken = 0;
       for (var si2 = 0; si2 < underSlots.length; si2++) {
@@ -621,15 +678,15 @@
         underTaken += takeFrom(under.cleanup.concat(under.easy, under.hard), underTarget - underTaken);
       }
       if (djMode === 'on') {
-        takeFrom(reach.cleanup.concat(reach.easy, reach.hard), 10 - picks.length);
+        takeFrom(reach.cleanup.concat(reach.easy, reach.hard), POOL_N - picks.length);
       }
       // 그래도 부족하면 전체 풀에서 clearScore 순 보충.
-      var need = 10 - picks.length;
+      var need = POOL_N - picks.length;
       if (need > 0) {
         var allCands = underSample.concat(reachedSample);
         takeFrom(allCands, need);
       }
-      return picks.sort(function (a, b) { return (b._clearScore || 0) - (a._clearScore || 0); });
+      return finalizeRecs(picks);
     }
 
     // ─── buildWeaknessRecs ──────────────────────────────────────────
@@ -656,6 +713,10 @@
       var flipOn = !(opts && opts.flipOn === false);
       var handMode = (opts && opts.handMode) || 'both';
       var topN = (opts && typeof opts.topN === 'number') ? opts.topN : 5;
+      // 풀 + 계층 랜덤 (opts.randomize) — 점수순 상위 POOL_N_W(기본 60) 풀에서 topN 곡을 밴드별 무작위 추출.
+      //   리롤마다 변동. opts 없으면(=randomize 미지정) 기존 practiceType 다양성 takeType 로직 유지(결정적).
+      var RANDOMIZE_W = !!(opts && opts.randomize);
+      var POOL_N_W = RANDOMIZE_W ? ((opts && typeof opts.poolSize === 'number') ? opts.poolSize : 60) : topN;
       var strength = (opts && typeof opts.strength === 'number' && opts.strength >= 1) ? opts.strength : 1;
       var clamp = function (v, lo, hi) { return Math.max(lo, Math.min(hi, v)); };
       var zasaMin = (opts && typeof opts.zasaMin === 'number') ? opts.zasaMin : practiceZasaDefault.min;
@@ -903,29 +964,35 @@
       var keyOfW = function (c) { return c.title + '|' + c.diff; };
       var usedW = new Set();
       var sliceW = [];
-      var takeType = function (type, n) {
-        for (var pi3 = 0; pi3 < pool.length; pi3++) {
-          var cp3 = pool[pi3];
-          if (sliceW.length >= topN || n <= 0) break;
-          if (cp3.practiceType !== type) continue;
-          var k = keyOfW(cp3);
-          if (usedW.has(k)) continue;
-          usedW.add(k);
-          sliceW.push(cp3);
-          n -= 1;
+      if (RANDOMIZE_W) {
+        // 풀 버전 — 점수순 상위 POOL_N_W 곡 → topN 곡 계층 랜덤 추출 (밴드별 ≈topN/3, 상위 약간 가중).
+        sliceW = stratifiedSample(pool.slice(0, POOL_N_W), topN);
+      } else {
+        // 결정적 — practiceType (복습/패턴/점수/실전) 다양성 쿼터로 topN 채움.
+        var takeType = function (type, n) {
+          for (var pi3 = 0; pi3 < pool.length; pi3++) {
+            var cp3 = pool[pi3];
+            if (sliceW.length >= topN || n <= 0) break;
+            if (cp3.practiceType !== type) continue;
+            var k = keyOfW(cp3);
+            if (usedW.has(k)) continue;
+            usedW.add(k);
+            sliceW.push(cp3);
+            n -= 1;
+          }
+        };
+        takeType('review', Math.ceil(topN * 0.3));
+        takeType('pattern', Math.ceil(topN * 0.3));
+        takeType('score', Math.ceil(topN * 0.2));
+        takeType('practical', topN - sliceW.length);
+        for (var pi4 = 0; pi4 < pool.length; pi4++) {
+          var cp4 = pool[pi4];
+          if (sliceW.length >= topN) break;
+          var kk = keyOfW(cp4);
+          if (usedW.has(kk)) continue;
+          usedW.add(kk);
+          sliceW.push(cp4);
         }
-      };
-      takeType('review', Math.ceil(topN * 0.3));
-      takeType('pattern', Math.ceil(topN * 0.3));
-      takeType('score', Math.ceil(topN * 0.2));
-      takeType('practical', topN - sliceW.length);
-      for (var pi4 = 0; pi4 < pool.length; pi4++) {
-        var cp4 = pool[pi4];
-        if (sliceW.length >= topN) break;
-        var kk = keyOfW(cp4);
-        if (usedW.has(kk)) continue;
-        usedW.add(kk);
-        sliceW.push(cp4);
       }
 
       // 5단계 — items 변환 + _matchByHand + tags/hashtags.
@@ -1017,6 +1084,17 @@
       return items;
     }
 
+    // buildRecs 의 풀 버전 — { picked, pool } 반환 (INFOhSorry 의 picked 표시 + 클리어 시 pool refill 용).
+    //   기본 randomize=true (리롤마다 변동). opts 로 limit / poolSize / randomize 조정 가능.
+    function buildRecsWithPool(threshold, getDiffField, baseStar, recLevelMode, djMode, opts) {
+      var o = {};
+      var src = opts || {};
+      for (var k in src) if (Object.prototype.hasOwnProperty.call(src, k)) o[k] = src[k];
+      o.withPool = true;
+      if (o.randomize === undefined) o.randomize = true;
+      return buildRecs(threshold, getDiffField, baseStar, recLevelMode, djMode, o);
+    }
+
     return {
       chartStrengthMatch: chartStrengthMatch,
       chartStrengthMatchByHand: chartStrengthMatchByHand,
@@ -1024,6 +1102,7 @@
       computeRecHashtags: computeRecHashtags,
       buildPools: buildPools,
       buildRecs: buildRecs,
+      buildRecsWithPool: buildRecsWithPool,
       buildWeaknessRecs: buildWeaknessRecs,
       setLayoutMode: function (m) { if (m === 'on' || m === 'off') layoutModeForClear = m; },
       getLayoutMode: function () { return layoutModeForClear; },

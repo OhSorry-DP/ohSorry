@@ -441,6 +441,13 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### 2026-05-31 — recommend.js v0.0.9 — 추천 풀 + 계층 랜덤 추출 (리롤 변동성) + 연습곡 INF 미수록 제외 (notInINF)
+- **풀 + 계층 랜덤** — `buildRecs` 에 `opts.randomize`/`withPool`/`limit`/`poolSize` 추가. randomize 시 `_clearScore` 순 상위 30곡(연습곡 60곡) 풀을 3밴드(상위 4/중간 3/하위 3)로 나눠 밴드별 무작위 추출 → 리롤마다 곡 변동. 기존 5-인자 호출은 결정적 동작 100% 보존(하위호환).
+  - 신규 `buildRecsWithPool(...) → { picked, pool }` (INFOhSorry 의 클리어 시 pool refill 용).
+  - `buildWeaknessRecs` 도 randomize 시 60곡 풀 + topN 비례 밴드.
+- **웹 적용** ([calcOhsorryCore.js](modules/calcOhsorryCore.js)) — 초기 렌더 + `__dp_rerollRecs` / `__dp_rerollWeakness` 모두 `randomize:true` → 누를 때마다 새 곡.
+- **연습곡 INF 미수록 제외** — `isInfChartInSeries` 가 `service-status.json` 의 `notInINF` 목록도 참조 (songs.legen 데이터 오류 / 캐시 fallback 누수 보강). `chartName→slot` 매핑 후 하드 제외. 라이브·DB 모드 공통.
+
 ### 2026-05-31 — recommend.js v0.0.8 — 약도전(easy) 상한 0.7d → 0.65d
 - `buildPools` 의 `hardMin` 을 `effectiveBase + 0.7d` → `+ 0.65d` (EC/HC 공통, EXH 무관).
 - 약도전 = `[effectiveBase, effectiveBase + 0.65d)`, 도전(hard) 시작점이 그만큼 내려감.
