@@ -441,6 +441,10 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### 2026-05-31 — recommend.js v0.0.8 — 약도전(easy) 상한 0.7d → 0.65d
+- `buildPools` 의 `hardMin` 을 `effectiveBase + 0.7d` → `+ 0.65d` (EC/HC 공통, EXH 무관).
+- 약도전 = `[effectiveBase, effectiveBase + 0.65d)`, 도전(hard) 시작점이 그만큼 내려감.
+
 ### 2026-05-31 — recommend.js v0.0.7 — EC(이지클) 추천 도전곡(hard) 완화
 - 피드백: 이지클 추천의 도전곡(hard)이 과하게 어려움.
 - fix [recommend.js](modules/recommend.js) — EC 에만 적용 (HC/EXH 불변):

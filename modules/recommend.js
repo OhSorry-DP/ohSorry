@@ -30,7 +30,7 @@
 })(function () {
   'use strict';
 
-  var VERSION = '0.0.7';
+  var VERSION = '0.0.8';
 
   // 차트 패턴 hashtag — 그 곡의 강한 top 3 feature → 한국어 약어.
   //   추천 row hover / 토스트에 "#동치 #계단 #밀도" 식으로 표시.
@@ -324,7 +324,7 @@
                         : isEXH ? (baseStar + 2)
                         : baseStar;  // HC
       var d = Math.max(0, topClearStar - effectiveBase);
-      var hardMin = effectiveBase + 0.7 * d;
+      var hardMin = effectiveBase + 0.65 * d;
       // hard 상한 — 기본은 내 최고기록(topClearStar)보다 0.3d 위까지 허용.
       //   EC(이지클) 는 도전곡이 과하게 어렵다는 피드백 → 0.15d 로 완화.
       var hardMax = isEC ? topClearStar + 0.15 * d : topClearStar + 0.3 * d;
