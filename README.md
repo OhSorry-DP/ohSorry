@@ -441,6 +441,12 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### 2026-05-31 — recommend.js v0.0.7 — EC(이지클) 추천 도전곡(hard) 완화
+- 피드백: 이지클 추천의 도전곡(hard)이 과하게 어려움.
+- fix [recommend.js](modules/recommend.js) — EC 에만 적용 (HC/EXH 불변):
+  - **hard 상한 완화** — `buildPools` 의 `hardMax` 를 `topClearStar + 0.3d` → EC 는 `topClearStar + 0.15d` (내 EC 최고기록 위로의 도전 폭 절반).
+  - **hard 슬롯 축소** — `buildRecs` underSlots 를 EC 전용 분기로 분리, `cleanup4 / easy4 / hard2` → `cleanup4 / easy5 / hard1` (도전곡 1곡, 약도전으로 보충).
+
 ### 2026-05-31 — recommend.js v0.0.6 — 연습곡 후보 zasa 도 zasaMap fallback (미표기 오작동 수정)
 - 증상: v0.0.5 미표기 적용 후, zasaMap 에 실측이 있는 11레벨 곡(예: Macho Gang 11.8)이 `☆--` 로 잘못 미표기됨.
 - 원인: 상한 계산(`practiceZasaDefault`/`topClearZasa`)은 zasaMap 을 보지만, **후보 곡의 표시 zasa 를 정하는 [L723-737](modules/recommend.js#L723-L737) 은 ereter→rating→`zasaAvgByGameLv` 로 zasaMap 을 건너뜀** → 실측 곡도 게임레벨 평균 임의값(`__lowFallback`)으로 빠져 미표기.
