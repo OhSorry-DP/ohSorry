@@ -100,7 +100,7 @@ window.OhsorryRender = {
       starEstimateEreterOnly, starEstimateLv12Only, starEstimateAll, eraterTrueStar,
       allCharts,
       ereterData, zasaSupplemental, ereterMap, zasaMap, ratingMap, ereterExtractedAt,
-      gameLevelTotals,
+      gameLevelTotals, isInfUser,
       ohsorryRecBase,
       topEC, topHC, topEXH, topWeakness = [],
       pageCount, useOnlyLv12, matched, unmatched, details, perLevel, perLamp,
@@ -979,8 +979,10 @@ window.OhsorryRender = {
               lampStats[lv.toFixed(1)] = { total: 0, fc: 0, exh: 0, hd: 0, cl: 0, ez: 0, as: 0, fa: 0, np: 0, played: 0 };
               djStats[lv.toFixed(1)]   = { total: 0, AAA: 0, AA: 0, A: 0, B: 0, C: 0, lower: 0, none: 0 };
             }
-            // ereter 데이터는 gameLevel 필드가 없고 전부 lv12 → lv12 모드에서만 분모(total)에 합산.
-            if (mode === 'lv12') {
+            // 분모(total) 정책 — 서열표가 그리는 곡 집합과 동일하게:
+            //   AC 유저: 아케이드 자사★ 전곡 (ereterData lv12 + zasaSupplemental). 미플레이 포함.
+            //   INF 유저: 보유/플레이 곡(charts) 자체 (아래 charts 루프에서 total++). ereter(AC 곡) 분모는 안 씀.
+            if (!isInfUser && mode === 'lv12') {
               for (const e of ereterData) {
                 if (e.level == null) continue;
                 const k = e.level.toFixed(1);
@@ -988,12 +990,14 @@ window.OhsorryRender = {
                 if (djStats[k]) djStats[k].total++;
               }
             }
-            for (const z of zasaSupplemental) {
-              if (z.level == null) continue;
-              if (!isLv(z.gameLevel)) continue;
-              const k = z.level.toFixed(1);
-              if (lampStats[k]) lampStats[k].total++;
-              if (djStats[k]) djStats[k].total++;
+            if (!isInfUser) {
+              for (const z of zasaSupplemental) {
+                if (z.level == null) continue;
+                if (!isLv(z.gameLevel)) continue;
+                const k = z.level.toFixed(1);
+                if (lampStats[k]) lampStats[k].total++;
+                if (djStats[k]) djStats[k].total++;
+              }
             }
             for (const c of charts) {
               const key = norm(c.title) + '|' + c.diff;
@@ -1006,6 +1010,8 @@ window.OhsorryRender = {
                 if (z && z.level != null && isLv(z.gameLevel)) k = z.level.toFixed(1);
               }
               if (!k || !lampStats[k]) continue;
+              // INF 유저 — 보유곡(charts) 자체가 분모 (서열표와 동일 집합). zasa★ 버킷별 total++.
+              if (isInfUser) { lampStats[k].total++; djStats[k].total++; }
               if (c.lampNum >= 1) lampStats[k].played++;
               if (c.lampNum === 7) lampStats[k].fc++;
               else if (c.lampNum === 6) lampStats[k].exh++;

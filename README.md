@@ -441,6 +441,12 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### 2026-06-01 — calcOhsorryCore v0.0.390 — 통계 분모를 "서열표 곡 집합" 기준으로 (INF/AC 필터 복원)
+- 증상: 통계탭 난이도별 스택바 분모가 INF 유저에서 AC 곡(ereter) 기준이라 부정확/과다 (v0.0.389 의 textage×songs 분모도 INF/AC 필터가 의도대로 안 먹음).
+- fix: 분모를 **서열표가 그리는 곡 집합**과 동일하게 통일.
+  - [calcOhsorryCore.js](modules/calcOhsorryCore.js): `gameLevelTotals` 재작성 — textage×songs 방식 폐기, **AC 유저 = `zasaData`(아케이드 자사★ 전곡) / INF 유저 = `allCharts`(보유·플레이 곡)** 의 gameLevel 별 채보 수. `songsByNorm` fetch 는 원래대로 INF 유저만(분모에 더는 불필요). `result.isInfUser` 추가.
+  - [ohsorryRender.js](modules/ohsorryRender.js): DP12/DP11 `computeStats` 분모를 `isInfUser` 분기 — **AC 유저는 기존(ereterData + zasaSupplemental = 아케이드곡)**, **INF 유저는 보유곡(charts) 자체를 zasa★ 버킷별 분모**로. ALL 모드는 재작성된 `gameLevelTotals` 사용.
+
 ### 2026-05-31 — calcOhsorryCore v0.0.389 — 통계탭 ALL 분모를 textage-meta × songs 수록 비트로 정확화
 - ALL 모드 난이도별 막대의 **분모(총 채보 수)** 를 `allCharts`(플레이/보유 곡) 직접 집계 → **textage-meta DP 채보 × songs.ac/legen 수록 비트** 기반 `gameLevelTotals` 로 교체. 미플레이 채보까지 포함한 실제 NO PLAY 비율이 나옴.
 - [calcOhsorryCore.js](modules/calcOhsorryCore.js):
