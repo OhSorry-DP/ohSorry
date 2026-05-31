@@ -441,6 +441,10 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### 2026-06-01 — calcOhsorryCore v0.0.391 — ALL 분모는 textage×songs, DP12/DP11 분모는 서열표 곡 집합 (모드별 분리)
+- DP12/DP11 막대 분모: 서열표 곡 집합 (AC=`zasaData` 아케이드 전곡 / INF=`allCharts` 보유곡) — v0.0.390 그대로.
+- ALL 막대 분모(`gameLevelTotals`): **zasa 무관, textage-meta DP 채보 levels × songs.ac/legen 수록 비트** (INF=2 / AC=1, DX=legen·그 외=ac) 로 복원. `songsByNorm` 전체 유저 fetch. textage levels 0(채보 없음) 을 실제 레벨로 오인하던 버그도 수정(`>= 1` 만 채택).
+
 ### 2026-06-01 — calcOhsorryCore v0.0.390 — 통계 분모를 "서열표 곡 집합" 기준으로 (INF/AC 필터 복원)
 - 증상: 통계탭 난이도별 스택바 분모가 INF 유저에서 AC 곡(ereter) 기준이라 부정확/과다 (v0.0.389 의 textage×songs 분모도 INF/AC 필터가 의도대로 안 먹음).
 - fix: 분모를 **서열표가 그리는 곡 집합**과 동일하게 통일.

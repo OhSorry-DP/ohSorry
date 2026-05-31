@@ -66,7 +66,7 @@ window.OhsorryCore = {
   let dbData = opts.dbData || null;
   const rivalToken = opts.rivalToken || null;
   const wrapperVersion = opts.wrapperVersion || 'unknown';
-  const CORE_VERSION_SHORT = '0.0.390'.replace(/^0\.0\./, '');  // '390'
+  const CORE_VERSION_SHORT = '0.0.391'.replace(/^0\.0\./, '');  // '391'
   const dbVersionString = `${wrapperVersion}-core${CORE_VERSION_SHORT}`;
   dbData = dbData || null;
   // 추천 풀의 chart 마다 c.layoutLabel (= w8.bestLabel) 가 채워지면 이 closure map 에도 동시에 기록.
@@ -1274,13 +1274,14 @@ window.OhsorryCore = {
   //   songsByNorm 못 가져오면 (= OhsorryDb 미로드 / fetch 실패) fallback 으로 allCharts title set 매칭 (곡 단위).
   //   AC 유저는 isInfUser=false → fetch / 필터 모두 skip (기존 동작 유지).
   const isInfUser = isInfData || (profile && profile.iidxId && /^[A-Za-z]/.test(String(profile.iidxId).replace(/-/g, '')));
-  // songs 캐시 — INF 유저 차트 단위 INF 수록 필터용 (INF 유저만 fetch).
+  // songs 캐시 — INF 유저 차트 단위 INF 수록 필터 + (INF/AC 공통) ALL 통계 분모(textage×songs ac/legen) 계산.
+  //   ALL 분모는 AC 유저도 ac & 1 수록 비트가 필요하므로 모든 유저 fetch.
   let songsByNorm = null;
-  if (isInfUser && window.OhsorryDb && typeof window.OhsorryDb.getSongsByNorm === 'function') {
+  if (window.OhsorryDb && typeof window.OhsorryDb.getSongsByNorm === 'function') {
     try {
       songsByNorm = await window.OhsorryDb.getSongsByNorm();
     } catch (err) {
-      console.warn('[step2] songs cache fetch 실패 — INF 필터 title fallback:', err && err.message);
+      console.warn('[step2] songs cache fetch 실패 (INF 필터 / ALL 통계 분모):', err && err.message);
     }
   }
   const infTitleSet = isInfUser
@@ -1320,21 +1321,46 @@ window.OhsorryCore = {
     return infTitleSet.has(norm(title));
   };
 
-  // 난이도별 총 채보 수 (ALL 통계 막대 분모) — 서열표가 그리는 곡 집합 기준.
-  //   AC 유저: zasaData(아케이드 자사★ 전곡, gameLevel 포함). INF 유저: allCharts(보유/플레이 곡).
-  //   gameLevel 1~12 별 채보 수. (서열표 DP12/DP11 격자와 동일 곡 집합)
-  const gameLevelTotals = (() => {
+  // ALL 통계 막대 분모 — zasa 무관, textage-meta 의 DP 채보 levels × songs.ac/legen 수록 비트.
+  //   유저 타입 비트: INF=2 / AC=1. DX(LEGGENDARIA)=legen 컬럼, 그 외(DN/DH/DA/DB)=ac 컬럼.
+  //   songs 레코드(동명이곡 = 같은 norm 의 여러 레코드 포함) 각각에 대해 수록 비트가 set 이면 그 채보를 gameLevel 별 카운트.
+  //   (DP12/DP11 막대 분모는 서열표 곡 집합 기준 — ohsorryRender computeStats 의 isInfUser 분기에서 별도 처리.)
+  let gameLevelTotals = null;
+  if (textageSongs && songsByNorm) {
+    const stripHtmlT = (s) => (s || '').replace(/<[^>]*>/g, '');
+    const userBit = isInfUser ? 2 : 1;
+    const DP_KEYS = ['DN', 'DH', 'DA', 'DX', 'DB'];
+    // norm → textage levels 엔트리 목록 (동명이곡이면 여러 개).
+    const tLevelsByNorm = new Map();
+    for (const id in textageSongs) {
+      const s = textageSongs[id];
+      if (!s || !s.levels || !s.title) continue;
+      const k = norm(stripHtmlT(s.title));
+      if (!tLevelsByNorm.has(k)) tLevelsByNorm.set(k, []);
+      tLevelsByNorm.get(k).push(s.levels);
+    }
     const totals = {};
-    const shelfSongs = isInfUser ? allCharts : zasaData;
-    for (const c of (shelfSongs || [])) {
-      const gl = c && c.gameLevel;
-      if (typeof gl === 'number' && gl >= 1 && gl <= 12) {
-        totals[gl] = (totals[gl] || 0) + 1;
+    for (const [k, cands] of songsByNorm) {
+      const levelsList = tLevelsByNorm.get(k);
+      if (!levelsList || !levelsList.length) continue;
+      for (const rec of cands) {                 // songs 레코드 각각 카운트
+        for (const tk of DP_KEYS) {
+          let lvl = null;
+          for (const lv of levelsList) {
+            // 0 = 해당 채보 없음 → skip (실제 레벨 있는 엔트리를 찾음).
+            if (typeof lv[tk] === 'number' && lv[tk] >= 1) { lvl = lv[tk]; break; }
+          }
+          if (lvl == null || lvl < 1 || lvl > 12) continue;
+          const col = (tk === 'DX') ? 'legen' : 'ac';
+          if (typeof rec[col] === 'number' && (rec[col] & userBit) !== 0) {
+            totals[lvl] = (totals[lvl] || 0) + 1;
+          }
+        }
       }
     }
-    console.log('[step2] 통계 난이도별 총 채보수 분모(서열표 곡 집합):', JSON.stringify(totals));
-    return totals;
-  })();
+    gameLevelTotals = totals;
+    console.log('[step2] ALL 통계 난이도별 총 채보수 분모(textage×songs):', JSON.stringify(totals));
+  }
 
   // recommend.js 모듈 ctx — recommendLib 로드 성공 시 createContext 호출, 실패 시 null (옛 인라인 함수 fallback).
   //   ctx 생성 시점: 모든 deps (patternsTitleMap / userVec / isInfChartInSeries / 등) 준비된 후.
