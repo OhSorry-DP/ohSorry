@@ -100,6 +100,7 @@ window.OhsorryRender = {
       starEstimateEreterOnly, starEstimateLv12Only, starEstimateAll, eraterTrueStar,
       allCharts,
       ereterData, zasaSupplemental, ereterMap, zasaMap, ratingMap, ereterExtractedAt,
+      gameLevelTotals,
       ohsorryRecBase,
       topEC, topHC, topEXH, topWeakness = [],
       pageCount, useOnlyLv12, matched, unmatched, details, perLevel, perLamp,
@@ -918,13 +919,16 @@ window.OhsorryRender = {
             { key: 'none',  color: '#e9ecef', label: 'NP' },
           ];
           const computeStats = (mode) => {
-            // ALL 모드 — gameLevel 1~12 전체 곡을 gameLevel 정수별로 집계 (zasa★ 매핑 / ereter·zasa 분모 보강 없이 allCharts 직접).
-            //   분모 보강 소스가 없는 저레벨은 allCharts 에 있는(플레이한) 곡만 집계됨.
+            // ALL 모드 — gameLevel 1~12 전체를 gameLevel 정수별로 집계.
+            //   분모(total)는 gameLevelTotals (textage-meta DP 채보 × songs.ac/legen 수록 비트, INF/AC 유저별).
+            //   played / lamp / dj 는 allCharts 에서 집계, NO PLAY = total - played.
+            //   gameLevelTotals 없으면(fetch 실패) allCharts 집계로 fallback.
             if (mode === 'all') {
               const clearTypeCount = { 'FULL COMBO': 0, 'EX HARD': 0, 'HARD': 0, 'CLEAR': 0, 'EASY': 0, 'ASSIST': 0, 'FAILED': 0, 'NO PLAY': 0 };
               const djCount = {};
               const lampStats = {};
               const djStats = {};
+              const hasTotals = gameLevelTotals && typeof gameLevelTotals === 'object';
               for (const lv of GAME_LEVELS) {
                 lampStats[String(lv)] = { total: 0, fc: 0, exh: 0, hd: 0, cl: 0, ez: 0, as: 0, fa: 0, np: 0, played: 0 };
                 djStats[String(lv)]   = { total: 0, AAA: 0, AA: 0, A: 0, B: 0, C: 0, lower: 0, none: 0 };
@@ -934,8 +938,7 @@ window.OhsorryRender = {
                 if (c.djLevel) djCount[c.djLevel] = (djCount[c.djLevel] || 0) + 1;
                 const k = c.gameLevel != null ? String(c.gameLevel) : null;
                 if (!k || !lampStats[k]) continue;
-                lampStats[k].total++;
-                djStats[k].total++;
+                if (!hasTotals) { lampStats[k].total++; djStats[k].total++; }   // fallback 분모
                 if (c.lampNum >= 1) lampStats[k].played++;
                 if (c.lampNum === 7) lampStats[k].fc++;
                 else if (c.lampNum === 6) lampStats[k].exh++;
@@ -951,9 +954,14 @@ window.OhsorryRender = {
               }
               for (const lv of GAME_LEVELS) {
                 const k = String(lv);
+                if (hasTotals) {
+                  const t = gameLevelTotals[k] || gameLevelTotals[lv] || 0;
+                  lampStats[k].total = t;
+                  djStats[k].total = t;
+                }
                 lampStats[k].np = Math.max(0, lampStats[k].total - lampStats[k].played);
-                const s = djStats[k];
-                s.none = Math.max(0, s.total - (s.AAA + s.AA + s.A + s.B + s.C + s.lower));
+                const djPlayed = djStats[k].AAA + djStats[k].AA + djStats[k].A + djStats[k].B + djStats[k].C + djStats[k].lower;
+                djStats[k].none = Math.max(0, djStats[k].total - djPlayed);
               }
               return { clearTypeCount, djCount, lampStats, djStats };
             }

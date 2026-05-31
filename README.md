@@ -441,9 +441,16 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### 2026-05-31 — calcOhsorryCore v0.0.389 — 통계탭 ALL 분모를 textage-meta × songs 수록 비트로 정확화
+- ALL 모드 난이도별 막대의 **분모(총 채보 수)** 를 `allCharts`(플레이/보유 곡) 직접 집계 → **textage-meta DP 채보 × songs.ac/legen 수록 비트** 기반 `gameLevelTotals` 로 교체. 미플레이 채보까지 포함한 실제 NO PLAY 비율이 나옴.
+- [calcOhsorryCore.js](modules/calcOhsorryCore.js):
+  - `songsByNorm` fetch 를 **AC 유저까지 확대** (기존 INF 유저만 → AC 도 `ac & 1` 수록 필터 필요). `isInfChartInSeries` 동작은 불변(AC 유저 early-return).
+  - `gameLevelTotals` 계산 — `textageSongs` 의 DP 채보 levels(DN/DH/DA/DX/DB)를 norm 매칭한 `songs` 레코드(동명이곡 = 같은 norm 의 여러 레코드 **각각**)에 대해 수록 비트 검사. **userBit = INF `2` / AC `1`**, **DX(LEGGENDARIA)=`legen` / 그 외=`ac`**. set 인 채보만 해당 gameLevel 카운트. `result.gameLevelTotals` 로 전달.
+- [ohsorryRender.js](modules/ohsorryRender.js): ALL 모드 `computeStats` 가 `total` 을 `gameLevelTotals` 로 사용, `played`/lamp/dj 는 `allCharts` 매칭, **NO PLAY = total − played**. `gameLevelTotals` 없으면(fetch 실패) 기존 allCharts 집계로 fallback.
+
 ### 2026-05-31 — ohsorryRender — 통계탭 난이도 선택에 ALL 추가 (gameLevel 1~12 막대)
 - 통계탭 "난이도 선택" 토글(DP12 / DP11)에 **ALL** 추가. DP12/DP11 동작은 그대로 보존.
-- ALL 모드: `computeStats('all')` 신설 — `allCharts` 를 **gameLevel 정수 1~12 별로 직접 집계** (zasa★ 매핑 / ereter·zasa 분모 보강 없이). 난이도별 램프·DJ LEVEL 막대가 zasa★ 가 아닌 `Lv1`~`Lv12` 단위로 표시. 분모 보강 소스 없는 저레벨은 `allCharts` 에 있는(플레이한) 곡만 집계.
+- ALL 모드: `computeStats('all')` 신설 — **gameLevel 정수 1~12 별로 집계**. 난이도별 램프·DJ LEVEL 막대가 zasa★ 가 아닌 `Lv1`~`Lv12` 단위로 표시.
 - 막대 행 체계가 모드별로 달라(zasa★ ↔ gameLevel) 부분 갱신 불가 → `__dp_setLvMode` 가 `#__dp_detail_filtered`(표+막대) 전체 재렌더. `details`(클리어 램프 / DJ LEVEL) 펼침 상태는 복원. `buildTable`/`buildBars`/`buildBarRow` 를 `stats`·`mode`·`key/label` 파라미터화.
 
 ### 2026-05-31 — recommend.js v0.0.9 — 추천 풀 + 계층 랜덤 추출 (리롤 변동성) + 연습곡 INF 미수록 제외 (notInINF)
