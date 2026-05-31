@@ -441,6 +441,11 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### 2026-05-31 — recommend.js v0.0.6 — 연습곡 후보 zasa 도 zasaMap fallback (미표기 오작동 수정)
+- 증상: v0.0.5 미표기 적용 후, zasaMap 에 실측이 있는 11레벨 곡(예: Macho Gang 11.8)이 `☆--` 로 잘못 미표기됨.
+- 원인: 상한 계산(`practiceZasaDefault`/`topClearZasa`)은 zasaMap 을 보지만, **후보 곡의 표시 zasa 를 정하는 [L723-737](modules/recommend.js#L723-L737) 은 ereter→rating→`zasaAvgByGameLv` 로 zasaMap 을 건너뜀** → 실측 곡도 게임레벨 평균 임의값(`__lowFallback`)으로 빠져 미표기.
+- fix [recommend.js](modules/recommend.js) — 후보 수집부에도 zasaMap fallback 추가. 함수 내 세 경로(상한 2곳 + 후보 표시값) 모두 `ereter→rating→zasaMap→평균` 으로 통일. 실측 있으면 `☆11.8` 정상 표시, 진짜 없는 곡만 `☆--`.
+
 ### 2026-05-31 — recommend.js v0.0.5 — 연습곡 zasa 실측 없는 곡 ☆ 미표기
 - 증상: 연습곡 추천에서 zasa 실측(ereter/rating/zasaMap)이 없는 곡에 게임레벨 평균(`zasaAvgByGameLv`) 임의값을 `☆11.x` 로 표시 — 실제 서열표 값이 아닌데 있는 것처럼 보임.
 - fix:

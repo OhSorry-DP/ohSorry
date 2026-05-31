@@ -30,7 +30,7 @@
 })(function () {
   'use strict';
 
-  var VERSION = '0.0.5';
+  var VERSION = '0.0.6';
 
   // 차트 패턴 hashtag — 그 곡의 강한 top 3 feature → 한국어 약어.
   //   추천 row hover / 토스트에 "#동치 #계단 #밀도" 식으로 표시.
@@ -723,6 +723,7 @@
           var e = ereterMap.get(normFn(title) + '|' + diff);
           if (!e || e.level == null) {
             var rr = ratingMap.get(normFn(title) + '|' + diff);
+            var zz = zasaMap.get(normFn(title) + '|' + diff);
             if (rr && typeof rr.zasaLevel === 'number') {
               e = {
                 level: rr.zasaLevel,
@@ -731,6 +732,9 @@
                 exh: typeof rr.estExh === 'number' ? rr.estExh : null,
                 ec_n: rr.nEcCleared || 0, hc_n: rr.nHcCleared || 0, exh_n: rr.nExhCleared || 0,
               };
+            } else if (zz && typeof zz.level === 'number') {
+              // sub-12 (11렙 등) 실측 — ereter/rating 엔 없고 zasaMap 에만 있음. 실측이므로 ☆ 정상 표시.
+              e = { level: zz.level, ec: null, hc: null, exh: null, ec_n: 0, hc_n: 0, exh_n: 0 };
             } else if (typeof zasaAvgByGameLv[gameLevel] === 'number') {
               // zasa 실측 없음 — 게임레벨 평균으로 임의 채움 (정렬/필터 계산용). 표시는 미표기(__lowFallback).
               e = { level: zasaAvgByGameLv[gameLevel], ec: null, hc: null, exh: null, ec_n: 0, hc_n: 0, exh_n: 0, __lowFallback: true };
