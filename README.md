@@ -441,6 +441,12 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### 2026-06-02 — calcOhsorryCore v0.0.391 / ohsorryRender — 통계 즉시 렌더(statsOnly) 경량 모드 + noRender
+- **statsOnly** 모드 추가 ([calcOhsorryCore.js](modules/calcOhsorryCore.js)) — 통계 + 노트레이더만 즉시 렌더하고 무거운 계산(userVec/calcWeakness · recommend · layoutMap) 과 추천곡 섹션 · supabase 업로드를 스킵. 게스트 페이지에서 통계가 빨리 뜨도록.
+- **noRender** 모드 — `show`(패널 렌더) 스킵, result 만 반환. 2차 백그라운드 full compute 시 전체화면 패널 깜빡임 방지. statsOnly 와 독립.
+- [ohsorry.js](ohsorry.js) wrapper — `window.__dp_render(dbData, renderOpts)` 로 `{ statsOnly, noRender }` 전달.
+- [ohsorryRender.js](modules/ohsorryRender.js) — `show(result, { statsOnly })` 에서 statsOnly 면 추천곡 섹션 생략. 노트레이더 빌더를 named 함수(`buildRadarSection`)로 분리(동작 동일).
+
 ### 2026-06-01 — calcOhsorryCore v0.0.391 — ALL 분모는 textage×songs, DP12/DP11 분모는 서열표 곡 집합 (모드별 분리)
 - DP12/DP11 막대 분모: 서열표 곡 집합 (AC=`zasaData` 아케이드 전곡 / INF=`allCharts` 보유곡) — v0.0.390 그대로.
 - ALL 막대 분모(`gameLevelTotals`): **zasa 무관, textage-meta DP 채보 levels × songs.ac/legen 수록 비트** (INF=2 / AC=1, DX=legen·그 외=ac) 로 복원. `songsByNorm` 전체 유저 fetch. textage levels 0(채보 없음) 을 실제 레벨로 오인하던 버그도 수정(`>= 1` 만 채택).

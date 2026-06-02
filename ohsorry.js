@@ -137,7 +137,7 @@
     });
   }
 
-  window.__dp_render = async (dbData) => {
+  window.__dp_render = async (dbData, renderOpts) => {
     // 라이벌 페이지에서 실행했는지 감지 — URL 의 ?rival=<토큰> 유무로 판단 (rivalOhsorry 와 동일 기준).
     // dbData 모드 (게스트 페이지 등 외부 호출) 는 무조건 own.
     const rivalToken = (!dbData && location.hostname.endsWith('p.eagate.573.jp'))
@@ -177,6 +177,9 @@
         wrapperVersion: WRAPPER_VERSION,
         fetchMode: fetchOpts ? fetchOpts.fetchMode : undefined,
         levels: fetchOpts ? fetchOpts.levels : undefined,
+        // statsOnly — 게스트 페이지에서 __dp_render(dbData, { statsOnly:true }) 로 호출 시 통계만 즉시 렌더.
+        statsOnly: renderOpts ? !!renderOpts.statsOnly : false,
+        noRender: renderOpts ? !!renderOpts.noRender : false,
       });
     } finally {
       // Core.compute 호출 직후 로딩 박스 제거 — 이어서 Core 가 OhsorryRender.showProgress 로

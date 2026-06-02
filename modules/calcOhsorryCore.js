@@ -66,6 +66,12 @@ window.OhsorryCore = {
   let dbData = opts.dbData || null;
   const rivalToken = opts.rivalToken || null;
   const wrapperVersion = opts.wrapperVersion || 'unknown';
+  // statsOnly — 통계 + 노트레이더만 즉시 렌더하는 경량 모드. userVec(calcWeakness) / recommend / layoutMap
+  //   무거운 계산을 건너뛰고 show 도 statsOnly 로 호출 (추천곡 섹션 + supabase 업로드 스킵).
+  const statsOnly = !!opts.statsOnly;
+  // noRender — show(패널 렌더)를 건너뛰고 result 만 반환. 2차 백그라운드 full compute(패턴분석 userVec 만 필요)에서
+  //   전체화면 패널이 깜빡이지 않도록 사용. statsOnly 와 독립.
+  const noRender = !!opts.noRender;
   const CORE_VERSION_SHORT = '0.0.391'.replace(/^0\.0\./, '');  // '391'
   const dbVersionString = `${wrapperVersion}-core${CORE_VERSION_SHORT}`;
   dbData = dbData || null;
@@ -1227,7 +1233,7 @@ window.OhsorryCore = {
   // patterns 또는 calcWeakness lib 로드 실패 시 가중치 없이 (chartStrengthMatch 항상 0 → fallback to count desc).
   let userVec = null;
   const patternsTitleMap = {};
-  if (patternsMap && weaknessLib) {
+  if (!statsOnly && patternsMap && weaknessLib) {
     for (const id in patternsMap) {
       const k = norm(patternsMap[id].t || '');
       if (k && !patternsTitleMap[k]) patternsTitleMap[k] = id;
@@ -1367,7 +1373,7 @@ window.OhsorryCore = {
   //   다음 turn 부터 호출부를 ctx 통과로 점진적 교체 (chartStrengthMatch(r) → ctx.chartStrengthMatch(r)).
   //   __pdLayoutMap 은 buildWeaknessRecs 가 layoutLabel 기록할 외부 객체로 전달 (옛 closure 동작 호환).
   // eslint-disable-next-line no-unused-vars
-  const recommendCtx = recommendLib ? recommendLib.createContext({
+  const recommendCtx = (recommendLib && !statsOnly) ? recommendLib.createContext({
     userVec, weaknessLib,
     patternsMap, patternsTitleMap, normFn: norm,
     seriesNames, textageSeriesByNorm,
@@ -1536,8 +1542,8 @@ window.OhsorryCore = {
 
   // ohsorryRender 모듈은 wrapper 가 미리 fetch 해서 window.OhsorryRender 로 노출했다고 가정.
   // wrapper 가 안 띄웠다면 console.error 만 — 결과 객체는 return 으로 반환되니 호출자가 처리 가능.
-  if (window.OhsorryRender && window.OhsorryRender.show) {
-    await window.OhsorryRender.show(result);
+  if (!noRender && window.OhsorryRender && window.OhsorryRender.show) {
+    await window.OhsorryRender.show(result, { statsOnly });
   } else {
     console.error('[OhsorryCore] window.OhsorryRender 가 없습니다. wrapper 가 ohsorryRender.js 를 fetch 하지 않았을 수 있어요.');
   }

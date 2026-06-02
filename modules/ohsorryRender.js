@@ -111,6 +111,9 @@ window.OhsorryRender = {
     // 재할당 되는 변수는 let
     let recBaseMode = result.recBaseMode;
     let recBaseStar = result.recBaseStar;
+    // 통계만 먼저 그리는 경량 모드 — 추천곡(calcWeakness·recommend 결과) 빌드 + 핸들러 등록 + supabase 업로드를 건너뛴다.
+    //   유저카드 진입 시 DB(charts_json·user_radars)만으로 통계+노트레이더를 즉시 렌더하기 위한 분기.
+    const statsOnly = !!(opts && opts.statsOnly);
 
     // ===== core 의 line 1285~2160 (panel build) 코드 그대로 옮김 =====
     document.getElementById('__dp_score_panel')?.remove();
@@ -184,6 +187,81 @@ window.OhsorryRender = {
     };
     const fmt = (n) => Math.max(0.1, Math.round(n * 100) / 100);
     const escHtml = (s) => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+    // ===== 노트레이더 섹션 빌더 — profile.spRadar/dpRadar (DB 노트레이더) SVG + 수치만 사용 (calcWeakness 불필요).
+    //   통계만 먼저 그리는 경량 진입점에서 재사용하려고 show 안의 IIFE 를 named 함수로 분리. 동작은 기존과 동일.
+    const buildRadarSection = () => {
+      if (!profileHasRadar) return '';
+        const CATS = ['NOTES', 'CHORD', 'PEAK', 'CHARGE', 'SCRATCH', 'SOF-LAN'];
+        const SVG_ORDER = ['NOTES', 'PEAK', 'SCRATCH', 'SOF-LAN', 'CHARGE', 'CHORD'];
+        const fmt2 = (v) => (v != null && !isNaN(v)) ? v.toFixed(2) : '—';
+        const RADAR_MAX = 100;
+        const LABEL_TEXT  = { NOTES: 'NOTES', CHORD: 'CHORD', PEAK: 'PEAK', CHARGE: 'CHARGE', SCRATCH: 'SCRATCH', 'SOF-LAN': 'SOF-LAN' };
+        const LABEL_COLOR = { NOTES: '#e91e63', CHORD: '#44b544', PEAK: '#ff8c00', CHARGE: '#b066d8', SCRATCH: '#dc3545', 'SOF-LAN': '#1ec5e8' };
+        const renderSvg = (radar, color) => {
+          const size = 130, cx = size / 2, cy = size / 2, R = 38, LR = 50;
+          const pt = (i, scale) => {
+            const a = -Math.PI / 2 + (i / 6) * 2 * Math.PI;
+            return `${(cx + Math.cos(a) * R * scale).toFixed(1)},${(cy + Math.sin(a) * R * scale).toFixed(1)}`;
+          };
+          const bgPoly = SVG_ORDER.map((_, i) => pt(i, 1)).join(' ');
+          const innerPoly = SVG_ORDER.map((_, i) => pt(i, 0.5)).join(' ');
+          const dataPoly = SVG_ORDER.map((c, i) => {
+            const v = Math.max((radar[c] || 0) / RADAR_MAX, 0);
+            return pt(i, v);
+          }).join(' ');
+          const spokes = SVG_ORDER.map((_, i) => {
+            const a = -Math.PI / 2 + (i / 6) * 2 * Math.PI;
+            return `<line x1="${cx}" y1="${cy}" x2="${(cx + Math.cos(a) * R).toFixed(1)}" y2="${(cy + Math.sin(a) * R).toFixed(1)}" stroke="#d6dae0" stroke-width="0.5"/>`;
+          }).join('');
+          const labels = SVG_ORDER.map((c, i) => {
+            const a = -Math.PI / 2 + (i / 6) * 2 * Math.PI;
+            const tx = cx + Math.cos(a) * LR;
+            const ty = cy + Math.sin(a) * LR;
+            return `<text x="${tx.toFixed(1)}" y="${ty.toFixed(1)}" fill="${LABEL_COLOR[c]}" font-size="8" font-weight="700" text-anchor="middle" dominant-baseline="central">${LABEL_TEXT[c]}</text>`;
+          }).join('');
+          return `<svg class="nr-svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" xmlns="http://www.w3.org/2000/svg">
+            <polygon points="${bgPoly}" fill="#fff" stroke="#c0c6cc" stroke-width="0.8"/>
+            <polygon points="${innerPoly}" fill="none" stroke="#d6dae0" stroke-width="0.5"/>
+            ${spokes}
+            <polygon points="${dataPoly}" fill="${color}" fill-opacity="0.55"/>
+            ${labels}
+          </svg>`;
+        };
+        const renderBox = (style, radar) => {
+          if (!hasRadarData(radar)) return '';
+          const cls = style.toLowerCase();
+          const topCat = CATS.reduce((top, c) => (radar[c] || 0) > (radar[top] || 0) ? c : top, CATS[0]);
+          const color = LABEL_COLOR[topCat];
+          return `
+            <div class="nr-box">
+              ${renderSvg(radar, color)}
+              <div class="nr-header ${cls}" style="color: ${color}">${style}</div>
+              <div class="nr-detail">
+                <div class="nr-stats">
+                  ${CATS.map(c => `
+                    <div class="nr-stat" data-cat="${c}">
+                      <span class="label">${c}</span>
+                      <span class="value">${fmt2(radar[c])}</span>
+                    </div>
+                  `).join('')}
+                </div>
+                <div class="nr-total">
+                  <span class="label">합계 레이더 스코어</span>
+                  <span class="value">${fmt2(radar.total)}</span>
+                </div>
+              </div>
+            </div>
+          `;
+        };
+        return `
+          <div class="notes-radar">
+            <button type="button" class="nr-close" onclick="window.__dp_hideRadar()" title="노트레이더 숨기기">레이더 닫기</button>
+            ${renderBox('SP', profile.spRadar)}
+            ${renderBox('DP', profile.dpRadar)}
+          </div>
+        `;
+    };
 
     // ===== Panel build — core 의 line 1355~2160 본문 그대로 (closure 변수는 위 result 분해로 받음) =====
     const panel = document.createElement('div');
@@ -394,80 +472,10 @@ window.OhsorryRender = {
         </div>
       ` : '<div class="meta">프로필 정보를 가져올 수 없었어요</div>'}
 
-      ${profileHasRadar ? (() => {
-        const CATS = ['NOTES', 'CHORD', 'PEAK', 'CHARGE', 'SCRATCH', 'SOF-LAN'];
-        const SVG_ORDER = ['NOTES', 'PEAK', 'SCRATCH', 'SOF-LAN', 'CHARGE', 'CHORD'];
-        const fmt2 = (v) => (v != null && !isNaN(v)) ? v.toFixed(2) : '—';
-        const RADAR_MAX = 100;
-        const LABEL_TEXT  = { NOTES: 'NOTES', CHORD: 'CHORD', PEAK: 'PEAK', CHARGE: 'CHARGE', SCRATCH: 'SCRATCH', 'SOF-LAN': 'SOF-LAN' };
-        const LABEL_COLOR = { NOTES: '#e91e63', CHORD: '#44b544', PEAK: '#ff8c00', CHARGE: '#b066d8', SCRATCH: '#dc3545', 'SOF-LAN': '#1ec5e8' };
-        const renderSvg = (radar, color) => {
-          const size = 130, cx = size / 2, cy = size / 2, R = 38, LR = 50;
-          const pt = (i, scale) => {
-            const a = -Math.PI / 2 + (i / 6) * 2 * Math.PI;
-            return `${(cx + Math.cos(a) * R * scale).toFixed(1)},${(cy + Math.sin(a) * R * scale).toFixed(1)}`;
-          };
-          const bgPoly = SVG_ORDER.map((_, i) => pt(i, 1)).join(' ');
-          const innerPoly = SVG_ORDER.map((_, i) => pt(i, 0.5)).join(' ');
-          const dataPoly = SVG_ORDER.map((c, i) => {
-            const v = Math.max((radar[c] || 0) / RADAR_MAX, 0);
-            return pt(i, v);
-          }).join(' ');
-          const spokes = SVG_ORDER.map((_, i) => {
-            const a = -Math.PI / 2 + (i / 6) * 2 * Math.PI;
-            return `<line x1="${cx}" y1="${cy}" x2="${(cx + Math.cos(a) * R).toFixed(1)}" y2="${(cy + Math.sin(a) * R).toFixed(1)}" stroke="#d6dae0" stroke-width="0.5"/>`;
-          }).join('');
-          const labels = SVG_ORDER.map((c, i) => {
-            const a = -Math.PI / 2 + (i / 6) * 2 * Math.PI;
-            const tx = cx + Math.cos(a) * LR;
-            const ty = cy + Math.sin(a) * LR;
-            return `<text x="${tx.toFixed(1)}" y="${ty.toFixed(1)}" fill="${LABEL_COLOR[c]}" font-size="8" font-weight="700" text-anchor="middle" dominant-baseline="central">${LABEL_TEXT[c]}</text>`;
-          }).join('');
-          return `<svg class="nr-svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" xmlns="http://www.w3.org/2000/svg">
-            <polygon points="${bgPoly}" fill="#fff" stroke="#c0c6cc" stroke-width="0.8"/>
-            <polygon points="${innerPoly}" fill="none" stroke="#d6dae0" stroke-width="0.5"/>
-            ${spokes}
-            <polygon points="${dataPoly}" fill="${color}" fill-opacity="0.55"/>
-            ${labels}
-          </svg>`;
-        };
-        const renderBox = (style, radar) => {
-          if (!hasRadarData(radar)) return '';
-          const cls = style.toLowerCase();
-          const topCat = CATS.reduce((top, c) => (radar[c] || 0) > (radar[top] || 0) ? c : top, CATS[0]);
-          const color = LABEL_COLOR[topCat];
-          return `
-            <div class="nr-box">
-              ${renderSvg(radar, color)}
-              <div class="nr-header ${cls}" style="color: ${color}">${style}</div>
-              <div class="nr-detail">
-                <div class="nr-stats">
-                  ${CATS.map(c => `
-                    <div class="nr-stat" data-cat="${c}">
-                      <span class="label">${c}</span>
-                      <span class="value">${fmt2(radar[c])}</span>
-                    </div>
-                  `).join('')}
-                </div>
-                <div class="nr-total">
-                  <span class="label">합계 레이더 스코어</span>
-                  <span class="value">${fmt2(radar.total)}</span>
-                </div>
-              </div>
-            </div>
-          `;
-        };
-        return `
-          <div class="notes-radar">
-            <button type="button" class="nr-close" onclick="window.__dp_hideRadar()" title="노트레이더 숨기기">레이더 닫기</button>
-            ${renderBox('SP', profile.spRadar)}
-            ${renderBox('DP', profile.dpRadar)}
-          </div>
-        `;
-      })() : ''}
+      ${buildRadarSection()}
 
       <div id="__rec_wrapper" style="display:contents">
-      ${(() => {
+      ${statsOnly ? '' : (() => {
         const chartColor = (chart) => {
           if (!chart) return '#888';
           const c = chart.toUpperCase();
@@ -1235,7 +1243,7 @@ window.OhsorryRender = {
 
     // ===== supabase upload — OhsorryDb.uploadResult 위임 (DB 모드는 자동 skip) =====
     // 트리거 로직이 dbConn v0.0.403 에 흡수됨 — render 는 한 줄 호출.
-    if (window.OhsorryDb && window.OhsorryDb.uploadResult) {
+    if (!statsOnly && window.OhsorryDb && window.OhsorryDb.uploadResult) {
       try { await window.OhsorryDb.uploadResult(result, { dbData }); }
       catch (e) { console.warn('[OhsorryRender] uploadResult 예외:', e && e.message); }
     }
