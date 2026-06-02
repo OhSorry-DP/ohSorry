@@ -200,11 +200,8 @@
     console.log(`[eagateFetch] LEVEL ${lvLabel} page ${lvPageCount} (offset=0): ${firstParse.charts.length}곡`);
     ictx.updateProgress(`LEVEL ${lvLabel} page ${lvPageCount} (offset=0): ${firstParse.charts.length}곡`, pctOf(0.08));
     if (firstParse.charts.length === 0) {
-      // 첫 LEVEL (보통 12) 의 첫 페이지가 비면 로그인 / 페이지 구조 의심
-      if (lvLabel === ictx.LEVELS_TO_FETCH[0].label) {
-        ictx.alertFn('첫 페이지에서 곡을 못 찾았어요. 로그인 상태가 아니거나 페이지 구조가 변경됐을 수 있습니다.');
-        return false;
-      }
+      // 이 레벨에 곡이 없음 — 해당 레벨을 한 번도 안 친 유저면 정상. 멈추지 말고 skip 하고 다음 레벨로.
+      //   (HTTP 에러는 위에서 이미 잡음. 로그인/페이지구조 문제는 collectByLevel 가 전 레벨 합산 0 일 때 판정.)
       console.log(`[eagateFetch] LEVEL ${lvLabel} 데이터 없음 — skip`);
       return true;
     }
@@ -275,6 +272,11 @@
       if (!ok) return false;  // 첫 LEVEL 실패하면 중단
     }
     console.log(`[eagateFetch] 전 LEVEL 합산: ${state.pageCount}페이지 / ${state.charts.length}곡 파싱 완료`);
+    // 전 레벨 합산이 0 곡 = 진짜 로그인 안 됨 / 페이지 구조 변경 (특정 레벨 미플레이는 위에서 skip 됨).
+    if (state.charts.length === 0) {
+      ictx.alertFn('곡을 하나도 못 찾았어요. 로그인 상태가 아니거나 페이지 구조가 변경됐을 수 있습니다.');
+      return false;
+    }
     return true;
   }
 

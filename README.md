@@ -441,6 +441,10 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### 2026-06-02 — eagateFetch — 빈 레벨 폴더에서 멈추지 않고 skip
+- 증상: eagate 레벨 모드 fetch 시 첫 레벨(보통 12)을 한 번도 안 친 유저는 그 레벨 폴더가 비어(HTTP 200 + 곡 0개) "로그인 의심" alert 뜨고 전체 fetch 가 중단됨.
+- fix: [eagateFetch.js](modules/eagateFetch.js) `fetchOneLevel` 가 빈 레벨(첫 레벨 포함)을 **skip 하고 다음 레벨로 진행**. 로그인/페이지구조 오류 판정은 `collectByLevel` 가 **전 레벨 합산 0곡일 때만** 하도록 이동. (HTTP/네트워크 에러는 기존대로 즉시 감지.)
+
 ### 2026-06-02 — calcOhsorryCore v0.0.391 / ohsorryRender — 통계 즉시 렌더(statsOnly) 경량 모드 + noRender
 - **statsOnly** 모드 추가 ([calcOhsorryCore.js](modules/calcOhsorryCore.js)) — 통계 + 노트레이더만 즉시 렌더하고 무거운 계산(userVec/calcWeakness · recommend · layoutMap) 과 추천곡 섹션 · supabase 업로드를 스킵. 게스트 페이지에서 통계가 빨리 뜨도록.
 - **noRender** 모드 — `show`(패널 렌더) 스킵, result 만 반환. 2차 백그라운드 full compute 시 전체화면 패널 깜빡임 방지. statsOnly 와 독립.
