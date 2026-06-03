@@ -441,6 +441,11 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### 2026-06-03 — 3-fetch-zasa — H/A/L 전부 추출 (☆9 이하 자사레벨 보강)
+- [3-fetch-zasa.js](old/3-fetch-zasa.js) 추출 규칙에서 HYPER 필터(`A/L 없거나 ☆11/12`)를 제거하고 **HYPER / ANOTHER / LEGGENDARIA 를 전부** 추가.
+  - 기존엔 ☆7~9 곡(HYPER 메인)이 ANOTHER 보유 시 버려져 zasa-data 가 ☆10~12 위주였음.
+  - 이제 ☆1~12 전 자사레벨 채보가 들어와, low 유저의 `practiceZasaDefault` 최대 클리어 zasa 매칭을 커버. (zasa-data.json 재추출·배포 필요)
+
 ### 2026-06-03 — recommend.js v0.0.10 — 연습곡 zasa 기본 범위 단순화 (최대 클리어 zasa-1 ~ 최대, 이력 없으면 5.9~6.9)
 - 연습곡 추천 zasa 토글 기본값(`practiceZasaDefault`)을 정리. ([recommend.js](modules/recommend.js))
   - **최대 클리어 zasa 있는 유저**(low/high 무관) → `min = 최대 zasa − 1`, `max = 최대 zasa` (기존과 동일).

@@ -2,15 +2,10 @@
 // STEP 3 (선택): zasa.sakura.ne.jp/dp/run.php 보충 데이터 추출
 // ============================================================
 // ereter.net 에 없는 차트를 보완하기 위해 zasa 의 비공식 난이도표를 긁어옵니다.
-// zasa 페이지에는 ☆10/11/12 차트가 모두 있고, 각각 decimal 난이도 (11.7, 12.3 등) 가 매겨져 있어요.
+// zasa 페이지에는 ☆1~12 차트가 모두 있고, 각 채보마다 decimal 난이도 (8.5, 11.7 등) 가 매겨져 있어요.
 //
-// 추출 규칙 (한 곡당):
-//   1. ANOTHER 가 있으면 ANOTHER 추가
-//   2. LEGGENDARIA 가 있으면 LEGGENDARIA 추가
-//   3. HYPER 는 다음 중 하나일 때 추가:
-//      (a) ANOTHER 와 LEGGENDARIA 가 모두 없는 경우 (fallback)
-//      (b) HYPER 의 게임 LEVEL 이 11 또는 12 인 경우 (★11/12 HYPER 는 항상 포함)
-//   → decimal 범위 필터 없음. 메인 채보 위주.
+// 추출 규칙 (한 곡당): HYPER / ANOTHER / LEGGENDARIA 가 있으면 전부 추가 (필터 없음).
+//   → ☆1~12 전 자사레벨 채보를 모두 포함 — low 유저 zasa 매칭까지 커버.
 //
 // 사용 방법:
 //   1. https://zasa.sakura.ne.jp/dp/run.php 페이지 열기
@@ -46,8 +41,7 @@
     const title = titleCell.textContent.trim();
     if (!title) return;
 
-    // 한 row 의 3 셀 (HYPER / ANOTHER / LEGGENDARIA) 을 먼저 parsed 에 모은 뒤,
-    // 위 규칙 (A/L 우선 + HYPER 는 fallback 또는 ★11/12) 따라 charts 에 push.
+    // 한 row 의 3 셀 (HYPER / ANOTHER / LEGGENDARIA) 을 parsed 에 모은 뒤 전부 charts 에 push (필터 없음).
     const parsed = {};  // { HYPER: { gameLevel, level }, ANOTHER: {...}, LEGGENDARIA: {...} }
     for (let i = 0; i < 3; i++) {
       const a = tds[i].querySelector('a.music');
@@ -64,18 +58,8 @@
       if (!Number.isFinite(level)) continue;
       parsed[diff] = { gameLevel, level };
     }
-    if (parsed.ANOTHER) {
-      charts.push({ title, diff: 'ANOTHER', gameLevel: parsed.ANOTHER.gameLevel, level: parsed.ANOTHER.level });
-    }
-    if (parsed.LEGGENDARIA) {
-      charts.push({ title, diff: 'LEGGENDARIA', gameLevel: parsed.LEGGENDARIA.gameLevel, level: parsed.LEGGENDARIA.level });
-    }
-    if (parsed.HYPER) {
-      const noAdvanced = !parsed.ANOTHER && !parsed.LEGGENDARIA;
-      const isHyperHi = parsed.HYPER.gameLevel === 11 || parsed.HYPER.gameLevel === 12;
-      if (noAdvanced || isHyperHi) {
-        charts.push({ title, diff: 'HYPER', gameLevel: parsed.HYPER.gameLevel, level: parsed.HYPER.level });
-      }
+    for (const diff of ['HYPER', 'ANOTHER', 'LEGGENDARIA']) {
+      if (parsed[diff]) charts.push({ title, diff, gameLevel: parsed[diff].gameLevel, level: parsed[diff].level });
     }
   });
 
@@ -86,7 +70,7 @@
     byGameLevel[c.gameLevel] = (byGameLevel[c.gameLevel] || 0) + 1;
     byDiff[c.diff] = (byDiff[c.diff] || 0) + 1;
   }
-  console.log(`[zasa] 추출된 차트: ${charts.length}개 (메인 채보 위주 — A/L 우선 + ★11/12 HYPER)`);
+  console.log(`[zasa] 추출된 차트: ${charts.length}개 (H/A/L 전부)`);
   for (const k of Object.keys(byGameLevel).sort((a, b) => Number(a) - Number(b))) {
     console.log(`   게임 LEVEL ${k}: ${byGameLevel[k]}곡`);
   }
