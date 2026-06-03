@@ -441,6 +441,12 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### 2026-06-03 — recommend.js v0.0.10 — 연습곡 zasa 기본 범위 단순화 (최대 클리어 zasa-1 ~ 최대, 이력 없으면 5.9~6.9)
+- 연습곡 추천 zasa 토글 기본값(`practiceZasaDefault`)을 정리. ([recommend.js](modules/recommend.js))
+  - **최대 클리어 zasa 있는 유저**(low/high 무관) → `min = 최대 zasa − 1`, `max = 최대 zasa` (기존과 동일).
+  - **최대 클리어 zasa 이력 없는 유저** → 기존 game level 기반 분기(`5.9~10` / `8~10.9` / `10~12.1` / `11.6~12.7`)를 폐기하고 **`5.9~6.9` 고정**.
+  - low 유저가 기본 `5.9~10` 의 넓은 범위로 잡히던 문제 해소. 오소리웹·본체 오소리 공통 적용(공유 모듈).
+
 ### 2026-06-02 — eagateFetch — 빈 레벨 폴더에서 멈추지 않고 skip
 - 증상: eagate 레벨 모드 fetch 시 첫 레벨(보통 12)을 한 번도 안 친 유저는 그 레벨 폴더가 비어(HTTP 200 + 곡 0개) "로그인 의심" alert 뜨고 전체 fetch 가 중단됨.
 - fix: [eagateFetch.js](modules/eagateFetch.js) `fetchOneLevel` 가 빈 레벨(첫 레벨 포함)을 **skip 하고 다음 레벨로 진행**. 로그인/페이지구조 오류 판정은 `collectByLevel` 가 **전 레벨 합산 0곡일 때만** 하도록 이동. (HTTP/네트워크 에러는 기존대로 즉시 감지.)

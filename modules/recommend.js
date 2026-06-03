@@ -30,7 +30,7 @@
 })(function () {
   'use strict';
 
-  var VERSION = '0.0.9';
+  var VERSION = '0.0.10';
 
   // 차트 패턴 hashtag — 그 곡의 강한 top 3 feature → 한국어 약어.
   //   추천 row hover / 토스트에 "#동치 #계단 #밀도" 식으로 표시.
@@ -151,7 +151,7 @@
       }
       return mx;
     })();
-    // practiceZasaDefault — 사용자가 클리어 (lampNum>=3) 한 차트들의 zasa 최고값 기준 ±1.0 범위. 이력 없으면 game level fallback.
+    // practiceZasaDefault — 사용자가 클리어 (lampNum>=3) 한 차트들의 zasa 최고값 기준 -1.0 범위 (max=최고값). 이력 없으면 5.9~6.9 고정.
     var practiceZasaDefault = (function () {
       var topClearZasa = 0;
       for (var ci = 0; ci < allCharts.length; ci++) {
@@ -173,10 +173,8 @@
         if (zasa != null && zasa > topClearZasa) topClearZasa = zasa;
       }
       if (topClearZasa > 0) return { min: +(topClearZasa - 1).toFixed(1), max: topClearZasa };
-      if (maxClearGameLevel >= 12) return { min: 11.6, max: 12.7 };
-      if (maxClearGameLevel >= 11) return { min: 10.0, max: 12.1 };
-      if (maxClearGameLevel >= 10) return { min: 8.0, max: 10.9 };
-      return { min: 5.9, max: 10.0 };
+      // 최대 클리어 zasa 이력 없으면 (game level 무관) 입문 범위 고정.
+      return { min: 5.9, max: 6.9 };
     })();
 
     // 배치 추천 토글 — 'on' = 8 배치 best (default), 'off' = 정규 N/N 강제.
