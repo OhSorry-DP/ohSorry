@@ -441,6 +441,11 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### 2026-06-03 — calcOhsorryCore — 별값 파이프라인 onlyOSR + onlyOSRtoEreter 로 전환 (adopt 대체)
+- 별값 최종을 `onlyOSR`(전체곡 native 50%) + `onlyOSRtoEreter`(ereter★ 변환, OSR13.5 tier) 로 계산 — 기존 `adopt` 대체. ([calcOhsorryCore.js](modules/calcOhsorryCore.js))
+- DB 모드는 `dbData.native_star` 로 추천 baseStar 사용, 비-DB 는 `onlyOSRtoEreter.inferEreter` 로 ★(ereter)/native(onlyOSR) 계산. star=toEreter / native_star=onlyOSR(추천 base).
+- `native_star` 를 supabase 페이로드 + RPC 파라미터에 추가. ([dbConn.js](modules/dbConn.js))
+
 ### 2026-06-03 — 3-fetch-zasa — H/A/L 전부 추출 (☆9 이하 자사레벨 보강)
 - [3-fetch-zasa.js](old/3-fetch-zasa.js) 추출 규칙에서 HYPER 필터(`A/L 없거나 ☆11/12`)를 제거하고 **HYPER / ANOTHER / LEGGENDARIA 를 전부** 추가.
   - 기존엔 ☆7~9 곡(HYPER 메인)이 ANOTHER 보유 시 버려져 zasa-data 가 ☆10~12 위주였음.

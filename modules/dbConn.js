@@ -263,6 +263,7 @@ window.OhsorryDb = (function () {
         p_ereter_star: payload.ereter_star != null ? Number(payload.ereter_star) : null,
         p_sp_rank: rankToInt(payload.sp_rank),
         p_dp_rank: rankToInt(payload.dp_rank),
+        p_native_star: payload.native_star != null ? Number(payload.native_star) : null,  // v3.4.0
       });
       // 2. user_radars (SP / DP 각각, 있을 때만)
       const radar = payload.notes_radar;

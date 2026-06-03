@@ -57,7 +57,7 @@ function __ohsorryHideSpinner() {
 }
 
 window.OhsorryCore = {
-  VERSION: '0.0.367',
+  VERSION: '0.0.368',
   compute: async (opts) => {
   __ohsorryShowSpinner();
   opts = opts || {};
@@ -281,6 +281,9 @@ window.OhsorryCore = {
   const CALC_OSR135_URL = GIST_RAW + '/OSR13.5%2B.js';
   // v3.3.7: adopt.js — v335E 채택 분기 (세 lib raw 값 → 최종 ★) 통합 lib
   const CALC_ADOPT_URL = GIST_RAW + '/adopt.js';
+  // v3.4.0: onlyOSR (전체곡 50% native) + onlyOSRtoEreter (ereter★ 변환, OSR13.5 tier) — adopt 대체
+  const CALC_ONLYOSR_URL = GIST_RAW + '/onlyOSR.js';
+  const CALC_ONLYOSR2E_URL = GIST_RAW + '/onlyOSRtoEreter.js';
   // ohsorryShelf.js — renderChartRow (추천곡 곡명 클릭 토스트용). 실패해도 무시.
   const CALC_SHELF_URL = GIST_RAW + '/ohsorryShelf.js';
   // 패턴 분석 — 유저 약점/강점 9 feature 벡터 + 차트별 강점 매치 점수 (추천 정렬 가중치).
@@ -352,6 +355,7 @@ window.OhsorryCore = {
   //   ohSorryWeb 게스트 페이지 진입 시 그만큼 다운로드 절감 + lib eval 비용 절감.
   let oldOSR = null, ohSorryRatingLib = null, osr135Lib = null, shelfLib = null;
   let adoptLib = null;
+  let onlyOSRLib = null, onlyOSR2eLib = null;  // v3.4.0
   if (!dbData) {
     try {
       const { data: oldOSRSrc, source: oldSrc } = await loadWithCache(CALC_OLD_OSR_URL, 'ohSorry:libOldOSR', false);
@@ -391,6 +395,20 @@ window.OhsorryCore = {
       console.log(`[step2] adopt.js v${adoptLib.version} 로드 (${srcAdopt})`);
     } catch (e) {
       console.error('[step2] adopt.js 로드 실패:', e.message, '— 본체 inline 분기 fallback');
+    }
+    // v3.4.0: onlyOSR + onlyOSRtoEreter (★ = native 50% → ereter 변환, OSR13.5 tier). window.OhsorryNorm/OSR135 선행 필요(이미 로드됨).
+    try {
+      const { data: ooSrc } = await loadWithCache(CALC_ONLYOSR_URL, 'ohSorry:libOnlyOSR', false);
+      (new Function(ooSrc))();
+      onlyOSRLib = window.onlyOSR;
+      if (!onlyOSRLib) throw new Error('onlyOSR global 등록 실패');
+      const { data: o2eSrc } = await loadWithCache(CALC_ONLYOSR2E_URL, 'ohSorry:libOnlyOSR2e', false);
+      (new Function(o2eSrc))();
+      onlyOSR2eLib = window.onlyOSRtoEreter;
+      if (!onlyOSR2eLib) throw new Error('onlyOSRtoEreter global 등록 실패');
+      console.log(`[step2] onlyOSR v${onlyOSRLib.version} + onlyOSRtoEreter v${onlyOSR2eLib.version} 로드`);
+    } catch (e) {
+      console.error('[step2] onlyOSR/onlyOSRtoEreter 로드 실패 — adopt 값 유지:', e.message);
     }
   } else {
     console.log('[step2] DB 모드 — ★ 추정 lib 4종 (oldOSR / osr / OSR13.5+ / adopt) fetch skip');
@@ -1101,6 +1119,24 @@ window.OhsorryCore = {
   }  // ← adopt.js fetch 실패 시 inline fallback 블록 끝
   }
 
+  // v3.4.0: 별값 최종 = onlyOSR(전체곡 native 50%) + onlyOSRtoEreter(ereter★, OSR13.5≥13.5 tier).
+  //   adopt 결과를 override. DB 모드: dbData.native_star 읽어 추천 baseStar 로. 비-DB: toEreter 계산.
+  let nativeStar = null;
+  if (dbData) {
+    nativeStar = typeof dbData.native_star === 'number' ? dbData.native_star : null;
+    if (nativeStar != null) starEstimateNew = nativeStar;  // 추천 baseStar = native(onlyOSR)
+  } else if (onlyOSR2eLib && ratingData) {
+    try {
+      const r2e = onlyOSR2eLib.inferEreter(allCharts, ratingData, { charts: ereterData, players: ereterPlayers || {} });
+      if (typeof r2e.ereterStar === 'number') {
+        starEstimate = r2e.ereterStar;
+        nativeStar = typeof r2e.ohsorryStar === 'number' ? r2e.ohsorryStar : null;
+        starEstimateNew = nativeStar != null ? nativeStar : starEstimate;  // 추천 baseStar = native(onlyOSR)
+        console.log(`[step2] ★ = onlyOSRtoEreter ${starEstimate.toFixed(2)} (native ${nativeStar != null ? nativeStar.toFixed(2) : 'N/A'}, tier ${r2e.tier})`);
+      }
+    } catch (e) { console.error('[step2] onlyOSRtoEreter override 실패 — 기존 ★ 유지:', e.message); }
+  }
+
   // -------- 5.6. status 페이지에서 프로필 정보 fetch --------
   // 쿠프로(クプロ) 이미지, DJ 이름, IIDX ID, SP/DP 단위(段位), 노트레이더 등
   let profile = null;
@@ -1472,6 +1508,7 @@ window.OhsorryCore = {
       iidx_id: iidxIdNorm,
       dj_name: profile.djName || null,
       star_estimate: starEstimate != null ? Number(starEstimate.toFixed(4)) : null,
+      native_star: nativeStar != null ? Number(nativeStar.toFixed(4)) : null,  // v3.4.0: onlyOSR 전체곡 native
       ereter_star: eraterTrueStar != null ? Number(eraterTrueStar) : null,
       raw_s: starRaw != null ? Number(starRaw.toFixed(4)) : null,
       version: dbVersionString,
