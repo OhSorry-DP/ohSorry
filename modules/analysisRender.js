@@ -105,7 +105,25 @@
   //   0.0.45 — 막대그래프 기준 변경: max% 평균 대비 → "상위 N%" (= 100 - percentile) 평균 대비.
   //            percentiles 없으면 기존 max% 로 fallback.
   //   0.0.46 — 스킬 대상곡 표에서 chart_score == 0 인 곡 제외 (CHARGE/SOF-LAN 같은 sparse feature 에서 의미 없는 0/0 row 방지).
-  var VERSION = '0.0.46';
+  //   0.0.47 — 막대그래프 "상대평가 ↔ 개인평가" 토글 추가 (오른쪽 위). 상대평가=상위N% 평균 대비(기존),
+  //            개인평가=calcWeakness 잔차(userVec) 평균 대비. barMode 옵션/state 로 관리.
+  //   0.0.48 — 평가 토글 스타일을 통계탭 "난이도 선택 :" 토글과 동일한 텍스트+파이프(active 볼드)로 변경.
+  //   0.0.49 — 막대그래프 기본 모드를 개인평가(잔차)로 변경 (opts.barMode 명시 없으면 personal).
+  //   0.0.50 — 스킬 대상곡 표 위에 잔차 강/약점 이유 박스 추가 (강/약점 배지 + 강한 곡 평균 rate vs 전체 평균 gap).
+  //   0.0.51 — 이유 박스 문구를 수치 강조체로 ("<feature> 강한 곡을 전체보다 +X%p 잘/못 칩니다").
+  //   0.0.52 — detail 헤더의 feature desc 설명줄 제거 (이유 박스와 중복).
+  //   0.0.53 — NOTES 한국어 라벨 '노트수' → '물량'.
+  //   0.0.54 — 이유 문구 "플레이 한 곡 중에 <feature>이/가 강한 곡을 평균적으로 ±X% 잘/못 칩니다" (조사 자동, %p→%).
+  //   0.0.55 — 이유 배지 강/약점 판정을 막대그래프와 동일 기준(내 잔차 평균 대비)으로 — 막대 색/배지 불일치 해소.
+  //   0.0.56 — 이유 문구 ±X% 를 막대 숫자(잔차-내평균)와 일치 + "다른 패턴보다" 문구로 (배지·막대·문구 동일 기준).
+  //   0.0.57 — 이유 박스 하단 보조줄(강한 곡/전체 rate) 제거 + 미사용 strongAvg/gap 계산 정리.
+  //   0.0.58 — 상대평가 막대 숫자를 등수('N위')로 + 이유 박스를 헤더↔등수 행 사이로 이동(랭킹보기 토글해도 유지).
+  //   0.0.59 — 상대평가 막대를 바닥에서 시작(평균=가운데 50% 고정) + 동률(평균과 ≈같음) 시 중립 흰색. 점선 z-index 위로.
+  //   0.0.60 — 막대 색을 라이벌 스택바 색으로 통일: 평균 이상(강점·동률) 노랑(#d9a92e) / 평균 미만(약점) 파랑(#2f6db3). 개인·상대평가 공통, 상대평가 단색.
+  //   0.0.61 — 상대평가 막대를 절대 등수 스케일(1등=100%, 15등=0%, 16등+ 빈 막대)로 + 막대/등수 라벨 색을 다시 녹(강점)/빨(약점)로 복귀.
+  //   0.0.62 — 상대평가 막대를 평균±15등 스케일로(평균선=meanLineP, 상위 유저는 평균선 위로 끌어올려 1등이 천장). 막대 색은 녹/빨, 등수 라벨은 흰색. 점선 위치도 평균선과 동기화.
+  //   0.0.63 — 하위권(아래 15등 여유 없음)도 평균선을 아래로 내려 꼴찌가 바닥에 닿게 (total 사용, 상위/하위 대칭). 등수 라벨 볼드 제거(normal).
+  var VERSION = '0.0.63';
   var SKILL_WEIGHTS = (function () {
     var ws = [];
     for (var i = 0; i < 5; i++) ws.push(1.0);
@@ -118,7 +136,7 @@
   var SKILL_TOP_N = 30;
 
   var FEATS = [
-    { k: 'NOTES',   ko: '노트수',     desc: '곡의 전체 노트 양과 밀도' },
+    { k: 'NOTES',   ko: '물량',       desc: '곡의 전체 노트 양과 밀도' },
     { k: 'CHORD',   ko: '동시치기',   desc: '2개 이상 노트를 동시에 누르는 패턴의 빈도·복잡도' },
     { k: 'PHRASE',  ko: '계단',       desc: '인접 키가 순차로 흐르는 패턴 (1→2→3→4 형식)' },
     { k: 'PEAK',    ko: '순간 밀도',  desc: '곡 중 노트가 가장 빽빽하게 쏟아지는 구간의 nps' },
@@ -249,14 +267,17 @@
     return html;
   }
 
-  function buildBarChart(userPatternScore, maxScoreByFeat, selectedFeat, percentiles) {
-    // 막대그래프 — 각 feature 의 "상위 N%" (= 100 - percentile) 평균 대비 차이.
-    //   percentiles[f] = { rank, total, percentile } (percentile = rank/total×100, 작을수록 상위)
-    //   displayVal = 100 - percentile → 0~100 (큰 = 상위)
-    //   userMean = 10 feature displayVal 평균
-    //   막대 v = displayVal - userMean. + 면 평균 대비 상위 (강점), - 면 하위 (약점).
-    //   percentiles 없으면 fallback: max% (user_score / maxScoreByFeat × 100) 기준.
+  function buildBarChart(userPatternScore, maxScoreByFeat, selectedFeat, percentiles, barMode, userVec) {
+    // 막대그래프 — 각 feature 값의 "내 10 feature 평균 대비" 차이. barMode 로 base 전환.
+    //   relative(상대평가): displayVal = 100 - percentile (상위 N%, 큰=상위). percentiles 없으면 max% fallback.
+    //   personal(개인평가): displayVal = userVec[f] (calcWeakness 잔차 — 기대 대비 +강점/-약점).
+    //   공통: userMean = 10 feature displayVal 평균. 막대 v = displayVal - userMean (+ 강점 / - 약점).
+    var personal = barMode === 'personal';
     var valsRaw = FEATS.map(function (f) {
+      if (personal) {
+        var pv = userVec && userVec[f.k];
+        return (typeof pv === 'number') ? pv : 0;  // 잔차 (없으면 0)
+      }
       var pctInfo = percentiles && percentiles[f.k];
       if (pctInfo && typeof pctInfo.percentile === 'number') {
         return 100 - pctInfo.percentile;  // 상위 N% (큰=상위)
@@ -272,25 +293,72 @@
     var userMean = valsRaw.reduce(function (s, v) { return s + v; }, 0) / valsRaw.length;
     var vals = valsRaw.map(function (v) { return v - userMean; });
     var maxAbs = Math.max.apply(null, vals.map(Math.abs).concat(1));
+    // 상대평가 등수 막대 — 내 평균 등수(avgRank) + 평균선 위치(meanLineP, bottom 기준 %).
+    //   스케일: 평균 ±15등 = ±50% (15등당 50%). 평균선 위로 15등 여유 있으면 가운데(50%).
+    //   예외: 평균이 상위(<16등)면 위 여유(avgRank-1 등)만큼만 위 공간 → 평균선을 끌어올려 1등이 천장(100%)에 닿게.
+    var avgRank = null, meanLineP = 50;
+    if (!personal && percentiles) {
+      var rsum = 0, rn = 0, total = 0;
+      for (var ari = 0; ari < FEATS.length; ari++) {
+        var arp = percentiles[FEATS[ari].k];
+        if (arp && typeof arp.rank === 'number') { rsum += arp.rank; rn++; if (typeof arp.total === 'number') total = arp.total; }
+      }
+      if (rn > 0) {
+        avgRank = rsum / rn;
+        var upRoom = avgRank - 1;                            // 평균 위(상위) 등수 여유
+        var downRoom = total > 0 ? (total - avgRank) : 15;   // 평균 아래(하위) 등수 여유
+        // 위/아래 모두 15등 여유 있으면 평균선 가운데(50%).
+        //   상위(위 여유<15)면 평균선 위로 끌어올려 1등이 천장, 하위(아래 여유<15)면 아래로 내려 꼴찌가 바닥.
+        if (upRoom < 15) meanLineP = 100 - upRoom / 15 * 50;
+        else if (downRoom < 15) meanLineP = downRoom / 15 * 50;
+      }
+    }
     var cols = FEATS.map(function (f, i) {
       var v = vals[i];
-      var pct = Math.abs(v) / maxAbs * 50;
-      var isPos = v >= 0;
+      var rkInfo = (!personal && percentiles) ? percentiles[f.k] : null;
+      var rk = rkInfo && typeof rkInfo.rank === 'number' ? rkInfo.rank : null;
+      // 색 강/약 기준 — 상대평가는 평균 등수 대비(점선과 일치), 개인평가는 잔차 평균 대비.
+      var isPos = (!personal && avgRank != null && rk != null) ? (avgRank - rk >= 0) : (v >= 0);
+      // 강점·동률(평균 이상, v>=0) 녹색 / 약점(평균 미만) 빨강. 막대·라벨(등수/잔차) 공통.
       var color = isPos ? '#28a745' : '#dc3545';
       var sign = isPos ? '+' : '';
-      var barStyle = isPos
-        ? 'bottom:50%;height:' + pct + '%;background:' + color
-        : 'top:50%;height:' + pct + '%;background:' + color;
+      // 막대 숫자 라벨 — 상대평가는 등수 기반이므로 'N위'로, 개인평가는 잔차값(±수치)으로.
+      //   상대평가라도 percentile rank 없으면(fallback max%) ±수치 유지.
+      var label;
+      if (!personal) {
+        var pInfo = percentiles && percentiles[f.k];
+        label = (pInfo && typeof pInfo.rank === 'number') ? (pInfo.rank + '위') : (sign + v.toFixed(1));
+      } else {
+        label = sign + v.toFixed(1);
+      }
+      // 라벨 색 — 등수(상대평가) 숫자는 흰색, 개인평가(잔차)는 강약 색.
+      var labelColor = personal ? color : '#e9ecef';
+      // 막대 HTML.
+      var barBase = 'position:absolute;left:20%;right:20%;';
+      var barHtml;
+      if (personal) {
+        // 개인평가 — 가운데(평균) 기준 위(강점)/아래(약점) ± (잔차).
+        var pct = Math.abs(v) / maxAbs * 50;
+        var ps = isPos ? 'bottom:50%;height:' + pct + '%' : 'top:50%;height:' + pct + '%';
+        barHtml = '<div style="' + barBase + ps + ';background:' + color + ';border-radius:2px"></div>';
+      } else {
+        // 상대평가 — 평균 ±15등 스케일 (15등당 50%). 평균선(meanLineP)에서 상위(rank↓) 위로 / 하위 아래로.
+        //   평균이 상위(<16등)면 meanLineP 가 위로 올라가 1등이 천장(100%)에 닿음.
+        var rankH = (avgRank != null && rk != null)
+          ? Math.max(0, Math.min(100, meanLineP + (avgRank - rk) / 15 * 50))
+          : Math.max(0, Math.min(100, userMean > 0 ? (valsRaw[i] / userMean) * 50 : 0));  // rank 없으면 fallback
+        barHtml = '<div style="' + barBase + 'bottom:0;height:' + rankH + '%;background:' + color + ';border-radius:2px"></div>';
+      }
       var divider = i === 4 ? ';border-right:1px dashed #ccc;margin-right:4px;padding-right:4px' : '';
       var tip = f.k + ' (' + f.ko + ')\n' + f.desc;
       var tipAttr = ' title="' + tip.replace(/"/g, '&quot;') + '"';
       var selBg = selectedFeat === f.k ? 'background:rgba(127,127,127,0.15);' : '';
       return ''
         + '<div data-feat="' + f.k + '"' + tipAttr + ' style="' + selBg + 'cursor:pointer;flex:1;display:flex;flex-direction:column;align-items:center;position:relative' + divider + '">'
-        + '  <div style="height:16px;font-size:12px;font-weight:600;color:' + color + '">' + sign + v.toFixed(1) + '</div>'
+        + '  <div style="height:16px;font-size:12px;font-weight:' + (personal ? '600' : '400') + ';color:' + labelColor + '">' + label + '</div>'
         + '  <div style="position:relative;flex:1;width:100%;min-height:100px">'
-        + '    <div style="position:absolute;top:50%;left:0;right:0;height:1px;background:#ccc"></div>'
-        + '    <div style="position:absolute;left:20%;right:20%;' + barStyle + ';border-radius:2px"></div>'
+        + '    ' + barHtml
+        + '    <div style="position:absolute;top:' + (personal ? 50 : (100 - meanLineP)) + '%;left:0;right:0;height:1px;background:#ccc;z-index:1"></div>'
         + '  </div>'
         + '  <div style="margin-top:4px;font-size:11px;color:#666;font-weight:500;white-space:nowrap">' + f.k + '</div>'
         + '</div>';
@@ -320,14 +388,53 @@
     var hasUserScore = isFinite(score);
 
     var html = ''
-      + '<div style="font-size:15px;margin-bottom:4px"><b style="font-size:17px">' + escH(f.k) + '</b>'
+      + '<div style="font-size:15px;margin-bottom:8px"><b style="font-size:17px">' + escH(f.k) + '</b>'
       + ' <span style="color:#aaa;font-weight:400">' + (hasUserScore ? score.toFixed(1) + 'pt' : '-') + '</span>'
-      + '</div>'
-      + '<div style="font-size:11px;opacity:0.65;margin-bottom:8px">' + escH(f.desc) + '</div>';
+      + '</div>';
 
     if (!canAnalyze) {
       html += '<div style="opacity:0.6;font-size:11px">상세 분석 데이터 부재 (patterns / allCharts 미로드)</div>';
       return html;
+    }
+
+    // byChartData — 곡별 잔차 평균(rAvg) 집계. 이유 박스 + (아래) 스킬 대상곡 공용.
+    var entriesAll = userVec.__entries || [];
+    var byChartData = {};
+    for (var i = 0; i < entriesAll.length; i++) {
+      var e = entriesAll[i];
+      if (!byChartData[e.chartId]) byChartData[e.chartId] = {
+        pt: e.pt, rSum: 0, n: 0,
+        title: e.title, diff: e.diff, lv: e.lv, rate: e.rate, lampNum: e.lampNum,
+      };
+      byChartData[e.chartId].rSum += e.residual;
+      byChartData[e.chartId].n += 1;
+    }
+    for (var cid in byChartData) byChartData[cid].rAvg = byChartData[cid].rSum / byChartData[cid].n;
+
+    // 잔차 강/약점 이유 — 헤더(피처 라벨)와 등수 행 사이에 배치 (랭킹보기 토글해도 유지됨).
+    //   기준: userVec[k] - 내 10 feature 잔차 평균 (= 막대 v값). 배지·막대 색·문구 ±X% 모두 이 값 부호/크기로 일치.
+    var residualValue = (userVec && typeof userVec[k] === 'number') ? userVec[k] : 0;
+    var vecMeanForReason = 0, vmN = 0;
+    for (var vmi = 0; vmi < FEATS.length; vmi++) {
+      var vmv = userVec && userVec[FEATS[vmi].k];
+      if (typeof vmv === 'number') { vecMeanForReason += vmv; vmN++; }
+    }
+    vecMeanForReason = vmN > 0 ? vecMeanForReason / vmN : 0;
+    var barVal = residualValue - vecMeanForReason;   // 막대 숫자와 동일
+    var isStrength = barVal >= 0;
+    if (Object.keys(byChartData).length > 0) {
+      var reasonColor = isStrength ? '#28a745' : '#dc3545';
+      var badge = isStrength ? '강점 ▲' : '약점 ▼';
+      var barStr = (barVal >= 0 ? '+' : '-') + Math.abs(barVal).toFixed(1) + '%';
+      var verb = barVal >= 0 ? '잘 칩니다' : '못 칩니다';
+      // 받침 유무로 주격조사 이/가 선택
+      var koLast = f.ko.charCodeAt(f.ko.length - 1);
+      var josa = (koLast >= 0xAC00 && koLast <= 0xD7A3 && (koLast - 0xAC00) % 28 !== 0) ? '이' : '가';
+      html += '<div style="margin-bottom:8px;padding:8px 10px;border-radius:6px;background:rgba(127,127,127,0.1);border-left:3px solid ' + reasonColor + '">'
+        + '<div style="font-size:12px;font-weight:700;color:' + reasonColor + ';margin-bottom:3px">' + badge + '</div>'
+        + '<div style="font-size:12px;opacity:0.9">플레이 한 곡을 분석해보니 ' + escH(f.ko) + josa + ' 강한 곡을 다른 패턴보다 '
+        + '<b style="color:' + reasonColor + '">' + barStr + '</b> ' + verb + '</div>'
+        + '</div>';
     }
 
     // 랭킹 행 — opts.percentiles 있으면 표시. 없으면 (예: INFOhSorry 처럼 유저 목록 미보유) 숨김.
@@ -356,19 +463,7 @@
       return html;
     }
 
-    // byChartData + sumPtPerFeat 빌드 — vRel 기여 계산용
-    var entriesAll = userVec.__entries || [];
-    var byChartData = {};
-    for (var i = 0; i < entriesAll.length; i++) {
-      var e = entriesAll[i];
-      if (!byChartData[e.chartId]) byChartData[e.chartId] = {
-        pt: e.pt, rSum: 0, n: 0,
-        title: e.title, diff: e.diff, lv: e.lv, rate: e.rate, lampNum: e.lampNum,
-      };
-      byChartData[e.chartId].rSum += e.residual;
-      byChartData[e.chartId].n += 1;
-    }
-    for (var cid in byChartData) byChartData[cid].rAvg = byChartData[cid].rSum / byChartData[cid].n;
+    // sumPtPerFeat — vRel 기여 계산용 (byChartData 는 헤더 직후에서 이미 집계됨)
     var sumPtPerFeat = {};
     for (var fi = 0; fi < FEATS.length; fi++) {
       var s = 0;
@@ -471,7 +566,8 @@
     // selectedFeat 없으면 자동으로 가장 강점인 feat (max% 최대) 선택.
     var sf = opts.selectedFeat || pickStrongestFeat(opts.userPatternScore, opts.maxScoreByFeat);
     var viewMode = opts.viewMode === 'ranking' ? 'ranking' : 'skill';
-    var bar = buildBarChart(opts.userPatternScore, opts.maxScoreByFeat, sf, opts.percentiles);
+    var barMode = opts.barMode === 'relative' ? 'relative' : 'personal';  // 기본 개인평가(잔차)
+    var bar = buildBarChart(opts.userPatternScore, opts.maxScoreByFeat, sf, opts.percentiles, barMode, opts.userVec);
     var meta = opts.userVec.__meta || {};
     var lvParts = Object.keys(meta.lvCounts || {}).sort().map(function (lv) {
       return 'lv' + lv + ' ' + meta.lvCounts[lv];
@@ -479,8 +575,23 @@
     var detailHTML = sf
       ? buildDetailHTML(Object.assign({}, opts, { selectedFeat: sf }), viewMode)
       : '<div style="margin-top:10px;padding:10px;font-size:13px;opacity:0.7;text-align:center">분석 항목을 선택하세요 (위 막대 클릭)</div>';
+    // 막대 base 토글 — 상대평가(랭킹/상위N%) ↔ 개인평가(잔차). 오른쪽 위.
+    //   통계탭 "난이도 선택 :" 토글(ohsorryRender)과 동일한 텍스트+파이프 스타일. active 만 볼드/밝게.
+    var segBtn = function (mode, label) {
+      var active = barMode === mode;
+      return '<span data-action="set-bar-mode" data-barmode="' + mode + '" style="cursor:pointer;'
+        + 'color:' + (active ? '#e9ecef' : '#888') + ';font-weight:' + (active ? '700' : '400') + ';transition:color .15s">'
+        + label + '</span>';
+    };
+    var capLabel = barMode === 'personal' ? '기대(잔차) 평균 대비 강점+ / 약점−' : '현재 실력 평균 대비 강점+ / 약점−';
     return ''
-      + '<div style="font-size:13px;opacity:0.75;margin-bottom:6px">현재 실력 평균 대비 강점+ / 약점−</div>'
+      + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;gap:8px">'
+      + '  <span style="font-size:13px;opacity:0.75">' + capLabel + '</span>'
+      + '  <span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#888;flex-shrink:0">'
+      +      '<span style="margin-right:2px">평가 :</span>'
+      +      segBtn('relative', '상대평가') + '<span style="color:#555">|</span>' + segBtn('personal', '개인평가')
+      + '  </span>'
+      + '</div>'
       + '<div style="display:flex;justify-content:space-between;font-size:11px;color:#888;margin-bottom:2px">'
       + '  <span>← 지력</span><span>개인차 →</span>'
       + '</div>'
@@ -501,14 +612,24 @@
     var state = {
       selectedFeat: opts.selectedFeat || pickStrongestFeat(opts.userPatternScore, opts.maxScoreByFeat),
       viewMode: 'skill',
+      barMode: opts.barMode === 'relative' ? 'relative' : 'personal',  // 기본 개인평가(잔차)
     };
     function render() {
       rootEl.innerHTML = buildAnalysisHTML(Object.assign({}, opts, {
         selectedFeat: state.selectedFeat,
         viewMode: state.viewMode,
+        barMode: state.barMode,
       }));
     }
     rootEl.addEventListener('click', function (e) {
+      // 막대 base 토글 (상대평가 ↔ 개인평가) — selectedFeat / viewMode 는 유지.
+      var barModeBtn = e.target.closest && e.target.closest('[data-action="set-bar-mode"]');
+      if (barModeBtn) {
+        e.stopPropagation();
+        state.barMode = barModeBtn.getAttribute('data-barmode') === 'personal' ? 'personal' : 'relative';
+        render();
+        return;
+      }
       // viewMode 토글 버튼 ("랭킹보기" ↔ "스킬곡 보기").
       var toggleBtn = e.target.closest && e.target.closest('[data-action="toggle-view-mode"]');
       if (toggleBtn) {

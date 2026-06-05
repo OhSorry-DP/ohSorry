@@ -135,6 +135,15 @@
     var MIN_BIN_N = 10;
     var WEAKNESS_MODE_FEATS = {
       all:       WEAKNESS_FEATS,
+      // 개별 건반 피처 — '건반'(all) 의 7 feature 를 하나씩 단독 연습. 후보 풀은 all 과 동일(개인차 제외).
+      NOTES:     ['NOTES'],
+      CHORD:     ['CHORD'],
+      PEAK:      ['PEAK'],
+      PHRASE:    ['PHRASE'],
+      JACK:      ['JACK'],
+      TRILL:     ['TRILL'],
+      RAND:      ['RAND'],
+      // 개인차 — 전용 feature 만.
       CHARGE:    ['CHARGE'],
       SCRATCH:   ['SCRATCH'],
       'SOF-LAN': ['SOF-LAN'],
@@ -689,12 +698,13 @@
 
     // ─── buildWeaknessRecs ──────────────────────────────────────────
     // 연습곡 추천 (calcOhsorryCore 2026-05-27~) — 복습곡 + 신규 패턴곡 + 실전 연습곡 혼합.
-    //   '건반' 모드: 7 feature (NOTES/CHORD/PEAK/PHRASE/JACK/TRILL/RAND) — CHARGE/SCRATCH/SOF-LAN 제외.
+    //   '건반'(all) 모드: 7 feature (NOTES/CHORD/PEAK/PHRASE/JACK/TRILL/RAND) — CHARGE/SCRATCH/SOF-LAN 제외.
+    //   개별 건반 피처 모드(NOTES/CHORD/...): 해당 feature 단독 — 후보 풀은 all 과 동일(개인차 제외).
     //   CHARGE/SCRATCH/SOF-LAN 모드: 전용 feature 만.
     //   안 친 곡도 후보. 이미 잘 친 (rate>=95) 곡 제외. 평균 미달 곡 복습 가산.
     //
     // opts: { mode, flipOn, handMode, topN, strength, zasaMin, zasaMax }
-    //   mode      : 'all' (default) / 'CHARGE' / 'SCRATCH' / 'SOF-LAN'
+    //   mode      : 'all' (default) / 개별 건반 'NOTES'|'CHORD'|'PEAK'|'PHRASE'|'JACK'|'TRILL'|'RAND' / 개인차 'CHARGE'|'SCRATCH'|'SOF-LAN'
     //   flipOn    : true (default) / false — UI 토글. ON=8 배치 best, OFF=정규(N/N) 강제
     //   handMode  : 'both' (default) / 'left' / 'right'
     //   strength  : 1 (default) / 2 / 3 — 난이도 강도
@@ -777,16 +787,17 @@
           var soflanAvg = ((ptL_pre['SOF-LAN'] || 0) + (ptR_pre['SOF-LAN'] || 0)) / 2;
           var chargeAvg = ((ptL_pre.CHARGE || 0) + (ptR_pre.CHARGE || 0)) / 2;
           var scratchAvg = ((ptL_pre.SCRATCH || 0) + (ptR_pre.SCRATCH || 0)) / 2;
-          if (mode === 'all') {
-            if (soflanAvg > 0) continue;
-            if (chargeAvg > 0) continue;
-            if (scratchAvg >= 6.35) continue;
-          } else if (mode === 'CHARGE') {
+          if (mode === 'CHARGE') {
             if (chargeAvg <= 0 || soflanAvg > 0 || scratchAvg >= 6.35) continue;
           } else if (mode === 'SCRATCH') {
             if (scratchAvg < 6.35 || chargeAvg > 0 || soflanAvg > 0) continue;
           } else if (mode === 'SOF-LAN') {
             if (soflanAvg <= 0 || chargeAvg > 0 || scratchAvg >= 6.35) continue;
+          } else {
+            // all + 개별 건반 피처(NOTES/CHORD/PEAK/PHRASE/JACK/TRILL/RAND) — 순수 건반곡만(개인차 제외).
+            if (soflanAvg > 0) continue;
+            if (chargeAvg > 0) continue;
+            if (scratchAvg >= 6.35) continue;
           }
           var e = ereterMap.get(normFn(title) + '|' + diff);
           if (!e || e.level == null) {

@@ -441,6 +441,12 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### 2026-06-05 — 분석탭 평가 토글·잔차 이유·등수 막대 + 약점추천 개별 피처 (analysisRender 0.0.63, recommend)
+- [analysisRender.js](modules/analysisRender.js): 막대그래프 **"상대평가 ↔ 개인평가" 토글** 추가 (기본 개인평가). 개인평가=calcWeakness 잔차, 상대평가=등수 기반.
+  - 막대(feature) 클릭 시 **스킬 대상곡 위에 강/약점 이유 박스** — "플레이 한 곡을 분석해보니 〈피처〉가 강한 곡을 다른 패턴보다 ±X% 잘/못 칩니다" (막대 숫자와 일치). 헤더 desc 줄 제거, NOTES 라벨 '물량'.
+  - 상대평가 막대를 **등수 막대**로 — 평균±15등 스케일, 평균선 동적(상위권은 위로 끌어올려 1등이 천장 / 하위권은 아래로 내려 꼴찌가 바닥). 막대 색 녹(강점)/빨(약점), 등수 라벨 흰색.
+- [recommend.js](modules/recommend.js): 약점추천 모드에 **개별 건반 피처 7개**(밀도/동치/순간밀도/계단/축연타/트릴/난타) 추가. 후보 풀은 '건반'(all)과 동일하게 개인차(롱잡·스크·변속) 제외.
+
 ### 2026-06-03 — calcOhsorryCore — 별값 파이프라인 onlyOSR + onlyOSRtoEreter 로 전환 (adopt 대체)
 - 별값 최종을 `onlyOSR`(전체곡 native 50%) + `onlyOSRtoEreter`(ereter★ 변환, OSR13.5 tier) 로 계산 — 기존 `adopt` 대체. ([calcOhsorryCore.js](modules/calcOhsorryCore.js))
 - DB 모드는 `dbData.native_star` 로 추천 baseStar 사용, 비-DB 는 `onlyOSRtoEreter.inferEreter` 로 ★(ereter)/native(onlyOSR) 계산. star=toEreter / native_star=onlyOSR(추천 base).
