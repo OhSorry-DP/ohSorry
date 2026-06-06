@@ -434,6 +434,27 @@
     return strongCount * MISFINGER_WEIGHT_STRONG + randCount * MISFINGER_WEIGHT_RAND;
   }
 
+  // 8배치 trill penalty — 약지·소지가 직접 트릴 치는 배치가 무리 (스크 misfinger 와 반대 위치).
+  //   왼손 키보드 (1P) 약지·소지 = 바깥 K1/K2 쪽 → 정규 무리 = 12/13/23, mirror 시 K6/K7 위치가 바깥 → mirror 무리 = 56/57/67.
+  //   오른손 키보드 (2P) 약지·소지 = 바깥 K6/K7 쪽 → 정규 무리 = 56/57/67, mirror 무리 = 12/13/23.
+  //   6페어 동일 가중치. 스크 misfinger(strong 0.5)보다 약하게 (사용자 정의). count 는 트릴 구간 노트 수 합.
+  var TRILL_WEIGHT = 0.35;
+  function trillPenalty(m, mirrored, isLeftHand) {
+    if (!m || !m.TRILL) return 0;
+    var t = m.TRILL;
+    function sum(keys) {
+      var s = 0;
+      for (var i = 0; i < keys.length; i++) { var e = t[keys[i]]; if (e && e.count) s += e.count; }
+      return s;
+    }
+    var low = sum(['12', '13', '23']);   // 왼쪽 바깥 (K1·K2 약지·소지)
+    var high = sum(['56', '57', '67']);  // 오른쪽 바깥 (K6·K7 약지·소지)
+    var grp;
+    if (isLeftHand) grp = mirrored ? high : low;   // 정규 왼손 = low, mirror = high
+    else            grp = mirrored ? low : high;   // 정규 오른손 = high, mirror = low
+    return grp * TRILL_WEIGHT;
+  }
+
   // 차트 8 배치 매치 — chartStrengthMatchByHand 의 mirror 확장.
   //   8 배치: N/N, M/-, -/M, M/M, F, F M/-, F -/M, F M/M
   //   mirror-invariant 10 feature (FEATS) dot product + mirror 9 feature (MIRROR_STEMS) × 손별 dot product.
@@ -445,7 +466,8 @@
   // opts:
   //   flipOn       true(default) — false 면 4 배치 (정규 mirror 만), flip 안 비교
   //   mirrorOn     true(default) — false 면 mirror 안 비교 (정규 + flip 만)
-  //   misfingerOn  true(default) — false 면 misfinger penalty 안 차감 (디버그/비교용)
+  //   misfingerOn  true(default) — false 면 스크 misfinger penalty 안 차감 (디버그/비교용)
+  //   trillOn      true(default) — false 면 약지·소지 trill penalty 안 차감 (디버그/비교용)
   //   handMode     'both'(default) / 'left' / 'right' — best 결정 시 합계 기준
   // return: { results: [...8 배치...], best: {label, total, flip, mL, mR}, bestLabel, bestTotal }
   //   results[i] — { flip, mL, mR, label, L, R, total, penalty } (total 은 이미 penalty 차감 후)
@@ -454,6 +476,7 @@
     var flipOn = !(opts && opts.flipOn === false);
     var mirrorOn = !(opts && opts.mirrorOn === false);
     var misfingerOn = !(opts && opts.misfingerOn === false);
+    var trillOn = !(opts && opts.trillOn === false);
     var handMode = (opts && opts.handMode) || 'both';
     var vecL = userVec.__vecL || userVec;
     var vecR = userVec.__vecR || userVec;
@@ -495,10 +518,10 @@
           var RmCur = mirR ? applyMirror(Rm) : Rm;
           var sL = invariantScore(vecL, Lpt) + mirrorScore(userVec, 'L', LmCur);
           var sR = invariantScore(vecR, Rpt) + mirrorScore(userVec, 'R', RmCur);
-          // misfinger penalty — 왼손은 항상 isLeftHand=true (1P 키보드, 스크 왼쪽), 오른손은 false.
+          // misfinger + trill penalty — 왼손은 항상 isLeftHand=true (1P 키보드, 스크 왼쪽), 오른손은 false.
           //   flip 영향 없음 (flip 은 어느 m 데이터를 왼손/오른손이 잡는지만 바꿀 뿐, 손가락 매핑 고정).
-          var penL = misfingerOn ? misfingerPenalty(Lm, mirL, true) : 0;
-          var penR = misfingerOn ? misfingerPenalty(Rm, mirR, false) : 0;
+          var penL = (misfingerOn ? misfingerPenalty(Lm, mirL, true) : 0) + (trillOn ? trillPenalty(Lm, mirL, true) : 0);
+          var penR = (misfingerOn ? misfingerPenalty(Rm, mirR, false) : 0) + (trillOn ? trillPenalty(Rm, mirR, false) : 0);
           var scoreL = sL - penL;
           var scoreR = sR - penR;
           var penalty = penL + penR;
@@ -539,8 +562,8 @@
   //   best 배치 자체는 strength 기준 (= 가장 잘 매칭되는 배치로 약점 보완 추천).
   function chartWeaknessMatch8Way(chart, userVec, opts) {
     var s = chartStrengthMatch8Way(chart, userVec, opts);
-    var misfingerOn = !(opts && opts.misfingerOn === false);
-    var bestPen = misfingerOn ? (s.best.penalty || 0) : 0;
+    // penalty 는 strength 계산에서 이미 misfingerOn/trillOn 토글 반영됨 (둘 다 off 면 0). 그대로 사용.
+    var bestPen = s.best.penalty || 0;
     var bestStrengthRaw = (typeof s.best.strengthRaw === 'number') ? s.best.strengthRaw : s.best.total;
     return {
       results: s.results, best: s.best,

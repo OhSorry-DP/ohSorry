@@ -441,6 +441,13 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### 2026-06-06 — calcWeakness — 8배치 무리배치에 약지·소지 트릴 조건 추가 (trillPenalty)
+- [calcWeakness.js](modules/calcWeakness.js): 8배치 평가에 **약지·소지 트릴 penalty** 추가 — 약지·소지가 직접 트릴 치는 배치가 무리.
+  - 기존 스크 misfinger(스크에서 먼 키 K67/K12)와 **반대 위치** — 왼손 바깥 K1·K2 / 오른손 바깥 K6·K7 영역 트릴.
+  - 정규 왼손 무리 = 12/13/23, mirror 왼손 = 56/57/67 (오른손 반대). 6페어 동일 가중치 `TRILL_WEIGHT=0.35` (스크 strong 0.5 보다 약하게).
+  - `chartStrengthMatch8Way` 에 `trillOn` 토글 추가 (기본 on). `chartWeaknessMatch8Way` 의 bestPen 은 penalty 직접 사용 (misfingerOn/trillOn 이미 반영).
+  - 차트 데이터는 `patterns-all-slim.json` 의 m1/m2 `TRILL` 필드(ohSorryRating 에서 생성). gist(c3da608) 배포.
+
 ### 2026-06-05 — 분석탭 평가 토글·잔차 이유·등수 막대 + 약점추천 개별 피처 (analysisRender 0.0.63, recommend)
 - [analysisRender.js](modules/analysisRender.js): 막대그래프 **"상대평가 ↔ 개인평가" 토글** 추가 (기본 개인평가). 개인평가=calcWeakness 잔차, 상대평가=등수 기반.
   - 막대(feature) 클릭 시 **스킬 대상곡 위에 강/약점 이유 박스** — "플레이 한 곡을 분석해보니 〈피처〉가 강한 곡을 다른 패턴보다 ±X% 잘/못 칩니다" (막대 숫자와 일치). 헤더 desc 줄 제거, NOTES 라벨 '물량'.
