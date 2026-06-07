@@ -205,7 +205,7 @@
     // 손 분리 + FLIP / 8 배치 매치 — bestTotal / bestLabel / mirror·flip 부호 등 반환.
     //   chartStrengthMatch8Way 우선 (8 배치), 옛 gist 면 chartStrengthMatchByHand fallback (2 배치).
     //   layoutModeForClear === 'off' 면 정규 N/N 강제 (mirror/flip 안 비교).
-    function chartStrengthMatchByHand(r) {
+    function chartStrengthMatchByHand(r, normalize) {
       if (!userVec || !userVec.__vecL || !userVec.__vecR || !weaknessLib) return null;
       var sid = patternsTitleMap[normFn(r.title || '')];
       if (!sid) return null;
@@ -213,7 +213,8 @@
       if (!cn || !patternsMap[sid] || !patternsMap[sid].c[cn]) return null;
       var chartC = patternsMap[sid].c[cn];
       if (weaknessLib.chartStrengthMatch8Way) {
-        var w8Opts = layoutModeForClear === 'off' ? { flipOn: false, mirrorOn: false } : undefined;
+        var w8Opts = layoutModeForClear === 'off' ? { flipOn: false, mirrorOn: false } : {};
+        if (normalize) w8Opts.normalize = true;
         var w8 = weaknessLib.chartStrengthMatch8Way(chartC, userVec, w8Opts);
         if (!w8) return null;
         return {
@@ -224,6 +225,7 @@
           flip: w8.best.flip, mL: w8.best.mL, mR: w8.best.mR,
           total: w8.best.total,
           results: w8.results,
+          bestNorm: w8.bestNorm,
         };
       }
       // 옛 gist fallback
@@ -477,6 +479,7 @@
       //   opts.limit      — 표시 곡 수 (default 10).
       //   opts.poolSize   — 후보 풀 크기 (default 30). randomize/withPool 일 때만 풀 확대.
       opts = opts || {};
+      var scoreMode = opts.scoreMode === 'v2' ? 'v2' : 'v1';   // v2 = 28dim 배치적합(matchScore) 주력 점수식. 기본 v1 = 기존 동작.
       var LIMIT = typeof opts.limit === 'number' ? opts.limit : 10;
       var RANDOMIZE = !!opts.randomize;
       var WANT_POOL = !!opts.withPool;
@@ -534,15 +537,32 @@
         var layoutGainFit = clamp01(layoutGain / 8);
         var categoryBoost = r._category === 'cleanup' ? 0.10 : r._category === 'easy' ? 0.04 : -0.03;
         r._layoutGain = layoutGain;
-        r._clearScore =
-          diffFit * 0.24 +
-          lampFit * 0.18 +
-          rateFit * 0.18 +
-          countFit * 0.14 +
-          layoutFit * 0.14 +
-          layoutGainFit * 0.06 +
-          djFit * 0.06 +
-          categoryBoost;
+        if (scoreMode === 'v2') {
+          // v2 — "어떻게든 깰 수 있는 방향". 28dim 배치적합(matchScore)을 주력으로,
+          //   클리어 가능성(난이도·램프·점수)은 가드로 유지(못 깰 곡 차단), 배치이득은 강조(배치 걸면 깰 곡).
+          //   matchScore: bestNorm(-1~1, 강점/배치적합) → 0~1. bestNorm 없으면(데이터 미스) 0.5 중립.
+          var matchScore = (typeof r._matchNorm === 'number') ? r._matchNorm : 0.5;   // 풀 내 bestNorm min-max 정규화값 (sample15 의 applyMatchNorm 이 설정)
+          r._matchScore = matchScore;
+          r._clearScore =
+            matchScore    * 0.45 +   // 28dim 배치 적합 — 주력 (내 손으로 배치 걸어서라도 칠 수 있는가)
+            layoutGainFit * 0.10 +   // 배치 걸면 깰 수 있는 곡 강조
+            diffFit       * 0.15 +   // 난이도 가드
+            lampFit       * 0.12 +   // 램프 근접 (깰 수 있는지)
+            rateFit       * 0.10 +   // 점수 근접
+            countFit      * 0.04 +   // 검증곡(클리어 인원)
+            djFit         * 0.04 +
+            categoryBoost;
+        } else {
+          r._clearScore =
+            diffFit * 0.24 +
+            lampFit * 0.18 +
+            rateFit * 0.18 +
+            countFit * 0.14 +
+            layoutFit * 0.14 +
+            layoutGainFit * 0.06 +
+            djFit * 0.06 +
+            categoryBoost;
+        }
         if (r.lampNum === threshold - 1 || (typeof r.scoreRate === 'number' && r.scoreRate >= stageRateTarget - 2)) r._clearType = 'near-lamp';
         else if (typeof r.scoreRate === 'number' && r.scoreRate >= stageRateTarget - 5) r._clearType = 'score-ready';
         else if (countFit >= 0.6) r._clearType = 'popular';
@@ -553,12 +573,31 @@
       // 카테고리 내 모든 분류 합쳐서 sample 15 — bestTotal desc top 15.
       //   cleanup 50/50 보정 — cleanup 곡 절반은 bestTotal 낮은 쪽 잘라내고 cleanup 풀 dv asc 곡으로 교체.
       var canUseByHand = !!(userVec && userVec.__vecL && userVec.__vecR && weaknessLib && (weaknessLib.chartStrengthMatch8Way || weaknessLib.chartStrengthMatchByHand));
+      // v2 — 풀 내 bestNorm min-max 정규화 → _matchNorm (0~1). 유저 절대 실력 레벨을 제거하고 곡 간 상대 변별만 남김.
+      var applyMatchNorm = function (arr) {
+        var mn = Infinity, mx = -Infinity;
+        for (var ai = 0; ai < arr.length; ai++) {
+          var mb = arr[ai]._matchByHand;
+          if (mb && typeof mb.bestNorm === 'number') { if (mb.bestNorm < mn) mn = mb.bestNorm; if (mb.bestNorm > mx) mx = mb.bestNorm; }
+        }
+        var range = mx - mn;
+        for (var aj = 0; aj < arr.length; aj++) {
+          var mb2 = arr[aj]._matchByHand;
+          arr[aj]._matchNorm = (mb2 && typeof mb2.bestNorm === 'number' && range > 0) ? (mb2.bestNorm - mn) / range : 0.5;
+        }
+      };
       var sample15 = function (cat) {
         var pool = cat.hard.concat(cat.easy, cat.cleanup);
+        // 1-pass: 8배치 매치(bestNorm) + 태그 — v2 풀 정규화가 bestNorm 분포를 먼저 알아야 함.
         for (var pi = 0; pi < pool.length; pi++) {
           var r = pool[pi];
-          if (r._matchByHand === undefined) r._matchByHand = canUseByHand ? chartStrengthMatchByHand(r) : null;
+          if (r._matchByHand === undefined) r._matchByHand = canUseByHand ? chartStrengthMatchByHand(r, scoreMode === 'v2') : null;
           if (r._tags === undefined) r._tags = computeChartTags(r);
+        }
+        if (scoreMode === 'v2') applyMatchNorm(pool);
+        // 2-pass: 점수화 (matchScore = 풀 정규화된 _matchNorm)
+        for (var pj = 0; pj < pool.length; pj++) {
+          var r = pool[pj];
           enrichClearCandidate(r);
           if (r._hashtags === undefined) r._hashtags = computeRecHashtags(r);
         }
@@ -720,6 +759,7 @@
       var feats = WEAKNESS_MODE_FEATS[mode] || WEAKNESS_FEATS;
       var flipOn = !(opts && opts.flipOn === false);
       var handMode = (opts && opts.handMode) || 'both';
+      var scoreMode = (opts && opts.scoreMode === 'v2') ? 'v2' : 'v1';   // v2 = 28dim 약점매칭(weakMatchScore) 주력
       var topN = (opts && typeof opts.topN === 'number') ? opts.topN : 5;
       // 풀 + 계층 랜덤 (opts.randomize) — 점수순 상위 POOL_N_W(기본 60) 풀에서 topN 곡을 밴드별 무작위 추출.
       //   리롤마다 변동. opts 없으면(=randomize 미지정) 기존 practiceType 다양성 takeType 로직 유지(결정적).
@@ -926,6 +966,14 @@
           unplayedBonus +
           lampNeed -
           alreadyGoodPenalty;
+        // v2 재구성용 중간값 보존 — 4단계에서 28dim 약점매칭 주력으로 재조합.
+        cc5._weakSignal = weakSignal;
+        cc5._patternScore = patternScore;
+        cc5._difficultyFit = difficultyFit;
+        cc5._deficitScore = deficitScore;
+        cc5._unplayedBonus = unplayedBonus;
+        cc5._lampNeed = lampNeed;
+        cc5._alreadyGoodPenalty = alreadyGoodPenalty;
         cc5.practiceType = practiceType;
         pool.push(cc5);
       }
@@ -942,7 +990,7 @@
         for (var pi = 0; pi < pool.length; pi++) {
           var cp = pool[pi];
           var w8 = weaknessLib.chartStrengthMatch8Way(cp.chartPt, userVec,
-            { feats: feats, handMode: handMode, flipOn: flipOn, mirrorOn: flipOn });
+            { feats: feats, handMode: handMode, flipOn: flipOn, mirrorOn: flipOn, normalize: scoreMode === 'v2' });
           cp._w8 = w8;
           var normal = w8 && Array.isArray(w8.results) ? w8.results.find(function (r) { return !r.flip && !r.mL && !r.mR; }) : null;
           cp.bestTotal = w8 && w8.best ? layoutKeyW(w8.best) : 0;
@@ -955,10 +1003,38 @@
           cp.layoutAssistScore = clamp((cp.bestTotal + 12) / 24, 0, 1);
           cp.layoutGainScore = clamp(cp.layoutGain / 8, 0, 1);
           cp.layoutPracticeScore = clamp((-cp.layoutBaseTotal) / 12, 0, 1);
-          cp.practiceScore +=
-            cp.layoutAssistScore * 0.08 +
-            cp.layoutGainScore * 0.08 +
-            cp.layoutPracticeScore * (strength >= 3 ? 0.08 : strength === 2 ? 0.05 : 0.03);
+          if (scoreMode !== 'v2') {
+            cp.practiceScore +=
+              cp.layoutAssistScore * 0.08 +
+              cp.layoutGainScore * 0.08 +
+              cp.layoutPracticeScore * (strength >= 3 ? 0.08 : strength === 2 ? 0.05 : 0.03);
+          }
+          // v2 는 풀 전체 bestNorm 분포가 필요하므로 아래 루프 후 재구성.
+        }
+        if (scoreMode === 'v2') {
+          // 풀 내 bestNorm min-max → weakMatchScore (풀에서 강점이 가장 안 나오는=약점 곡 = 1). 유저 절대 레벨 제거.
+          var wmn = Infinity, wmx = -Infinity;
+          for (var wi = 0; wi < pool.length; wi++) {
+            var bnw = (pool[wi]._w8 && typeof pool[wi]._w8.bestNorm === 'number') ? pool[wi]._w8.bestNorm : null;
+            if (bnw != null) { if (bnw < wmn) wmn = bnw; if (bnw > wmx) wmx = bnw; }
+          }
+          var wrange = wmx - wmn;
+          for (var wj = 0; wj < pool.length; wj++) {
+            var cpj = pool[wj];
+            var bnj = (cpj._w8 && typeof cpj._w8.bestNorm === 'number') ? cpj._w8.bestNorm : null;
+            var weakMatchScore = (bnj != null && wrange > 0) ? (wmx - bnj) / wrange : 0.5;   // 약점방향: 풀에서 bestNorm 가장 낮은 곡 = 1
+            cpj.weakMatchScore = weakMatchScore;
+            cpj.practiceScore =
+              weakMatchScore      * 0.38 +   // 28dim 약점 매칭 (손별 포함, 풀 상대) — 주력
+              cpj._weakSignal     * 0.18 +
+              cpj._patternScore   * 0.08 +
+              cpj._difficultyFit  * 0.18 +
+              cpj._deficitScore   * 0.10 +
+              cpj.layoutGainScore * 0.08 +
+              cpj._unplayedBonus +
+              cpj._lampNeed -
+              cpj._alreadyGoodPenalty;
+          }
         }
       } else {
         for (var pi2 = 0; pi2 < pool.length; pi2++) {

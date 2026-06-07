@@ -441,6 +441,13 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### 2026-06-08 — 추천 v2: 28dim 배치적합/약점콕 주력 (REC_SCORE_MODE)
+- [calcWeakness.js](modules/calcWeakness.js): `chartStrengthMatch8Way` 에 `normalize` 옵션 + `bestNorm` 추가 — `invMatch`/`mirMatch` 로 **pt(곡 패턴)만 정규화**(vec 은 분자 유지)해 vec 이 전부 동부호인 유저에서도 곡 간 변별 유지. `chartWeaknessMatch8Way` 도 약점방향 `bestNorm` 노출. 기존 `bestTotal`/`best` 는 불변.
+- [recommend.js](modules/recommend.js): **클리어 추천** = 28dim 배치적합(`matchScore`) 주력 + 난이도·램프 가드(깰 수 있는 방향) + 배치이득·추천배치 표시 / **약점 추천** = 28dim 약점콕(`weakMatchScore`, 손별 STAIR·K 포함) 주력. 두 추천 모두 **추천 풀 내 min-max 정규화**로 유저 절대 실력 레벨을 제거하고 곡 간 상대 변별만 반영. 모두 `scoreMode:'v2'` 플래그 뒤 (기본 v1 = 기존).
+- [calcOhsorryCore.js](modules/calcOhsorryCore.js): `REC_SCORE_MODE='v2'` 스위치 — EC/HC/EXH·약점·리롤 전 추천 호출에 전달. `'v1'` 로 한 줄 롤백.
+- [ohsorryRender.js](modules/ohsorryRender.js): 약점 추천 feature 선택 UI 보강 — 건반 종합(all) + 건반 개별 7(물량/동시치기/계단/순간밀도/산발/축연타/트릴) + 개인차 3(롱노트/스크래치/변속) = 10 feature.
+- 검증: ohSorryRating `eval-recscore-v1v2.js` 하니스로 약점형·강점형 유저 v1/v2 비교 — 풀 정규화로 포화 없이 28dim 주력항이 추천 순위에 반영됨 확인.
+
 ### 2026-06-06 — calcWeakness — 8배치 무리배치에 약지·소지 트릴 조건 추가 (trillPenalty)
 - [calcWeakness.js](modules/calcWeakness.js): 8배치 평가에 **약지·소지 트릴 penalty** 추가 — 약지·소지가 직접 트릴 치는 배치가 무리.
   - 기존 스크 misfinger(스크에서 먼 키 K67/K12)와 **반대 위치** — 왼손 바깥 K1·K2 / 오른손 바깥 K6·K7 영역 트릴.

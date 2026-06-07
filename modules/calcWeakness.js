@@ -478,6 +478,7 @@
     var misfingerOn = !(opts && opts.misfingerOn === false);
     var trillOn = !(opts && opts.trillOn === false);
     var handMode = (opts && opts.handMode) || 'both';
+    var normalize = !!(opts && opts.normalize);   // true 면 invariant·mirror 각자 norm 으로 나눠 -1~1 bestNorm 반환 (기존 bestTotal 은 불변)
     var vecL = userVec.__vecL || userVec;
     var vecR = userVec.__vecR || userVec;
     var p1 = (chart && chart.p1) || {}, p2 = (chart && chart.p2) || {};
@@ -503,6 +504,31 @@
       }
       return s;
     }
+    // 정규화 매치 — pt(곡 패턴)만 분모로 정규화하고 vec(강점/약점 잔차)는 분자에 그대로 둔다.
+    //   = "이 곡 패턴 가중으로 본 내 평균 실력" → 곡마다 패턴 분포가 달라 곡 간 변별이 유지됨.
+    //   (분모에 |vec| 를 넣으면 vec 가 전부 동부호인 유저에서 ±1 로 붕괴해 변별력이 사라지므로 pt 만 정규화.)
+    //   invariant·mirror 를 각자 pt 로 정규화해 스케일을 맞춰 mirror raw count 쏠림도 방지.
+    function invMatch(vec, pt) {
+      var num = 0, den = 0;
+      for (var i = 0; i < feats.length; i++) {
+        var f = feats[i];
+        var p = pt[f] || 0;
+        num += (vec[f] || 0) * p;
+        den += Math.abs(p);
+      }
+      return den > 0 ? num / den : 0;
+    }
+    function mirMatch(vec, suffix, m) {
+      if (!m) return null;   // m 없으면 mirror 항 제외 → invariant 만으로 매치
+      var num = 0, den = 0;
+      for (var i = 0; i < MIRROR_STEMS.length; i++) {
+        var ms = MIRROR_STEMS[i];
+        var msrc = mSrc(m, ms);
+        num += (vec[ms.stem + '_' + suffix] || 0) * msrc;
+        den += Math.abs(msrc);
+      }
+      return den > 0 ? num / den : null;
+    }
 
     var results = [];
     var flipCases = flipOn ? [false, true] : [false];
@@ -518,6 +544,16 @@
           var RmCur = mirR ? applyMirror(Rm) : Rm;
           var sL = invariantScore(vecL, Lpt) + mirrorScore(userVec, 'L', LmCur);
           var sR = invariantScore(vecR, Rpt) + mirrorScore(userVec, 'R', RmCur);
+          // 정규화 매치 — invariant·mirror 각각 pt 정규화한 뒤 평균 (mirror 데이터 없으면 invariant 만). normalize 옵션일 때만.
+          var nL = 0, nR = 0;
+          if (normalize) {
+            var imL = invMatch(vecL, Lpt);
+            var mmL = mirMatch(userVec, 'L', LmCur);
+            nL = (mmL == null) ? imL : (imL + mmL) / 2;
+            var imR = invMatch(vecR, Rpt);
+            var mmR = mirMatch(userVec, 'R', RmCur);
+            nR = (mmR == null) ? imR : (imR + mmR) / 2;
+          }
           // misfinger + trill penalty — 왼손은 항상 isLeftHand=true (1P 키보드, 스크 왼쪽), 오른손은 false.
           //   flip 영향 없음 (flip 은 어느 m 데이터를 왼손/오른손이 잡는지만 바꿀 뿐, 손가락 매핑 고정).
           var penL = (misfingerOn ? misfingerPenalty(Lm, mirL, true) : 0) + (trillOn ? trillPenalty(Lm, mirL, true) : 0);
@@ -537,6 +573,7 @@
             scoreL: scoreL, scoreR: scoreR,
             strengthRaw: sL + sR,        // penalty 차감 전 (weakness 계산용)
             total: scoreL + scoreR,      // penalty 차감 후 (misfingerOn=false 면 penalty=0)
+            normL: nL, normR: nR,        // 정규화 손별 점수 (-1~1, normalize 옵션 시. 아니면 0)
             penaltyL: penL, penaltyR: penR, penalty: penalty,
           });
         }
@@ -552,7 +589,13 @@
     for (var ri = 1; ri < results.length; ri++) {
       if (bestKey(results[ri]) > bestKey(best)) best = results[ri];
     }
-    return { results: results, best: best, bestLabel: best.label, bestTotal: bestKey(best) };
+    var bestNorm;
+    if (normalize) {
+      bestNorm = (handMode === 'left') ? best.normL
+               : (handMode === 'right') ? best.normR
+               : ((best.normL + best.normR) / 2);   // both — 양손 평균 (-1~1)
+    }
+    return { results: results, best: best, bestLabel: best.label, bestTotal: bestKey(best), bestNorm: bestNorm };
   }
 
   // 약점 8 배치 매치 — chartStrengthMatch8Way 의 부호 반대.
@@ -569,6 +612,7 @@
       results: s.results, best: s.best,
       bestLabel: s.bestLabel,
       bestTotal: -bestStrengthRaw - bestPen,
+      bestNorm: (typeof s.bestNorm === 'number') ? -s.bestNorm : undefined,   // 정규화 약점 점수 (-1~1, 매칭 낮을수록 ↑ = 약점)
     };
   }
 

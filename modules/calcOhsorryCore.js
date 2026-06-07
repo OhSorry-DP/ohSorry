@@ -1432,25 +1432,27 @@ window.OhsorryCore = {
   const REC_LEVEL_MODE_DEFAULT = recBaseStar != null && recBaseStar < 0.5 ? 'low' : (recBaseStar != null && recBaseStar >= 6 ? 'lv12' : 'all');
   // 추천곡 DJ레벨 미달 풀 기본값 — 'off' (클리어램프 미달 곡만), 토글로 'on' 가능
   const REC_DJ_MODE_DEFAULT = 'off';
+  // 추천 점수식 — 'v2'=28dim 매칭 주력 (클리어: 배치적합·깰수있는방향 / 약점: 약점콕, 손별 STAIR·K 포함). 'v1'=기존. 롤백은 'v1' 로 한 줄.
+  const REC_SCORE_MODE = 'v2';
   const ecBase = recBaseStar != null ? recBaseStar : EC_FALLBACK_BASE;
   // EC fallback (recBaseStar==null, baseStar=0.3) 케이스는 ★ 거리 cutoff 끄기 — 안 그러면 lv11/12 풀이 통째로 컷됨.
   // recommend.js 모듈 (recommendCtx) 의 buildRecs / buildWeaknessRecs 호출.
   //   ctx 없으면 (recommend.js 로드 실패 시) 빈 배열 — 추천 비활성.
   if (recommendCtx) {
     // randomize:true — 후보 풀(EC/HC/EXH 30곡)에서 계층 랜덤 추출. 초기 렌더부터 매번 변동 (리롤과 동일 동작).
-    recsEC.push(...recommendCtx.buildRecs(3, 'ec', ecBase, REC_LEVEL_MODE_DEFAULT, REC_DJ_MODE_DEFAULT, { randomize: true }));
+    recsEC.push(...recommendCtx.buildRecs(3, 'ec', ecBase, REC_LEVEL_MODE_DEFAULT, REC_DJ_MODE_DEFAULT, { randomize: true, scoreMode: REC_SCORE_MODE }));
     if (recBaseStar != null && recBaseStar >= 0.5) {
-      recsHC.push(...recommendCtx.buildRecs(5, 'hc', recBaseStar, REC_LEVEL_MODE_DEFAULT, REC_DJ_MODE_DEFAULT, { randomize: true }));
-      recsEXH.push(...recommendCtx.buildRecs(6, 'exh', recBaseStar, REC_LEVEL_MODE_DEFAULT, REC_DJ_MODE_DEFAULT, { randomize: true }));
+      recsHC.push(...recommendCtx.buildRecs(5, 'hc', recBaseStar, REC_LEVEL_MODE_DEFAULT, REC_DJ_MODE_DEFAULT, { randomize: true, scoreMode: REC_SCORE_MODE }));
+      recsEXH.push(...recommendCtx.buildRecs(6, 'exh', recBaseStar, REC_LEVEL_MODE_DEFAULT, REC_DJ_MODE_DEFAULT, { randomize: true, scoreMode: REC_SCORE_MODE }));
     }
     // 연습곡 — userVec.__vecL/__vecR 있어야 동작. 기본 ☆ 범위는 ctx 자체의 practiceZasaDefault 사용 (zasaMin/Max 생략 가능).
     recsWeakness.push(...recommendCtx.buildWeaknessRecs(recBaseStar, {
-      flipOn: true, handMode: 'both', mode: 'all', topN: 5, strength: 1, randomize: true,
+      flipOn: true, handMode: 'both', mode: 'all', topN: 5, strength: 1, randomize: true, scoreMode: REC_SCORE_MODE,
     }));
   }
   // window.__dp_rerollWeakness(opts) — ohsorryRender UI 토글에서 호출. opts: { flipOn, handMode, mode, topN, strength, zasaMin, zasaMax }
   //   randomize:true 강제 (리롤마다 60풀에서 계층 랜덤). opts 가 randomize 명시하면 그 값 우선.
-  window.__dp_rerollWeakness = (opts) => recommendCtx ? recommendCtx.buildWeaknessRecs(recBaseStar, Object.assign({ randomize: true }, opts || {})) : [];
+  window.__dp_rerollWeakness = (opts) => recommendCtx ? recommendCtx.buildWeaknessRecs(recBaseStar, Object.assign({ randomize: true, scoreMode: REC_SCORE_MODE }, opts || {})) : [];
   console.log(`[step2] 추천곡: EC ${recsEC.length}, HC ${recsHC.length}, EXH ${recsEXH.length}, 연습곡 ${recsWeakness.length}`);
 
   const topEC  = recsEC;
@@ -1468,10 +1470,10 @@ window.OhsorryCore = {
     const dMode = djMode === 'on' ? 'on' : 'off';
     recommendCtx.setLayoutMode(layoutMode === 'off' ? 'off' : 'on');
     if ((stage === 'hc' || stage === 'exh') && base != null && base < 0.5) return [];
-    if (stage === 'exh') return base != null ? recommendCtx.buildRecs(6, 'exh', base, lvMode, dMode, { randomize: true }) : [];
-    if (stage === 'hc')  return base != null ? recommendCtx.buildRecs(5, 'hc', base, lvMode, dMode, { randomize: true }) : [];
+    if (stage === 'exh') return base != null ? recommendCtx.buildRecs(6, 'exh', base, lvMode, dMode, { randomize: true, scoreMode: REC_SCORE_MODE }) : [];
+    if (stage === 'hc')  return base != null ? recommendCtx.buildRecs(5, 'hc', base, lvMode, dMode, { randomize: true, scoreMode: REC_SCORE_MODE }) : [];
     // EC reroll 도 base==null 이면 EC_FALLBACK_BASE + ★ 거리 cutoff 끄기 (초기 계산과 동일).
-    if (stage === 'ec')  return recommendCtx.buildRecs(3, 'ec', base != null ? base : EC_FALLBACK_BASE, lvMode, dMode, { randomize: true });
+    if (stage === 'ec')  return recommendCtx.buildRecs(3, 'ec', base != null ? base : EC_FALLBACK_BASE, lvMode, dMode, { randomize: true, scoreMode: REC_SCORE_MODE });
     return [];
   };
 

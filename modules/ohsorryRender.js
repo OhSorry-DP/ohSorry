@@ -695,10 +695,21 @@ window.OhsorryRender = {
               <select class="wk-select" style="${wkSelect}"
                 onclick="event.stopPropagation();" onmousedown="event.stopPropagation();"
                 onchange="event.stopPropagation();window.__dp_weakness_setMode(this.value);">
-                <option value="all" selected>건반</option>
-                <option value="CHARGE">차지</option>
-                <option value="SCRATCH">스크</option>
-                <option value="SOF-LAN">소프란</option>
+                <option value="all" selected>건반(종합)</option>
+                <optgroup label="건반 개별">
+                  <option value="NOTES">물량</option>
+                  <option value="CHORD">동시치기</option>
+                  <option value="PHRASE">계단</option>
+                  <option value="PEAK">순간밀도</option>
+                  <option value="RAND">산발</option>
+                  <option value="JACK">축연타</option>
+                  <option value="TRILL">트릴</option>
+                </optgroup>
+                <optgroup label="개인차">
+                  <option value="CHARGE">롱노트</option>
+                  <option value="SCRATCH">스크래치</option>
+                  <option value="SOF-LAN">변속</option>
+                </optgroup>
               </select>
               <select class="wk-select" style="${wkSelect}"
                 onclick="event.stopPropagation();" onmousedown="event.stopPropagation();"
