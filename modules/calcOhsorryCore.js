@@ -290,7 +290,10 @@ window.OhsorryCore = {
   //   patterns-all-slim.json: 2348 차트 × 9 feature pt (DP 1P/2P 분리).
   //   calcWeakness.js: 유저 차트 점수 + patterns → 약점/강점 벡터 + chartStrengthMatch helper.
   //   추천에 영향 — sample15 정렬을 강점 매치 desc 로 (기존 count desc 대신).
-  const PATTERNS_URL = GIST_RAW + '/patterns-all-slim.json';
+  // 레벨 구간별 분할 — 평소 11·12 만 로드(대부분 충분), 추천/약점이 하위 레벨을 다룰 때만 lazy 병합.
+  const PATTERNS_URL = GIST_RAW + '/patterns-dp-1112.json';        // 기본 (gameLevel 11/12)
+  const PATTERNS_URL_0810 = GIST_RAW + '/patterns-dp-0810.json';   // lazy (8~10)
+  const PATTERNS_URL_REST = GIST_RAW + '/patterns-dp-rest.json';   // lazy (1~7)
   // feature-scores-slim.json — 차트별 28 feature quantile score (0~100). 연습곡 패턴 점수 + top 3 feature 분류용.
   const FEATURE_SCORES_URL = GIST_RAW + '/feature-scores-slim.json';
   const CALC_WEAKNESS_URL = GIST_RAW + '/calcWeakness.js';
@@ -431,9 +434,9 @@ window.OhsorryCore = {
   // recommendLib — window.OhsorryRecommend (recommend.js gist 로드 결과). createContext(deps) 호출용.
   let recommendLib = null;
   try {
-    const { data: pData, source: pSrc } = await loadWithCache(PATTERNS_URL, 'ohSorry:patterns', true);
+    const { data: pData, source: pSrc } = await loadWithCache(PATTERNS_URL, 'ohSorry:patterns:1112', true);
     patternsMap = pData;
-    console.log(`[step2] patterns-all-slim.json ${Object.keys(patternsMap).length}곡 로드 (${pSrc})`);
+    console.log(`[step2] patterns 11·12 ${Object.keys(patternsMap).length}곡 로드 (${pSrc})`);
   } catch (e) {
     console.warn('[step2] patterns-all-slim.json 로드 실패 (가중치 비활성):', e.message);
   }
@@ -1418,6 +1421,30 @@ window.OhsorryCore = {
     isInfChartInSeries,
     pdLayoutMap: __pdLayoutMap,
   }) : null;
+  // 레벨 구간 lazy 로드 — 추천/약점이 하위 레벨(8~10, 1~7)을 다룰 때 호출. patternsMap/patternsTitleMap 에 in-place
+  //   병합(recommendCtx 가 같은 객체를 참조하므로 자동 반영). 평소엔 11·12 만 로드해 fetch 량 절감.
+  const __loadedPatBands = new Set(['1112']);
+  async function ensurePatternsLevel(band) {
+    if (!patternsMap || __loadedPatBands.has(band)) return;
+    const url = band === '0810' ? PATTERNS_URL_0810 : band === 'rest' ? PATTERNS_URL_REST : null;
+    if (!url) return;
+    __loadedPatBands.add(band);
+    try {
+      const { data } = await loadWithCache(url, 'ohSorry:patterns:' + band, true);
+      let added = 0;
+      for (const id in data) {
+        if (patternsMap[id]) Object.assign(patternsMap[id].c, data[id].c);
+        else { patternsMap[id] = data[id]; added++; }
+        const k = norm(data[id].t || '');
+        if (k && !patternsTitleMap[k]) patternsTitleMap[k] = id;
+      }
+      console.log(`[patterns] ${band} lazy 병합 (+${added}곡, 총 ${Object.keys(patternsMap).length}곡)`);
+    } catch (e) {
+      __loadedPatBands.delete(band);
+      console.warn(`[patterns] ${band} lazy 로드 실패:`, e && e.message);
+    }
+  }
+  window.__dp_ensurePatternsLevel = ensurePatternsLevel;
   // 연습곡 기본 범위는 zasa 11.6~12.7. DP12/DP11+ 클리어 범위 토글과 독립적으로 ☆ 입력값만 따른다.
   // 연습곡 알고리즘 (2026-05-27~) — 복습곡 + 신규 패턴곡 + 실전 연습곡 혼합.
   //   - '건반'은 순수 건반 7 feature 만 사용하며 CHARGE / SCRATCH / SOF-LAN 은 제외.
@@ -1439,6 +1466,9 @@ window.OhsorryCore = {
   // recommend.js 모듈 (recommendCtx) 의 buildRecs / buildWeaknessRecs 호출.
   //   ctx 없으면 (recommend.js 로드 실패 시) 빈 배열 — 추천 비활성.
   if (recommendCtx) {
+    // 저렙 유저(baseStar<6 → lvMode≠'lv12')는 추천 풀이 하위 레벨까지 내려가므로 patterns 하위 구간을 미리 lazy 로드.
+    //   11·12 유저('lv12')는 1112 만으로 충분 → 추가 fetch 없음.
+    if (REC_LEVEL_MODE_DEFAULT !== 'lv12') { await ensurePatternsLevel('0810'); await ensurePatternsLevel('rest'); }
     // randomize:true — 후보 풀(EC/HC/EXH 30곡)에서 계층 랜덤 추출. 초기 렌더부터 매번 변동 (리롤과 동일 동작).
     recsEC.push(...recommendCtx.buildRecs(3, 'ec', ecBase, REC_LEVEL_MODE_DEFAULT, REC_DJ_MODE_DEFAULT, { randomize: true, scoreMode: REC_SCORE_MODE }));
     if (recBaseStar != null && recBaseStar >= 0.5) {
@@ -1452,7 +1482,13 @@ window.OhsorryCore = {
   }
   // window.__dp_rerollWeakness(opts) — ohsorryRender UI 토글에서 호출. opts: { flipOn, handMode, mode, topN, strength, zasaMin, zasaMax }
   //   randomize:true 강제 (리롤마다 60풀에서 계층 랜덤). opts 가 randomize 명시하면 그 값 우선.
-  window.__dp_rerollWeakness = (opts) => recommendCtx ? recommendCtx.buildWeaknessRecs(recBaseStar, Object.assign({ randomize: true, scoreMode: REC_SCORE_MODE }, opts || {})) : [];
+  window.__dp_rerollWeakness = async (opts) => {
+    if (!recommendCtx) return [];
+    const o = Object.assign({ randomize: true, scoreMode: REC_SCORE_MODE }, opts || {});
+    // 약점 추천 zasa 하한이 11 미만(하위 레벨 곡 포함)이면 patterns 하위 구간 lazy 로드.
+    if (typeof o.zasaMin === 'number' && o.zasaMin < 11) { await ensurePatternsLevel('0810'); if (o.zasaMin < 8) await ensurePatternsLevel('rest'); }
+    return recommendCtx.buildWeaknessRecs(recBaseStar, o);
+  };
   console.log(`[step2] 추천곡: EC ${recsEC.length}, HC ${recsHC.length}, EXH ${recsEXH.length}, 연습곡 ${recsWeakness.length}`);
 
   const topEC  = recsEC;
@@ -1463,10 +1499,11 @@ window.OhsorryCore = {
   // 다시 뽑기 버튼에서 사용할 수 있도록 노출
   // (panel 생성 후 클릭으로 재호출 → DOM 부분 업데이트)
   //   layoutMode — 'on'(default) 8 배치 best / 'off' 정규 N/N 강제. closure 의 layoutModeForClear 에 set 해서 chartStrengthMatchByHand 가 참조.
-  window.__dp_rerollRecs = (stage, baseStarOverride, recLevelMode, djMode, layoutMode) => {
+  window.__dp_rerollRecs = async (stage, baseStarOverride, recLevelMode, djMode, layoutMode) => {
     if (!recommendCtx) return [];
     const base = typeof baseStarOverride === 'number' ? baseStarOverride : recBaseStar;
     const lvMode = recLevelMode === 'lv12' ? 'lv12' : recLevelMode === 'low' ? 'low' : REC_LEVEL_MODE_DEFAULT;
+    if (lvMode !== 'lv12') { await ensurePatternsLevel('0810'); await ensurePatternsLevel('rest'); }   // 하위 레벨 추천 — patterns 하위 구간 lazy 로드
     const dMode = djMode === 'on' ? 'on' : 'off';
     recommendCtx.setLayoutMode(layoutMode === 'off' ? 'off' : 'on');
     if ((stage === 'hc' || stage === 'exh') && base != null && base < 0.5) return [];

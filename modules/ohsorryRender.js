@@ -544,8 +544,8 @@ window.OhsorryRender = {
         let recLevelMode = result.recLevelModeDefault === 'lv12' ? 'lv12' : result.recLevelModeDefault === 'low' ? 'low' : 'all';
         let recDjMode = result.recDjModeDefault === 'on' ? 'on' : 'off';
         let recLayoutMode = result.recLayoutModeDefault === 'off' ? 'off' : 'on';
-        const rerenderRecStage = (stage, color) => {
-          const newRecs = window.__dp_rerollRecs(stage, recBaseStar, recLevelMode, recDjMode, recLayoutMode);
+        const rerenderRecStage = async (stage, color) => {
+          const newRecs = await window.__dp_rerollRecs(stage, recBaseStar, recLevelMode, recDjMode, recLayoutMode);
           const container = document.getElementById(`__dp_recs_${stage}`);
           if (container) container.innerHTML = window.__dp_renderRecItems(newRecs, color);
           const counter = document.getElementById(`__dp_recs_count_${stage}`);
@@ -560,9 +560,9 @@ window.OhsorryRender = {
         // 연습곡 (weakness) UI 옵션 상태 — 기본 ☆ 범위는 core 가 사용자 최대 클리어 zasa 기준 [max-1, max] 로 계산 (없으면 게임레벨 fallback).
         const practiceDefault = result.practiceZasaDefault || { min: 11.6, max: 12.7 };
         const weaknessOpts = { mode: 'all', topN: 5, flipOn: true, handMode: 'both', strength: 1, zasaMin: practiceDefault.min, zasaMax: practiceDefault.max };
-        const rerenderWeakness = () => {
+        const rerenderWeakness = async () => {
           if (typeof window.__dp_rerollWeakness !== 'function') return;
-          const newRecs = window.__dp_rerollWeakness({ ...weaknessOpts });
+          const newRecs = await window.__dp_rerollWeakness({ ...weaknessOpts });
           const container = document.getElementById('__dp_recs_weakness');
           if (container) container.innerHTML = window.__dp_renderRecItems(newRecs, '#ff6b9d');
           const counter = document.getElementById('__dp_recs_count_weakness');

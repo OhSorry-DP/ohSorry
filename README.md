@@ -441,6 +441,11 @@ https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/r
 
 ## 변경 이력
 
+### 2026-06-09 — patterns 레벨 구간 분할 lazy 로드 (평소 11·12 만 fetch)
+- [calcOhsorryCore.js](modules/calcOhsorryCore.js): `PATTERNS_URL` 을 `patterns-dp-1112.json`(11·12) 기본으로, `PATTERNS_URL_0810`/`REST` 추가. `ensurePatternsLevel(band)` 로 하위 구간(8~10·1~7)을 `patternsMap`/`patternsTitleMap` 에 in-place 병합(`window.__dp_ensurePatternsLevel`). 초기 추천이 저렙(`lvMode≠'lv12'`)이면 미리 lazy 로드. `__dp_rerollRecs`/`__dp_rerollWeakness` 를 async 화 — reroll/약점 zasaMin<11 시 하위 구간 lazy.
+- [ohsorryRender.js](modules/ohsorryRender.js): reroll 핸들러(`rerenderRecStage`/`rerenderWeakness`) async + await 로 변경.
+- 효과: 대부분(11·12) 유저는 patterns fetch 가 **7MB→1.8MB**. `patterns-all-slim.json` 은 INFOhSorry 빌드 번들 호환 위해 gist 에 유지.
+
 ### 2026-06-08 — 추천 v2: 28dim 배치적합/약점콕 주력 (REC_SCORE_MODE)
 - [calcWeakness.js](modules/calcWeakness.js): `chartStrengthMatch8Way` 에 `normalize` 옵션 + `bestNorm` 추가 — `invMatch`/`mirMatch` 로 **pt(곡 패턴)만 정규화**(vec 은 분자 유지)해 vec 이 전부 동부호인 유저에서도 곡 간 변별 유지. `chartWeaknessMatch8Way` 도 약점방향 `bestNorm` 노출. 기존 `bestTotal`/`best` 는 불변.
 - [recommend.js](modules/recommend.js): **클리어 추천** = 28dim 배치적합(`matchScore`) 주력 + 난이도·램프 가드(깰 수 있는 방향) + 배치이득·추천배치 표시 / **약점 추천** = 28dim 약점콕(`weakMatchScore`, 손별 STAIR·K 포함) 주력. 두 추천 모두 **추천 풀 내 min-max 정규화**로 유저 절대 실력 레벨을 제거하고 곡 간 상대 변별만 반영. 모두 `scoreMode:'v2'` 플래그 뒤 (기본 v1 = 기존).
