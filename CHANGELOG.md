@@ -2,6 +2,9 @@
 
 ohSorry 의 변경 이력입니다. 사용방법은 [README.md](README.md) 를 참고하세요.
 
+### 2026-06-13 — 클리어 추천에도 시리즈(AC/INF) 채보 필터 적용 (LEG 누수 수정)
+- [recommend.js](modules/recommend.js) `buildPools`: 후보 채보에 `isInfChartInSeries` 필터 추가 — INF 유저는 INF 수록 채보만 / AC 유저는 AC 수록만(합본은 weakSource 토글). 연습곡(`buildWeaknessRecs`)엔 이미 있었으나 **클리어 추천 풀엔 빠져 있어** AC 유저에게 INF 전용 LEGGENDARIA 등이 추천되던 누수 수정. checker 에 weakness 와 동일한 chartName(`DP_LEG` 등) 형식 전달 → LEG 는 `legen` 비트, 그 외 `ac` 비트로 정확히 판정. (web=api.js acChecker/infChecker, console/INF=core checker 양쪽 호환)
+
 ### 2026-06-13 — 클리어 추천 배치(8배치) 기본 OFF — 정배치 위주 추천이 기본
 - 문제: 배치추천 토글이 OFF 인데도 추천곡에 #FLIP/미러(배치)가 찍혀 나옴. 원인은 `layoutModeForClear` 기본값이 `'on'` 인데 **초기 추천 빌드가 `setLayoutMode('off')` 를 호출하지 않아** 초기 추천이 8배치 ON 으로 계산됨(웹 유저카드는 클리어추천 배치 토글 미연동이라 항상 ON 상태였음).
 - [recommend.js](modules/recommend.js): `layoutModeForClear` 기본값 `'on'` → **`'off'`** (정배치 위주 추천이 정책 기본. 배치 평가는 UI 토글 `setLayoutMode('on')` 시에만). 정배치 bestLabel 은 `''` 라 배지·#FLIP 해시태그 모두 미표시.

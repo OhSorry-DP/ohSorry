@@ -416,6 +416,11 @@
       };
       for (var i = 0; i < allCharts.length; i++) {
         var c = allCharts[i];
+        // 시리즈(수록) 필터 — INF 유저는 INF 수록 채보만 / AC 유저는 AC 수록만 (LEG 는 legen 비트, 그 외 ac 비트).
+        //   합본은 weakSource 토글에 따라. checker 에 weakness 와 동일한 chartName 형식(DP_LEG 등) 전달.
+        //   (연습곡 buildWeaknessRecs 는 이미 필터하는데 클리어 추천 buildPools 엔 빠져 INF 전용 LEG 등이 누수됐음.)
+        var c_cn = (weaknessLib && weaknessLib.DIFF2CHART && weaknessLib.DIFF2CHART[c.diff]) || c.diff;
+        if (!isInfChartInSeries(c.title, c_cn)) continue;
         if (isLowLevelRec && (c.gameLevel == null || lowAllowedLevels.indexOf(c.gameLevel) === -1)) continue;
         if (recLevelMode === 'lv12' && c.gameLevel !== 12) continue;
         if (recLevelMode === 'lv11+12' && c.gameLevel !== 11 && c.gameLevel !== 12) continue;
