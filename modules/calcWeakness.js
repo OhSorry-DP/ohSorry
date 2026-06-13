@@ -1018,12 +1018,52 @@
     };
   }
 
+  // 약점 vec 의 population 중심화 + 유저내 정규화 (연습곡 추천 전용).
+  //   calcUserWeakness 의 vec 은 같은 ★ bucket 안에서 "pt 높은=더 어려운" 곡을 무겁게 잡아
+  //   전 feature 가 음수로 쏠리는 population 난이도 편향을 가진다(전체평균이 전부 음수).
+  //   → ① popMean(전체 유저 평균 약점)을 빼 개인 편차만 남기고(center)
+  //     ② 유저 내 z-score 로 "이 유저 안에서 상대적으로 어디가 약한가"(shape)만 매칭에 쓴다.
+  //   raw vec(③ 클리어추천·user_radars)은 건드리지 않고, 손별 invariant + mirror dim 만 정규화한 새 vec 반환.
+  //
+  //   popMean: { L:{feat:..}, R:{feat:..}, mir:{STEM_L/R:..} } (weakness-popmean.json — 3550명 평균).
+  //   opts.feats: z 대상 invariant feature (기본 순수건반 7 — 개인차 CHARGE/SCRATCH/SOF-LAN 제외).
+  //   opts.sdFloor: 저변별(프로파일 평평) 유저 노이즈 증폭 가드 — z 분모 sd 하한 (기본 0.7).
+  var WEAKNESS_KB_FEATS = ['NOTES', 'CHORD', 'PEAK', 'PHRASE', 'JACK', 'TRILL', 'RAND'];
+  function normalizeWeaknessVec(userVec, popMean, opts) {
+    if (!userVec || !popMean) return userVec;
+    var feats = (opts && Array.isArray(opts.feats)) ? opts.feats : WEAKNESS_KB_FEATS;
+    var sdFloor = (opts && typeof opts.sdFloor === 'number') ? opts.sdFloor : 0.7;
+    var popL = popMean.L || {}, popR = popMean.R || {}, popMir = popMean.mir || {};
+    // 그룹 내 center(pop 빼기) → 유저내 z (mean 0, sd 1; sd 는 sdFloor 로 하한).
+    function centerZ(srcObj, keys, popObj) {
+      var d = [], i;
+      for (i = 0; i < keys.length; i++) d.push(((srcObj && srcObj[keys[i]]) || 0) - (popObj[keys[i]] || 0));
+      var m = 0; for (i = 0; i < d.length; i++) m += d[i] / d.length;
+      var v = 0; for (i = 0; i < d.length; i++) v += (d[i] - m) * (d[i] - m);
+      var sd = Math.sqrt(v / d.length);
+      if (sd < sdFloor) sd = sdFloor;   // 평평한 프로파일은 약한 z → 거짓 약점 억제
+      var out = {};
+      for (i = 0; i < keys.length; i++) out[keys[i]] = (d[i] - m) / sd;
+      return out;
+    }
+    var vecLsrc = userVec.__vecL || userVec, vecRsrc = userVec.__vecR || userVec;
+    var zL = centerZ(vecLsrc, feats, popL);
+    var zR = centerZ(vecRsrc, feats, popR);
+    var mirKeys = []; for (var mi = 0; mi < MIRROR_STEMS.length; mi++) { mirKeys.push(MIRROR_STEMS[mi].stem + '_L'); mirKeys.push(MIRROR_STEMS[mi].stem + '_R'); }
+    var zMir = centerZ(userVec, mirKeys, popMir);
+    var out = { __vecL: zL, __vecR: zR, __normalized: true };
+    for (var fi = 0; fi < feats.length; fi++) out[feats[fi]] = (zL[feats[fi]] + zR[feats[fi]]) / 2;  // invariant 양손 평균
+    for (var ki = 0; ki < mirKeys.length; ki++) out[mirKeys[ki]] = zMir[mirKeys[ki]];
+    return out;
+  }
+
   return {
     FEATS: FEATS,
     DIFF2CHART: DIFF2CHART,
     DEFAULT_PATTERNS_URL: DEFAULT_PATTERNS_URL,
     avgPt: avgPt,
     calcUserWeakness: calcUserWeakness,
+    normalizeWeaknessVec: normalizeWeaknessVec,
     chartStrengthMatch: chartStrengthMatch,
     chartWeaknessMatch: chartWeaknessMatch,
     chartStrengthMatchByHand: chartStrengthMatchByHand,

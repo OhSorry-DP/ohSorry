@@ -300,6 +300,9 @@ window.OhsorryCore = {
   // rate-reference-slim.json — 3550명 ereter-fetched 평균 EX rate (estEc/Hc/Exh × 0.5 bucket, isotonic monotonic).
   //   calcWeakness 에 rateRef 전달 시 absolute reference 기준 잔차 분석 → 사용자간 vec 직접 비교 가능.
   const RATE_REF_URL = GIST_RAW + '/rate-reference-slim.json';
+  // weakness-popmean.json — 3396명 평균 약점 vec (손별 invariant 7×2 + mirror 18). 연습추천 약점 정규화 baseline.
+  //   recommend.buildWeaknessRecs 가 normalizeWeaknessVec 로 빼서 개인 약점 shape 만 매칭. 실패해도 raw fallback.
+  const WEAKNESS_POPMEAN_URL = GIST_RAW + '/weakness-popmean.json';
   // recommend.js — 추천 관련 함수 모듈 (chartStrengthMatch / chartStrengthMatchByHand / computeChartTags /
   //   computeRecHashtags / buildPools / buildRecs / buildWeaknessRecs).
   //   calcOhsorryCore 가 이 모듈 호출하면 함수 본체는 단일 곳 (gist) 에서 관리 → ohSorryWeb / INFOhSorry 양쪽 reuse.
@@ -430,7 +433,7 @@ window.OhsorryCore = {
   }
 
   // 패턴 데이터 + weakness 모듈 fetch (실패 시 추천 가중치 없이 진행, 기존 정렬 fallback)
-  let patternsMap = null, weaknessLib = null, rateRefData = null, featureScoresMap = null;
+  let patternsMap = null, weaknessLib = null, rateRefData = null, featureScoresMap = null, weaknessPopMeanData = null;
   // recommendLib — window.OhsorryRecommend (recommend.js gist 로드 결과). createContext(deps) 호출용.
   let recommendLib = null;
   try {
@@ -475,6 +478,14 @@ window.OhsorryCore = {
     console.log(`[step2] rate-reference-slim.json 로드 (${rrSrc})`);
   } catch (e) {
     console.warn('[step2] rate-reference-slim.json 로드 실패 (self-relative fallback):', e.message);
+  }
+  // weakness-popmean — 연습추천 약점 vec 정규화용. 실패해도 raw vec fallback (정규화 skip).
+  try {
+    const { data: pmData, source: pmSrc } = await loadWithCache(WEAKNESS_POPMEAN_URL, 'ohSorry:weaknessPopMean', true);
+    weaknessPopMeanData = pmData;
+    console.log(`[step2] weakness-popmean.json 로드 (${pmSrc})`);
+  } catch (e) {
+    console.warn('[step2] weakness-popmean.json 로드 실패 (raw vec fallback):', e.message);
   }
 
   // -------- 1. 곡명 정규화 + 인덱싱 --------
@@ -1418,6 +1429,7 @@ window.OhsorryCore = {
     seriesNames, textageSeriesByNorm,
     allCharts, ereterMap, ratingMap, zasaMap, zasaAvgByGameLv,
     featureScoresMap,
+    weaknessPopMean: weaknessPopMeanData,
     isInfChartInSeries,
     pdLayoutMap: __pdLayoutMap,
   }) : null;

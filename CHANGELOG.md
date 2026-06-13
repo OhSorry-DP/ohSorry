@@ -2,6 +2,15 @@
 
 ohSorry 의 변경 이력입니다. 사용방법은 [README.md](README.md) 를 참고하세요.
 
+### 2026-06-13 — 연습추천 약점 vec 의 population/density 편향 제거 (usernorm 정규화)
+- 문제: calcWeakness 약점 vec 이 같은 ★ bucket 안 "pt 높은=더 어려운" 곡 가중으로 전 feature 가 음수로 쏠려(전체 유저 평균이 전부 음수), 약점추천이 개인 약점이 아니라 **population 난이도(밀도 높은 PEAK 곡)** 를 보고 모두에게 비슷한 곡을 추천. 3550명 검증에서 1순위 약점이 TRILL/PHRASE 에 85% 집중.
+- [calcWeakness.js](modules/calcWeakness.js): `normalizeWeaknessVec(userVec, popMean, opts)` 추가·export — 손별 invariant 7 + mirror 18 dim 에 ① population 중심화(popMean 빼기) ② 유저내 z-score(상대 약점 shape) 적용. 저변별(프로파일 평평) 유저 노이즈 증폭 가드(sdFloor=0.7). raw vec(③ 클리어추천·user_radars)은 불변.
+- [recommend.js](modules/recommend.js): `buildWeaknessRecs` 의 약점 매칭(8Way `weakMatchScore`·`weakSignal`·`weakFeats`)을 정규화 vec(`matchVec`)으로 교체 — 단 개인차 모드(CHARGE/SCRATCH/SOF-LAN)는 잔차가 진짜 개인 적성이라 raw 유지. `deps.weaknessPopMean` 없으면 raw fallback(기존 동작).
+- [calcOhsorryCore.js](modules/calcOhsorryCore.js): `weakness-popmean.json` fetch → recommend ctx `weaknessPopMean` 전달. 실패해도 raw fallback.
+- popMean 데이터·생성기는 ohSorryRating(`dist/weakness-popmean.json`, `scripts/gen-weakness-popmean.js`).
+- 검증(3550명): 1순위 약점 분포 엔트로피 1.61→2.60bit, TRILL/PHRASE 독식 85%→32%. production 8Way 매처 추천 다양성 — 유저간 Jaccard 0.21→0.06, 고유 추천곡 150→280. weakMatchScore 가중치(0.38) 상향은 성격이 달라 **별도 실험으로 분리**.
+- **gist 미배포** — 배포 전까지 fetch 실패→raw fallback 이라 라이브 동작 불변.
+
 ### 2026-06-13 — 문서 구조 개편 (사용법 / 상세 / 이력 분리)
 - README 를 사용방법 중심으로 정리. 파일 구조·모듈 구조·데이터 갱신·URL 모음 등 개발 상세는 `docs/`(architecture / modules / algorithms / data-pipeline) 로 분리하고 링크.
 - 변경 이력을 README 에서 이 `CHANGELOG.md` 로 분리.

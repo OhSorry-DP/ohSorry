@@ -122,6 +122,9 @@
     var featureScoresMap = deps.featureScoresMap || null;
     var isInfChartInSeries = typeof deps.isInfChartInSeries === 'function' ? deps.isInfChartInSeries : function () { return true; };
     var pdLayoutMap = deps.pdLayoutMap || null;
+    //   weaknessPopMean: weakness-popmean.json ({L,R,mir}) — 연습추천 약점 vec 정규화 baseline.
+    //     없으면 raw vec 으로 fallback (기존 동작).
+    var weaknessPopMean = deps.weaknessPopMean || null;
 
     // CHART2DIFF — patternsMap chartName (DP_HYP 등) → diff 문자열 (HYPER 등). weaknessLib.DIFF2CHART 의 역.
     var CHART2DIFF_REC = {};
@@ -757,6 +760,16 @@
       if (baseStar == null) baseStar = 11;
       var mode = (opts && opts.mode) || 'all';
       var feats = WEAKNESS_MODE_FEATS[mode] || WEAKNESS_FEATS;
+      // 약점 vec 정규화 (연습추천 전용) — population 중심화 + 유저내 z 로 "이 유저 안에서 상대적으로 약한" shape 매칭.
+      //   raw vec 은 같은 ★대 난이도 편향으로 전 feature 가 음수 → 모두에게 TRILL/PHRASE/PEAK(밀도) 곡만 추천되던 문제 교정.
+      //   개인차 모드(CHARGE/SCRATCH/SOF-LAN)는 잔차가 진짜 개인 적성이라 센터링 부적절 → raw 유지.
+      //   popMean(weakness-popmean.json) 없으면 raw fallback (기존 동작 보존).
+      var PERSONAL_WEAK_MODES = { 'CHARGE': 1, 'SCRATCH': 1, 'SOF-LAN': 1 };
+      var matchVec = userVec;
+      //   정규화는 항상 전체 7건반 shape 으로 (단일건반 모드도) — 매처가 mode feats subset 을 읽는다.
+      if (weaknessPopMean && weaknessLib && weaknessLib.normalizeWeaknessVec && !PERSONAL_WEAK_MODES[mode]) {
+        matchVec = weaknessLib.normalizeWeaknessVec(userVec, weaknessPopMean, {});
+      }
       var flipOn = !(opts && opts.flipOn === false);
       var handMode = (opts && opts.handMode) || 'both';
       var scoreMode = (opts && opts.scoreMode === 'v2') ? 'v2' : 'v1';   // v2 = 28dim 약점매칭(weakMatchScore) 주력
@@ -922,7 +935,7 @@
       }
 
       // 3단계 — 점수화. 복습/신규/실전 연습 혼합.
-      var weakFeats = feats.filter(function (f) { return (userVec[f] || 0) < 0; });
+      var weakFeats = feats.filter(function (f) { return (matchVec[f] || 0) < 0; });
       var pool = [];
       for (var ci5 = 0; ci5 < candidates.length; ci5++) {
         var cc5 = candidates[ci5];
@@ -942,7 +955,7 @@
         var weakSignal = 0, weakWeight = 0;
         for (var xi = 0; xi < arr.length; xi++) {
           var x = arr[xi];
-          var uv = userVec[x.f] || 0;
+          var uv = matchVec[x.f] || 0;
           var w = Math.max(0, -uv);
           weakSignal += (x.s / 100) * w;
           weakWeight += w;
@@ -989,7 +1002,7 @@
       if (weaknessLib && weaknessLib.chartStrengthMatch8Way) {
         for (var pi = 0; pi < pool.length; pi++) {
           var cp = pool[pi];
-          var w8 = weaknessLib.chartStrengthMatch8Way(cp.chartPt, userVec,
+          var w8 = weaknessLib.chartStrengthMatch8Way(cp.chartPt, matchVec,
             { feats: feats, handMode: handMode, flipOn: flipOn, mirrorOn: flipOn, normalize: scoreMode === 'v2' });
           cp._w8 = w8;
           var normal = w8 && Array.isArray(w8.results) ? w8.results.find(function (r) { return !r.flip && !r.mL && !r.mR; }) : null;
