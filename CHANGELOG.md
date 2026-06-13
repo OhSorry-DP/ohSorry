@@ -2,6 +2,11 @@
 
 ohSorry 의 변경 이력입니다. 사용방법은 [README.md](README.md) 를 참고하세요.
 
+### 2026-06-13 — 클리어 추천 배치(8배치) 기본 OFF — 정배치 위주 추천이 기본
+- 문제: 배치추천 토글이 OFF 인데도 추천곡에 #FLIP/미러(배치)가 찍혀 나옴. 원인은 `layoutModeForClear` 기본값이 `'on'` 인데 **초기 추천 빌드가 `setLayoutMode('off')` 를 호출하지 않아** 초기 추천이 8배치 ON 으로 계산됨(웹 유저카드는 클리어추천 배치 토글 미연동이라 항상 ON 상태였음).
+- [recommend.js](modules/recommend.js): `layoutModeForClear` 기본값 `'on'` → **`'off'`** (정배치 위주 추천이 정책 기본. 배치 평가는 UI 토글 `setLayoutMode('on')` 시에만). 정배치 bestLabel 은 `''` 라 배지·#FLIP 해시태그 모두 미표시.
+- [calcOhsorryCore.js](modules/calcOhsorryCore.js): 초기 EC/HC/EXH 빌드 전 `setLayoutMode('off')` 명시 + 결과에 `recLayoutModeDefault:'off'` 추가(콘솔/INF ohsorryRender 배치추천 토글 UI 도 기본 OFF 로 일치).
+
 ### 2026-06-13 — 클리어추천(③) cold-start 풀 전멸 가드 + 저레벨 추천 base 를 star 로
 - 문제: 클리어 램프 곡이 거의 없는 cold-start/신규 유저(예: 어제 등록·EC 클리어 0)는 ③ 클리어추천 EC/HC/EXH 가 **전부 0곡**. 원인은 `buildPools` 의 `topClearStar`(해당 stage 클리어곡 ★ 최댓값)=0 → `hardMax = topClearStar + 0.3d = 0` → **estEC ★0 = 11레벨 시작**이라 `dv > 0` 전곡이 컷. ④ 연습추천은 `baseStar=11` fallback 으로 살아남아 "③만 빔" 증상.
 - [recommend.js](modules/recommend.js): `buildPools` 에 floor 가드 — `topClearStar < baseStar` 면 `baseStar` 로 floor. cold-start 도 baseStar 근처(**11레벨 위주 + 12레벨 하단**) 풀 구성. `topClearStar ≥ baseStar` 정상 유저는 미발동(회귀 없음). 검증: base 0.87 EC 풀 = 11레벨 234곡 + 12레벨 28곡.

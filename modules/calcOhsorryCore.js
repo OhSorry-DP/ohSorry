@@ -1474,6 +1474,8 @@ window.OhsorryCore = {
   const REC_LEVEL_MODE_DEFAULT = recBaseStar != null && recBaseStar < 0.5 ? 'low' : (recBaseStar != null && recBaseStar >= 6 ? 'lv12' : 'all');
   // 추천곡 DJ레벨 미달 풀 기본값 — 'off' (클리어램프 미달 곡만), 토글로 'on' 가능
   const REC_DJ_MODE_DEFAULT = 'off';
+  // 클리어 추천 배치 평가 기본값 — 'off' (정배치 위주 추천이 기본). UI 토글로 'on'(8배치) 가능.
+  const REC_LAYOUT_MODE_DEFAULT = 'off';
   // 추천 점수식 — 'v2'=28dim 매칭 주력 (클리어: 배치적합·깰수있는방향 / 약점: 약점콕, 손별 STAIR·K 포함). 'v1'=기존. 롤백은 'v1' 로 한 줄.
   const REC_SCORE_MODE = 'v2';
   const ecBase = recBaseStar != null ? recBaseStar : EC_FALLBACK_BASE;
@@ -1484,6 +1486,8 @@ window.OhsorryCore = {
     // 저렙 유저(baseStar<6 → lvMode≠'lv12')는 추천 풀이 하위 레벨까지 내려가므로 patterns 하위 구간을 미리 lazy 로드.
     //   11·12 유저('lv12')는 1112 만으로 충분 → 추가 fetch 없음.
     if (REC_LEVEL_MODE_DEFAULT !== 'lv12') { await ensurePatternsLevel('0810'); await ensurePatternsLevel('rest'); }
+    // 초기 추천도 배치 기본값(OFF=정배치)으로 계산 — 토글 OFF 인데 #FLIP/미러 배지가 찍히던 문제 방지.
+    recommendCtx.setLayoutMode(REC_LAYOUT_MODE_DEFAULT);
     // randomize:true — 후보 풀(EC/HC/EXH 30곡)에서 계층 랜덤 추출. 초기 렌더부터 매번 변동 (리롤과 동일 동작).
     recsEC.push(...recommendCtx.buildRecs(3, 'ec', ecBase, REC_LEVEL_MODE_DEFAULT, REC_DJ_MODE_DEFAULT, { randomize: true, scoreMode: REC_SCORE_MODE }));
     if (recBaseStar != null && recBaseStar >= 0.5) {
@@ -1621,6 +1625,8 @@ window.OhsorryCore = {
     recBaseMode, recBaseStar,
     recLevelModeDefault: REC_LEVEL_MODE_DEFAULT,
     recDjModeDefault: REC_DJ_MODE_DEFAULT,
+    recLayoutModeDefault: REC_LAYOUT_MODE_DEFAULT,   // 콘솔/INF 배치추천 토글 기본값 (ohsorryRender) — OFF
+
     // recommend.js 의 context 에서 계산된 값 — ohsorryRender UI (연습곡 zasa 토글 기본값) 가 사용.
     //   recommendLib 로드 실패 시 (recommendCtx=null) fallback 값.
     practiceZasaDefault: recommendCtx ? recommendCtx.practiceZasaDefault : { min: 11.6, max: 12.7 },

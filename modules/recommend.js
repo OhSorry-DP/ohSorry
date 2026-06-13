@@ -208,7 +208,8 @@
     // 배치 추천 토글 — 'on' = 8 배치 best (default), 'off' = 정규 N/N 강제.
     //   chartStrengthMatchByHand 가 chartStrengthMatch8Way 의 opts 로 활용.
     //   외부 (UI 토글) 가 setLayoutMode 로 갱신.
-    var layoutModeForClear = 'on';
+    // 기본 OFF — 정배치 위주 추천이 기본. 배치(8배치 mirror/flip) 평가는 UI 토글로 setLayoutMode('on') 시에만.
+    var layoutModeForClear = 'off';
 
     // ─── 차트 매칭 함수 ────────────────────────────────────────────────
     // 양손 합산 — fallback (8 way / by hand 못 쓸 때 정렬용). 0 = 매칭 불가.
