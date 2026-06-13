@@ -24,6 +24,7 @@
 //     myIidxId,           // 본인 iidx_id — ranking 표에서 본인 row 강조용
 //     selectedFeat,       // 'NOTES' 등. null 이면 자동으로 가장 강점인 feat (max% 최대) 선택.
 //     weaknessLib,        // window.OhsorryWeakness (선택, 없으면 window 에서 lookup)
+//     weaknessPopMean,    // weakness-popmean.json ({L,R,mir}) — 개인평가 막대/이유배지 usernorm baseline (선택, 없으면 raw 잔차)
 //   }
 //
 // 클릭 위임 — 클라이언트가 직접 처리 권장:
@@ -123,7 +124,8 @@
   //   0.0.61 — 상대평가 막대를 절대 등수 스케일(1등=100%, 15등=0%, 16등+ 빈 막대)로 + 막대/등수 라벨 색을 다시 녹(강점)/빨(약점)로 복귀.
   //   0.0.62 — 상대평가 막대를 평균±15등 스케일로(평균선=meanLineP, 상위 유저는 평균선 위로 끌어올려 1등이 천장). 막대 색은 녹/빨, 등수 라벨은 흰색. 점선 위치도 평균선과 동기화.
   //   0.0.63 — 하위권(아래 15등 여유 없음)도 평균선을 아래로 내려 꼴찌가 바닥에 닿게 (total 사용, 상위/하위 대칭). 등수 라벨 볼드 제거(normal).
-  var VERSION = '0.0.63';
+  //   0.0.64 — 개인평가 막대 + 잔차 이유배지에 usernorm 적용 (7건반 normalizeWeaknessVec=popMean 빼고 유저내 z, 개인차는 7건반 raw 분포 sd 로 z 근사 → 막대 10피처 스케일 통일). opts.weaknessPopMean 없으면 raw fallback.
+  var VERSION = '0.0.64';
   var SKILL_WEIGHTS = (function () {
     var ws = [];
     for (var i = 0; i < 5; i++) ws.push(1.0);
@@ -163,6 +165,40 @@
     if (!m) return s;
     var groups = m[2].match(/.{1,4}/g) || [m[2]];
     return (m[1] ? m[1] + '-' : '') + groups.join('-');
+  }
+
+  // personal 막대/이유배지용 usernorm vec — 막대 10피처 스케일 통일.
+  //   7건반(WEAKNESS_KB_FEATS): normalizeWeaknessVec (popMean 빼고 손별 유저내 z).
+  //   개인차(CHARGE/SCRATCH/SOF-LAN): popMean·손분리 개념이 없어 raw 잔차를 7건반 raw 잔차의 유저내 sd 로 나눠
+  //     z 스케일 근사 (중심 보정은 막대의 userMean 차감이 처리) → 7건반 z 막대와 길이 비교가 가능.
+  //   popMean 미로드/미지원이면 userVec 그대로(기존 raw 동작). 막대/이유배지 전용 — ③④추천엔 안 씀.
+  function personalUsernormVec(opts) {
+    var uv = opts.userVec;
+    var wl = opts.weaknessLib || (typeof window !== 'undefined' && window.OhsorryWeakness);
+    if (!opts.weaknessPopMean || !wl || typeof wl.normalizeWeaknessVec !== 'function') return uv;
+    var nv = wl.normalizeWeaknessVec(uv, opts.weaknessPopMean, {});
+    var i, fk, rv;
+    // 7건반 raw 잔차의 유저내 mean/sd — 개인차 z 근사 분모.
+    var kbRaw = [];
+    for (i = 0; i < FEATS.length; i++) {
+      fk = FEATS[i].k;
+      if (typeof nv[fk] === 'number') { rv = uv && uv[fk]; if (typeof rv === 'number') kbRaw.push(rv); }
+    }
+    var n = Math.max(1, kbRaw.length);
+    var m = 0; for (i = 0; i < kbRaw.length; i++) m += kbRaw[i] / n;
+    var vv = 0; for (i = 0; i < kbRaw.length; i++) vv += (kbRaw[i] - m) * (kbRaw[i] - m);
+    var sd = Math.sqrt(vv / n) || 1;
+    var out = {};
+    for (i = 0; i < FEATS.length; i++) {
+      fk = FEATS[i].k;
+      if (typeof nv[fk] === 'number') {
+        out[fk] = nv[fk];                                                  // 7건반: normalizeWeaknessVec z
+      } else {
+        rv = (uv && typeof uv[fk] === 'number') ? uv[fk] : 0;
+        out[fk] = (rv - m) / sd;                                           // 개인차: 7건반 raw 분포로 z 근사
+      }
+    }
+    return out;
   }
 
   // 가장 강점인 feat 선택 — max% (score / maxScore) 최대값. null 이면 (데이터 부족) null 반환.
@@ -413,10 +449,11 @@
 
     // 잔차 강/약점 이유 — 헤더(피처 라벨)와 등수 행 사이에 배치 (랭킹보기 토글해도 유지됨).
     //   기준: userVec[k] - 내 10 feature 잔차 평균 (= 막대 v값). 배지·막대 색·문구 ±X% 모두 이 값 부호/크기로 일치.
-    var residualValue = (userVec && typeof userVec[k] === 'number') ? userVec[k] : 0;
+    var personalVec = personalUsernormVec(opts);   // 7건반 usernorm z + 개인차 raw — 막대와 동일 base (부호/평균 일치)
+    var residualValue = (personalVec && typeof personalVec[k] === 'number') ? personalVec[k] : 0;
     var vecMeanForReason = 0, vmN = 0;
     for (var vmi = 0; vmi < FEATS.length; vmi++) {
-      var vmv = userVec && userVec[FEATS[vmi].k];
+      var vmv = personalVec && personalVec[FEATS[vmi].k];
       if (typeof vmv === 'number') { vecMeanForReason += vmv; vmN++; }
     }
     vecMeanForReason = vmN > 0 ? vecMeanForReason / vmN : 0;
@@ -567,7 +604,7 @@
     var sf = opts.selectedFeat || pickStrongestFeat(opts.userPatternScore, opts.maxScoreByFeat);
     var viewMode = opts.viewMode === 'ranking' ? 'ranking' : 'skill';
     var barMode = opts.barMode === 'relative' ? 'relative' : 'personal';  // 기본 개인평가(잔차)
-    var bar = buildBarChart(opts.userPatternScore, opts.maxScoreByFeat, sf, opts.percentiles, barMode, opts.userVec);
+    var bar = buildBarChart(opts.userPatternScore, opts.maxScoreByFeat, sf, opts.percentiles, barMode, personalUsernormVec(opts));
     var meta = opts.userVec.__meta || {};
     var lvParts = Object.keys(meta.lvCounts || {}).sort().map(function (lv) {
       return 'lv' + lv + ' ' + meta.lvCounts[lv];

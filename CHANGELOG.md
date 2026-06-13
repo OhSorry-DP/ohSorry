@@ -2,6 +2,9 @@
 
 ohSorry 의 변경 이력입니다. 사용방법은 [README.md](README.md) 를 참고하세요.
 
+### 2026-06-14 — analysisRender 0.0.64: 개인평가 막대 + 이유배지 usernorm 정규화
+- [analysisRender.js](modules/analysisRender.js): 개인평가 막대 10피처를 usernorm z 스케일로 통일 — 7건반은 `normalizeWeaknessVec`(popMean 빼고 손별 유저내 z), 개인차 3개(롱노트·스크래치·변속)는 popMean·손분리 개념이 없어 **7건반 raw 잔차 분포 sd 로 z 근사**(중심 보정은 막대의 userMean 차감이 처리) → 막대 길이 비교 일관. 잔차 이유배지도 같은 base(`personalUsernormVec`)로 부호·색 일치. `opts.weaknessPopMean` 없으면 raw fallback(기존 동작). ③④추천(7건반+mirror)엔 안 씀 — 막대/이유배지 전용.
+
 ### 2026-06-13 — 클리어 추천에도 시리즈(AC/INF) 채보 필터 적용 (LEG 누수 수정)
 - [recommend.js](modules/recommend.js) `buildPools`: 후보 채보에 `isInfChartInSeries` 필터 추가 — INF 유저는 INF 수록 채보만 / AC 유저는 AC 수록만(합본은 weakSource 토글). 연습곡(`buildWeaknessRecs`)엔 이미 있었으나 **클리어 추천 풀엔 빠져 있어** AC 유저에게 INF 전용 LEGGENDARIA 등이 추천되던 누수 수정. checker 에 weakness 와 동일한 chartName(`DP_LEG` 등) 형식 전달 → LEG 는 `legen` 비트, 그 외 `ac` 비트로 정확히 판정. (web=api.js acChecker/infChecker, console/INF=core checker 양쪽 호환)
 
