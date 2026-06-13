@@ -125,6 +125,15 @@
     //   weaknessPopMean: weakness-popmean.json ({L,R,mir}) — 연습추천 약점 vec 정규화 baseline.
     //     없으면 raw vec 으로 fallback (기존 동작).
     var weaknessPopMean = deps.weaknessPopMean || null;
+    // ③ 클리어추천 강점매치(matchScore)용 정규화 vec — ④와 동일 normalizeWeaknessVec(7건반 + mirror18).
+    //   raw vec 의 population/density 편향(전 feature 음수 쏠림) 때문에 강점매치가 "내 강점"이 아니라
+    //   "population 강점(CHORD/PEAK)"을 보고 모두에게 비슷한 곡을 추천하던 문제 교정.
+    //   matchScore 의 bestNorm 입력에만 사용 — layout/bestTotal/layoutGain·난이도(diffFit/lampFit)·풀구성은 raw 불변.
+    //   popMean 없거나 userVec 미비 시 userVec 그대로 = 기존 동작과 완전 동일.
+    var clearMatchVec = (weaknessPopMean && weaknessLib && typeof weaknessLib.normalizeWeaknessVec === 'function'
+      && userVec && userVec.__vecL && userVec.__vecR)
+      ? weaknessLib.normalizeWeaknessVec(userVec, weaknessPopMean, {})
+      : userVec;
 
     // CHART2DIFF — patternsMap chartName (DP_HYP 등) → diff 문자열 (HYPER 등). weaknessLib.DIFF2CHART 의 역.
     var CHART2DIFF_REC = {};
@@ -220,6 +229,17 @@
         if (normalize) w8Opts.normalize = true;
         var w8 = weaknessLib.chartStrengthMatch8Way(chartC, userVec, w8Opts);
         if (!w8) return null;
+        var bestNorm = w8.bestNorm;
+        // matchScore 입력(bestNorm)만 usernorm vec 으로 — "내 강점 shape" 에 맞는 곡 선정.
+        //   7건반 + mirror 기준(개인차 CHARGE/SCRATCH/SOF-LAN 제외). layout/bestTotal/layoutGain 은 위 raw w8 그대로.
+        //   clearMatchVec === userVec (popMean 없음) 이면 skip → 기존 raw bestNorm.
+        if (normalize && clearMatchVec !== userVec) {
+          var w8nOpts = layoutModeForClear === 'off'
+            ? { flipOn: false, mirrorOn: false, normalize: true, feats: WEAKNESS_FEATS }
+            : { normalize: true, feats: WEAKNESS_FEATS };
+          var w8n = weaknessLib.chartStrengthMatch8Way(chartC, clearMatchVec, w8nOpts);
+          if (w8n && typeof w8n.bestNorm === 'number') bestNorm = w8n.bestNorm;
+        }
         return {
           bestTotal: w8.bestTotal,
           bestLabel: w8.bestLabel,
@@ -228,7 +248,7 @@
           flip: w8.best.flip, mL: w8.best.mL, mR: w8.best.mR,
           total: w8.best.total,
           results: w8.results,
-          bestNorm: w8.bestNorm,
+          bestNorm: bestNorm,
         };
       }
       // 옛 gist fallback

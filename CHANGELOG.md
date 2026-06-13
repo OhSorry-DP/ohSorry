@@ -2,6 +2,12 @@
 
 ohSorry 의 변경 이력입니다. 사용방법은 [README.md](README.md) 를 참고하세요.
 
+### 2026-06-13 — 클리어추천(③)도 usernorm 정규화 적용 (④와 high/low 대칭)
+- ④ 약점추천에 이어 ③ 클리어추천도 **같은 raw vec 의 population/density 편향**을 강점(high) 방향으로 물려받아, "내 강점"이 아니라 **population 강점(CHORD/PEAK)** 을 보고 모두에게 비슷한 곡을 추천하던 문제 교정. ③/④는 같은 weakness vector 의 high(강점)/low(약점) 대칭 활용 — 같은 정규화 철학으로 통일.
+- [recommend.js](modules/recommend.js): `createContext` 에 `clearMatchVec = normalizeWeaknessVec(userVec, popMean)`(7건반 + mirror18). `chartStrengthMatchByHand` wrapper 의 **matchScore 입력(bestNorm)만** clearMatchVec(7건반 feats)로 재계산해 override — layout/bestTotal/layoutGain/bestLabel·diffFit/lampFit·buildPools/cleanup/easy/hard·**matchScore 0.45 가중치 전부 raw 불변**. `weaknessPopMean` dep 없으면 raw 동일 fallback.
+- 검증(real buildRecs, 메인 C2000…7849 + V3E): 개인화·다양성·편향감소 명확. V3E EXH 에서 dv **+0.5★ 드리프트** 관측 — 원인분석 결과 **버그 아님**(유저 상대강점 RAND/TRILL/PHRASE 가 풀에서 더 어려운 곡에 몰려 corr(pt,dv) 양수 + matchScore 0.45≫diffFit 0.15). dv 는 population 난이도라 강점매치 곡은 본인에겐 덜 어려울 수 있어 clear-rec 의도에 부합.
+- **diffFit 가중치/dv cap 등 난이도 가드 튜닝은 별도 실험으로 분리.** EC/HC 풀은 강유저 계정 특성상 미검증(중간레벨 계정 추후).
+
 ### 2026-06-13 — 연습추천 약점 vec 의 population/density 편향 제거 (usernorm 정규화)
 - 문제: calcWeakness 약점 vec 이 같은 ★ bucket 안 "pt 높은=더 어려운" 곡 가중으로 전 feature 가 음수로 쏠려(전체 유저 평균이 전부 음수), 약점추천이 개인 약점이 아니라 **population 난이도(밀도 높은 PEAK 곡)** 를 보고 모두에게 비슷한 곡을 추천. 3550명 검증에서 1순위 약점이 TRILL/PHRASE 에 85% 집중.
 - [calcWeakness.js](modules/calcWeakness.js): `normalizeWeaknessVec(userVec, popMean, opts)` 추가·export — 손별 invariant 7 + mirror 18 dim 에 ① population 중심화(popMean 빼기) ② 유저내 z-score(상대 약점 shape) 적용. 저변별(프로파일 평평) 유저 노이즈 증폭 가드(sdFloor=0.7). raw vec(③ 클리어추천·user_radars)은 불변.
