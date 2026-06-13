@@ -2,6 +2,11 @@
 
 ohSorry 의 변경 이력입니다. 사용방법은 [README.md](README.md) 를 참고하세요.
 
+### 2026-06-13 — 연습추천 범위: 저레벨 유저 하한 자동 확장 (max−1 → min(max−1, 75분위))
+- 문제: `practiceZasaDefault` 가 `[최고클리어zasa − 1.0, 최고클리어zasa]` 였는데, **클리어가 듬성한 저레벨 유저**는 운빨 1곡으로 max 가 실력보다 한참 위로 튀어(예: 중앙 9.0·HC천장 10.0 인데 EC 운빨 11.8) 범위가 통째로 위로 떠 — 연습추천이 전부 **못 깬 곡**이 됨.
+- 하한을 `min(topClear − 1.0, 클리어 zasa 75분위)` 로 변경. max 가 운빨로 튄 유저(분위수 ≪ max)만 하한이 자동으로 내려가 **실력대 곡이 풀에 들어오고**, 클리어 촘촘한 유저(분위수 ≈ max)는 기존 −1.0 폭 그대로. ceiling(=topClear)·width·targetZasa·다른 추천 로직은 불변.
+- 검증: 58120555(12못함) `[10.8,11.8]`(전부 lamp 0~1) → `[9.6,11.8]`(zasa 10~11.6 실력대 유입). 79301798(12갓시작) `[11.1,12.1]` 변동 없음(75분위 11.2 ≈ max−1).
+
 ### 2026-06-13 — 클리어추천(③)도 usernorm 정규화 적용 (④와 high/low 대칭)
 - ④ 약점추천에 이어 ③ 클리어추천도 **같은 raw vec 의 population/density 편향**을 강점(high) 방향으로 물려받아, "내 강점"이 아니라 **population 강점(CHORD/PEAK)** 을 보고 모두에게 비슷한 곡을 추천하던 문제 교정. ③/④는 같은 weakness vector 의 high(강점)/low(약점) 대칭 활용 — 같은 정규화 철학으로 통일.
 - [recommend.js](modules/recommend.js): `createContext` 에 `clearMatchVec = normalizeWeaknessVec(userVec, popMean)`(7건반 + mirror18). `chartStrengthMatchByHand` wrapper 의 **matchScore 입력(bestNorm)만** clearMatchVec(7건반 feats)로 재계산해 override — layout/bestTotal/layoutGain/bestLabel·diffFit/lampFit·buildPools/cleanup/easy/hard·**matchScore 0.45 가중치 전부 raw 불변**. `weaknessPopMean` dep 없으면 raw 동일 fallback.

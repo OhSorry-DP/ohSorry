@@ -172,9 +172,12 @@
       }
       return mx;
     })();
-    // practiceZasaDefault — 사용자가 클리어 (lampNum>=3) 한 차트들의 zasa 최고값 기준 -1.0 범위 (max=최고값). 이력 없으면 5.9~6.9 고정.
+    // practiceZasaDefault — 클리어(lampNum>=3) 차트들의 zasa 분포로 연습 범위 [min, max] 산정. 이력 없으면 5.9~6.9.
+    //   max = 최고 클리어 zasa. min = topClear-1.0 과 75분위 중 낮은 쪽.
+    //   → 클리어가 듬성한 저레벨 유저(운빨 1곡으로 max 가 튀어 실력보다 한참 위)는 하한이 분위수까지 자동으로 넓어져
+    //     실제 실력대 곡이 풀에 들어온다. 클리어 촘촘한 유저는 75분위≈max 라 기존 -1.0 폭 그대로 유지.
     var practiceZasaDefault = (function () {
-      var topClearZasa = 0;
+      var clearZasas = [];
       for (var ci = 0; ci < allCharts.length; ci++) {
         var c = allCharts[ci];
         if (typeof c.lampNum !== 'number' || c.lampNum < 3) continue;
@@ -191,11 +194,15 @@
             if (z0 && typeof z0.level === 'number') zasa = z0.level;
           }
         }
-        if (zasa != null && zasa > topClearZasa) topClearZasa = zasa;
+        if (zasa != null) clearZasas.push(zasa);
       }
-      if (topClearZasa > 0) return { min: +(topClearZasa - 1).toFixed(1), max: topClearZasa };
       // 최대 클리어 zasa 이력 없으면 (game level 무관) 입문 범위 고정.
-      return { min: 5.9, max: 6.9 };
+      if (clearZasas.length === 0) return { min: 5.9, max: 6.9 };
+      clearZasas.sort(function (a, b) { return a - b; });
+      var topClearZasa = clearZasas[clearZasas.length - 1];
+      var pct75 = clearZasas[Math.min(clearZasas.length - 1, Math.floor(clearZasas.length * 0.75))];
+      var floorMin = Math.min(topClearZasa - 1.0, pct75);
+      return { min: +floorMin.toFixed(1), max: topClearZasa };
     })();
 
     // 배치 추천 토글 — 'on' = 8 배치 best (default), 'off' = 정규 N/N 강제.
