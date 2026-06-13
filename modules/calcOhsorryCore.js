@@ -1274,7 +1274,10 @@ window.OhsorryCore = {
   // v3.3.5: D2 의 표기 ★ (starEstimate) 대신 OSR (v0.0.2) 단독값을 추천 baseStar 로 사용
   //   이유: OSR135 의 over-estimation (12점대 +0.46 bias) 을 추천 풀 결정에서 배제
   //   OSR 결과 없으면 starEstimate (D2) 로 fallback
-  const ohsorryRecBase = starEstimateNew != null ? starEstimateNew : starEstimate;
+  let ohsorryRecBase = starEstimateNew != null ? starEstimateNew : starEstimate;
+  // ★0.5~2(12레벨 정착 전) 구간은 native(onlyOSR)가 과대추정되는 경향 → 표시 star 를 추천 base 로 우선.
+  //   ★0.5 미만은 native 유지 — star 로 낮추면 'low' 모드(8~10레벨)로 추락해 11레벨 플레이어에 부적합.
+  if (starEstimate != null && starEstimate >= 0.5 && starEstimate < 2) ohsorryRecBase = starEstimate;
   let recBaseMode = eraterTrueStar != null ? 'ereter' : 'ohsorry';
   let recBaseStar = recBaseMode === 'ereter' ? eraterTrueStar : ohsorryRecBase;
   console.log(`[step2] 추천곡 기준: ${recBaseMode} (★${recBaseStar != null ? recBaseStar.toFixed(2) : 'N/A'}, ohsorry=OSR단독 ${ohsorryRecBase != null ? ohsorryRecBase.toFixed(2) : 'N/A'})`);

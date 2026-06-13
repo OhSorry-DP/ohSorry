@@ -2,6 +2,12 @@
 
 ohSorry 의 변경 이력입니다. 사용방법은 [README.md](README.md) 를 참고하세요.
 
+### 2026-06-13 — 클리어추천(③) cold-start 풀 전멸 가드 + 저레벨 추천 base 를 star 로
+- 문제: 클리어 램프 곡이 거의 없는 cold-start/신규 유저(예: 어제 등록·EC 클리어 0)는 ③ 클리어추천 EC/HC/EXH 가 **전부 0곡**. 원인은 `buildPools` 의 `topClearStar`(해당 stage 클리어곡 ★ 최댓값)=0 → `hardMax = topClearStar + 0.3d = 0` → **estEC ★0 = 11레벨 시작**이라 `dv > 0` 전곡이 컷. ④ 연습추천은 `baseStar=11` fallback 으로 살아남아 "③만 빔" 증상.
+- [recommend.js](modules/recommend.js): `buildPools` 에 floor 가드 — `topClearStar < baseStar` 면 `baseStar` 로 floor. cold-start 도 baseStar 근처(**11레벨 위주 + 12레벨 하단**) 풀 구성. `topClearStar ≥ baseStar` 정상 유저는 미발동(회귀 없음). 검증: base 0.87 EC 풀 = 11레벨 234곡 + 12레벨 28곡.
+- [calcOhsorryCore.js](modules/calcOhsorryCore.js): 추천 base 를 **★0.5~2(12레벨 정착 전) 구간은 native(onlyOSR) 대신 표시 star(onlyOSRtoEreter)** 로 — 저레벨에서 native 가 과대추정되는 경향 교정. **★0.5 미만은 native 유지**(star 로 낮추면 `clearLvMode`='low' 8~10레벨로 추락해 11레벨 플레이어에 부적합).
+- 별값 척도 앵커 명문화: **★0 = 11레벨 시작, ★1 = 12레벨 막 EC**(estEC/HC/EXH 공통). 게임레벨별 분포는 `docs/README.md` "레벨 체계와 별값 기준점" 기록.
+
 ### 2026-06-13 — 연습추천 범위: 저레벨 유저 하한 자동 확장 (max−1 → min(max−1, 75분위))
 - 문제: `practiceZasaDefault` 가 `[최고클리어zasa − 1.0, 최고클리어zasa]` 였는데, **클리어가 듬성한 저레벨 유저**는 운빨 1곡으로 max 가 실력보다 한참 위로 튀어(예: 중앙 9.0·HC천장 10.0 인데 EC 운빨 11.8) 범위가 통째로 위로 떠 — 연습추천이 전부 **못 깬 곡**이 됨.
 - 하한을 `min(topClear − 1.0, 클리어 zasa 75분위)` 로 변경. max 가 운빨로 튄 유저(분위수 ≪ max)만 하한이 자동으로 내려가 **실력대 곡이 풀에 들어오고**, 클리어 촘촘한 유저(분위수 ≈ max)는 기존 −1.0 폭 그대로. ceiling(=topClear)·width·targetZasa·다른 추천 로직은 불변.

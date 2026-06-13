@@ -389,6 +389,10 @@
         if (!e0 || typeof e0[getDiffField] !== 'number') continue;
         if (e0[getDiffField] > topClearStar) topClearStar = e0[getDiffField];
       }
+      // cold-start/저클리어 가드 — 해당 stage 클리어곡이 baseStar 실력 미만(또는 0)이면
+      //   topClearStar 가 낮아 hardMax 가 0 근처로 무너지고(estEC ★0 = 11레벨 시작), dv>hardMax 로 전곡 컷 → 풀 전멸.
+      //   baseStar 실력만큼은 클리어 가능하다고 보고 topClearStar 를 baseStar 로 floor (11레벨 위주 + 12레벨 하단 풀).
+      if (topClearStar < baseStar) topClearStar = baseStar;
       var effectiveBase = isEC  ? (baseStar - 0.5)
                         : isEXH ? (baseStar + 2)
                         : baseStar;  // HC
