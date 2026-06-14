@@ -30,7 +30,7 @@
 // ============================================================
 
 window.OhsorryRender = {
-  VERSION: '0.0.364',
+  VERSION: '0.0.365',
 
   // 진행률 UI — core 의 onProgress 콜백에서 호출
   showProgress: function (msg, pct) {
@@ -90,6 +90,29 @@ window.OhsorryRender = {
   show: async function (result, opts) {
     if (!result) {
       console.error('[OhsorryRender] result 가 비어있습니다');
+      return;
+    }
+    // ===== SP 모드 (경량) — ★분석 없이 DJ명/단위 + '오소리웹으로 이동' 버튼만. =====
+    if (result.spMode) {
+      const __e = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[m]));
+      const p = result.profile || {};
+      const djName = p.djName || '(이름 없음)';
+      const rank = result.spRank || p.spRank || '-';
+      const iidx = result.iidxId || (p.iidxId ? String(p.iidxId).replace(/-/g, '') : '');
+      const webUrl = iidx ? ('https://ohsorry.iidx.in/#user@' + iidx) : 'https://ohsorry.iidx.in/';
+      document.getElementById('__dp_score_panel')?.remove();
+      const box = document.createElement('div');
+      box.id = '__dp_score_panel';
+      box.style.cssText = 'position:fixed;top:0;right:0;bottom:0;width:340px;max-width:92vw;z-index:2147483646;background:#1a1d22;color:#e9ecef;box-shadow:-4px 0 24px rgba(0,0,0,.4);padding:26px 22px;box-sizing:border-box;font-family:system-ui,sans-serif;overflow:auto';
+      box.innerHTML =
+        '<button onclick="document.getElementById(\'__dp_score_panel\').remove()" style="position:absolute;top:12px;right:14px;background:none;border:none;color:#adb5bd;font-size:22px;cursor:pointer;line-height:1">×</button>'
+        + '<div style="font-size:12px;color:#74c0fc;font-weight:800;letter-spacing:2px;margin-bottom:16px">SP</div>'
+        + '<div style="font-size:21px;font-weight:800;margin-bottom:6px;word-break:break-all">' + __e(djName) + '</div>'
+        + '<div style="font-size:13px;color:#adb5bd;margin-bottom:4px">SP 단위 · <b style="color:#ff9bce">' + __e(rank) + '</b></div>'
+        + '<div style="font-size:12px;color:#868e96;margin-bottom:22px">SP 기록 ' + (result.spChartCount || 0) + '곡 크롤'
+          + (result.spUploaded != null ? (' · <b style="color:#69db7c">' + result.spUploaded + '건 업로드</b>') : (result.isRival ? ' · (라이벌은 업로드 안 함)' : '')) + '</div>'
+        + '<a href="' + webUrl + '" target="_blank" rel="noopener" style="display:block;text-align:center;background:#ff6b9d;color:#1a1a1a;font-weight:800;font-size:14px;padding:12px 0;border-radius:9px;text-decoration:none">오소리웹으로 이동 →</a>';
+      document.body.appendChild(box);
       return;
     }
     // ===== result 분해 — core compute 가 담아 보낸 closure 변수들 =====
@@ -396,7 +419,6 @@ window.OhsorryRender = {
         #__dp_score_panel .rec-item .rec-level { flex: 0 0 32px; text-align: right; color: #888; font-variant-numeric: tabular-nums; font-size: 11px; }
         #__dp_score_panel .rec-item .rec-chart { flex: 0 0 12px; text-align: center; font-weight: 600; font-size: 11px; }
       </style>
-      ${(!dbData && !isRival) ? `<button class="__dp_sp_upload" onclick="if(window.OhsorryUploadSP)window.OhsorryUploadSP()" title="SP 10·11·12 기록을 크롤해서 업로드" style="position:absolute;top:11px;right:46px;background:#2b2f36;border:1px solid #495057;color:#74c0fc;padding:3px 9px;border-radius:5px;cursor:pointer;font-size:11px;font-weight:700;font-family:inherit;z-index:2">SP 업로드</button>` : ''}
       <button class="close" onclick="document.getElementById('__dp_score_panel').remove()" title="닫기">×</button>
 
       ${profile ? `

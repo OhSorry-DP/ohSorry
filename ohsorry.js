@@ -88,20 +88,43 @@
       ov.innerHTML = `
         <div style="background:#fff;border-radius:12px;padding:22px 24px;width:330px;max-width:calc(100vw - 32px);box-sizing:border-box;box-shadow:0 8px 32px rgba(0,0,0,.25);color:#212529">
           <div style="font-size:15px;font-weight:700;margin-bottom:3px">${titleText}</div>
-          <div style="font-size:12px;color:#888;margin-bottom:16px">어떤 곡을 가져올까요?</div>
-          <label style="display:flex;align-items:flex-start;gap:8px;margin-bottom:8px;cursor:pointer">
-            <input type="radio" name="__dpfm" value="level" checked style="margin-top:2px">
-            <span><b style="font-size:13px">레벨별</b><br><span style="font-size:11px;color:#888">선택한 LEVEL 폴더만 (빠름)</span></span>
-          </label>
-          <div id="__dp_lv_box" style="display:flex;flex-wrap:wrap;gap:8px 10px;padding:6px 10px 12px 28px">${lvBtns}</div>
-          <label style="display:flex;align-items:flex-start;gap:8px;margin-bottom:18px;cursor:pointer">
-            <input type="radio" name="__dpfm" value="series" style="margin-top:2px">
-            <span><b style="font-size:13px">전곡</b><br><span style="font-size:11px;color:#888">시리즈 폴더 전체 — 약 1분 소요</span></span>
-          </label>
+          <div style="font-size:12px;color:#888;margin-bottom:12px">어떤 곡을 가져올까요?</div>
+          ${isRival ? '' : `<div id="__dp_ps_tabs" style="display:flex;margin-bottom:16px;border:1px solid #dee2e6;border-radius:8px;overflow:hidden">
+            <button type="button" class="__dp_ps_tab" data-ps="DP" style="flex:1;padding:8px 0;border:0;background:#1d9e75;color:#fff;font-size:13px;font-weight:700;cursor:pointer">DP</button>
+            <button type="button" class="__dp_ps_tab" data-ps="SP" style="flex:1;padding:8px 0;border:0;background:#f1f3f5;color:#868e96;font-size:13px;font-weight:700;cursor:pointer">SP</button>
+          </div>`}
+          <div id="__dp_fm_section">
+            <label style="display:flex;align-items:flex-start;gap:8px;margin-bottom:8px;cursor:pointer">
+              <input type="radio" name="__dpfm" value="level" checked style="margin-top:2px">
+              <span><b style="font-size:13px">레벨별</b><br><span style="font-size:11px;color:#888">선택한 LEVEL 폴더만 (빠름)</span></span>
+            </label>
+            <div id="__dp_lv_box" style="display:flex;flex-wrap:wrap;gap:8px 10px;padding:6px 10px 12px 28px">${lvBtns}</div>
+            <label style="display:flex;align-items:flex-start;gap:8px;margin-bottom:18px;cursor:pointer">
+              <input type="radio" name="__dpfm" value="series" style="margin-top:2px">
+              <span><b style="font-size:13px">전곡</b><br><span style="font-size:11px;color:#888">시리즈 폴더 전체 — 약 1분 소요</span></span>
+            </label>
+          </div>
+          <div id="__dp_sp_note" style="display:none;font-size:12px;color:#1d9e75;background:#e9f7f1;border-radius:8px;padding:11px 13px;margin-bottom:18px;line-height:1.45">SP는 <b>10·11·12</b> 레벨 기록을 자동으로 가져옵니다.<br><span style="color:#888">(★추정 없이 점수·단위만 — 상세는 오소리웹)</span></div>
           <button id="__dp_fetch_ok" style="width:100%;padding:9px 0;border:0;border-radius:7px;background:#1d9e75;color:#fff;font-size:13px;font-weight:600;cursor:pointer">시작</button>
         </div>
       `;
       document.body.appendChild(ov);
+      // DP / SP 탭 — 기본 DP. SP 선택 시 style=0 크롤 (★분석 없이 점수/단위 + 오소리웹 이동).
+      let playStyle = 'DP';
+      const paintPs = () => {
+        ov.querySelectorAll('.__dp_ps_tab').forEach((b) => {
+          const on = b.dataset.ps === playStyle;
+          b.style.background = on ? '#1d9e75' : '#f1f3f5';
+          b.style.color = on ? '#fff' : '#868e96';
+        });
+        // SP 는 10~12 고정 → 레벨/전곡 선택 숨기고 안내 표시.
+        const fm = ov.querySelector('#__dp_fm_section');
+        const note = ov.querySelector('#__dp_sp_note');
+        if (fm) fm.style.display = playStyle === 'SP' ? 'none' : '';
+        if (note) note.style.display = playStyle === 'SP' ? 'block' : 'none';
+      };
+      ov.querySelectorAll('.__dp_ps_tab').forEach((b) => { b.onclick = () => { playStyle = b.dataset.ps; paintPs(); }; });
+      paintPs();
       const lvBox = ov.querySelector('#__dp_lv_box');
       // 레벨 선택 표시 — 꺼짐: 연한 글자 / 켜짐: 진한 + 볼드. (기본 체크박스가 한눈에 안 보여서)
       const paintLv = (label) => {
@@ -122,6 +145,11 @@
       ov.querySelectorAll('input[name="__dpfm"]').forEach((r) => { r.onchange = syncLvBox; });
       syncLvBox();
       ov.querySelector('#__dp_fetch_ok').onclick = () => {
+        if (playStyle === 'SP') {   // SP 는 레벨 선택 무시 — 항상 10~12
+          ov.remove();
+          resolve({ fetchMode: 'level', levels: [12, 11, 10], playStyle: 'SP' });
+          return;
+        }
         const mode = ov.querySelector('input[name="__dpfm"]:checked').value;
         let levels = [];
         if (mode === 'level') {
@@ -132,7 +160,7 @@
           }
         }
         ov.remove();
-        resolve({ fetchMode: mode, levels });
+        resolve({ fetchMode: mode, levels, playStyle });
       };
     });
   }
@@ -177,6 +205,7 @@
         wrapperVersion: WRAPPER_VERSION,
         fetchMode: fetchOpts ? fetchOpts.fetchMode : undefined,
         levels: fetchOpts ? fetchOpts.levels : undefined,
+        playStyle: fetchOpts ? fetchOpts.playStyle : undefined,   // 'SP' | 'DP'(기본)
         // statsOnly — 게스트 페이지에서 __dp_render(dbData, { statsOnly:true }) 로 호출 시 통계만 즉시 렌더.
         statsOnly: renderOpts ? !!renderOpts.statsOnly : false,
         noRender: renderOpts ? !!renderOpts.noRender : false,

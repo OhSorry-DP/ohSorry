@@ -2,9 +2,10 @@
 
 ohSorry 의 변경 이력입니다. 사용방법은 [README.md](README.md) 를 참고하세요.
 
-### 2026-06-14 — 본체 SP10~12 기록 별도 업로드 (core 0.0.392 / render 0.0.364)
-- [calcOhsorryCore.js](modules/calcOhsorryCore.js): 본인(own) 모드에서 `window.OhsorryUploadSP()` 노출 — eagate SP(style=0) lv12·11·10 별도 크롤 → gameLevel 10~12 필터 → `play_style:0`(played_version=SERIES)으로 `upsert_scores`. DP 분석 흐름과 완전 분리(원할 때만 실행).
-- [ohsorryRender.js](modules/ohsorryRender.js): 결과 패널 헤더(닫기 옆)에 **'SP 업로드' 버튼**(own 모드만) → `window.OhsorryUploadSP`. DBR/DB 모드·라이벌엔 미노출.
+### 2026-06-14 — 본체 SP 모드 (core 0.0.393 / render 0.0.365)
+- [ohsorry.js](ohsorry.js): 곡 데이터 모달 상단에 **DP / SP 탭**(본인 모드만). SP 선택 시 레벨/전곡 선택 숨기고 "SP는 10·11·12 자동" 안내 → `opts.playStyle='SP'`.
+- [calcOhsorryCore.js](modules/calcOhsorryCore.js): `playStyle==='SP'` → **SP 경량 분기**(★추정·추천 전부 스킵) — style=0 크롤, 본인은 SP10~12 `play_style:0` 자동 업로드, 최소 result(`spMode`). **라이벌은 토글 없이 DP 분석/업로드 후 SP10~12 도 자동 크롤·업로드**(웹 SP 표시용, 표시는 DP 패널 그대로).
+- [ohsorryRender.js](modules/ohsorryRender.js): `result.spMode` 면 경량 패널 — **DJ명 · SP단위 · "오소리웹으로 이동"(`#user@<IIDX>`) 버튼**. (이전 'SP 업로드' 버튼 제거 — SP 모드가 흡수.)
 - 적재된 SP 는 오소리웹 DP 화면에 안 섞임(RPC play_style=1 필터, sql/04·05). 웹 SP Recent 가 이 데이터를 표시.
 
 ### 2026-06-14 — dbConn(v0.0.408): scores upsert 에 play_style 통과 (SP/DP 공존 대비)

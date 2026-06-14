@@ -72,7 +72,7 @@ window.OhsorryCore = {
   // noRender — show(패널 렌더)를 건너뛰고 result 만 반환. 2차 백그라운드 full compute(패턴분석 userVec 만 필요)에서
   //   전체화면 패널이 깜빡이지 않도록 사용. statsOnly 와 독립.
   const noRender = !!opts.noRender;
-  const CORE_VERSION_SHORT = '0.0.392'.replace(/^0\.0\./, '');  // '392' — SP10~12 별도 업로드(window.OhsorryUploadSP)
+  const CORE_VERSION_SHORT = '0.0.393'.replace(/^0\.0\./, '');  // '393' — SP 모드(playStyle:'SP' 경량 크롤+본인 업로드+오소리웹 이동)
   const dbVersionString = `${wrapperVersion}-core${CORE_VERSION_SHORT}`;
   dbData = dbData || null;
   // 추천 풀의 chart 마다 c.layoutLabel (= w8.bestLabel) 가 채워지면 이 closure map 에도 동시에 기록.
@@ -617,16 +617,19 @@ window.OhsorryCore = {
   //
   // LEVEL 11 도 가져오는 이유: zasa★ 11.6~12.1 인 어려운 lv11 차트의 lamp 데이터를
   //                          ohSorryRating fallback 으로 ★ 추정 / EC·HC 추천에 활용.
-  const fetchMode = opts.fetchMode === 'series' ? 'series' : 'level';
+  const fetchMode = (opts.playStyle === 'SP') ? 'level' : (opts.fetchMode === 'series' ? 'series' : 'level');  // SP 는 항상 level(10~12)
   const SERIES = '33';            // 현재 시즌 (Sparkle Shower)
-  const style = '1';              // DP
+  const isSpMode = opts.playStyle === 'SP';   // SP 모드 — style=0 크롤 + ★분석 스킵(경량)
+  const style = isSpMode ? '0' : '1';         // 0=SP / 1=DP
   const disp = '1';
   // level 모드 — 가져올 게임레벨 목록 (1~12 만 허용, 내림차순 정렬, 중복 제거).
   //   eagateFetch.collectCharts 가 ctx.levels 로 받아 자체적으로 LEVELS_TO_FETCH / URL 빌드.
   //   core 는 fetchMode 만 유지 (이후 4.6 단계에서 series 모드 유령 차트 제거 분기에 사용).
-  const requestedLevels = (Array.isArray(opts.levels) && opts.levels.length > 0)
-    ? [...new Set(opts.levels.map(Number).filter((n) => n >= 1 && n <= 12))].sort((a, b) => b - a)
-    : [12, 11];
+  const requestedLevels = isSpMode
+    ? [12, 11, 10]   // SP 는 항상 10~12 고정
+    : ((Array.isArray(opts.levels) && opts.levels.length > 0)
+        ? [...new Set(opts.levels.map(Number).filter((n) => n >= 1 && n <= 12))].sort((a, b) => b - a)
+        : [12, 11]);
 
   // 도메인 체크 (잘못된 사이트에서 실행하면 의미 없으니 안내).
   // DB 모드 (dbData 있음) 에서는 eagate fetch 를 안 하므로 도메인 체크 스킵 → 그대로 진행.
@@ -1264,6 +1267,38 @@ window.OhsorryCore = {
     (RADAR_CATS.some((c) => typeof r[c] === 'number') || typeof r.total === 'number');
   const profileHasRadar = !!profile && (hasRadarData(profile.spRadar) || hasRadarData(profile.dpRadar));
 
+  // ===== SP 모드 (경량) — ★추정/추천 전부 스킵. 점수 크롤 + DJ명/단위 + 오소리웹 이동 패널. =====
+  //   본인(own)이면 SP10~12 자동 업로드(play_style:0). 라이벌/DB모드는 표시만(업로드 X).
+  if (isSpMode) {
+    const spIidx = profile && profile.iidxId ? profile.iidxId.replace(/-/g, '') : null;
+    const spPlayed = (allCharts || []).filter((c) => c.exScore > 0 || c.lampNum > 0);
+    let spUploaded = null;
+    if (!dbData && !isRival && spIidx && window.OhsorryDb && window.OhsorryDb.upsertUserChartScores) {
+      const nowIsoSp = new Date().toISOString();
+      const spRows = spPlayed
+        .filter((c) => c.gameLevel >= 10 && c.gameLevel <= 12)
+        .map((c) => ({
+          played_version: SERIES, title: c.title, iidx_id: spIidx, diff: c.diff,
+          game_level: c.gameLevel, ex_score: c.exScore != null ? c.exScore : null,
+          lamp: c.lamp || null, play_style: 0, date: new Date().toISOString(),
+        }));
+      if (spRows.length) {
+        try { const res = await window.OhsorryDb.upsertUserChartScores(spRows); spUploaded = (res && res.ok) ? spRows.length : null; }
+        catch (e) { console.warn('[SP upload]', e && e.message); }
+      }
+    }
+    const spResult = {
+      spMode: true, mode, isRival, dbData, wrapperVersion, dbVersionString,
+      profile, profileHasRadar,
+      spRank: profile ? (profile.spRank || null) : null,
+      iidxId: spIidx, spChartCount: spPlayed.length, spUploaded,
+    };
+    if (!opts.noRender && window.OhsorryRender && window.OhsorryRender.show) {
+      await window.OhsorryRender.show(spResult, {});
+    }
+    return spResult;
+  }
+
   // -------- 5.7. 추천곡 계산 (EC/HC/EXH 3종류) --------
   // 추천곡 기준 ★값: ereter (이레터 원본) / ohsorry (우리 모델 추정) 토글로 선택 가능
   const idNormForRec = profile && profile.iidxId ? profile.iidxId.replace(/-/g, '') : null;
@@ -1608,41 +1643,6 @@ window.OhsorryCore = {
     });
   }
 
-  // SP10~12 기록 별도 업로드 — 별도 트리거(결과 패널 'SP 업로드' 버튼 / 콘솔 window.OhsorryUploadSP()).
-  //   DP 분석과 분리: eagate SP(style=0) lv12·11·10 크롤 → play_style:0 으로 upsert_scores. 본인(own) 모드만.
-  if (!dbData && !isRival && profile && profile.iidxId) {
-    window.OhsorryUploadSP = async function () {
-      if (!window.OhsorryEagateFetch || !window.OhsorryEagateFetch.collectCharts) { alert('eagateFetch 모듈이 안 떠있어요. 새로고침 후 재시도.'); return; }
-      if (!window.OhsorryDb || !window.OhsorryDb.upsertUserChartScores) { alert('dbConn 모듈이 안 떠있어요.'); return; }
-      if (!location.hostname.endsWith('p.eagate.573.jp')) { alert('p.eagate.573.jp 에서 실행해주세요.'); return; }
-      if (!window.confirm('SP 10·11·12 레벨 기록을 크롤해서 업로드할까요? (몇 분 걸릴 수 있어요)')) return;
-      const spIidx = profile.iidxId.replace(/-/g, '');
-      let r;
-      try {
-        r = await window.OhsorryEagateFetch.collectCharts({
-          fetchMode: 'level', levels: [12, 11, 10], series: SERIES,
-          style: '0', disp, isRival: false,
-          updateProgress: (msg) => console.log('[OhsorryUploadSP]', msg),
-        });
-      } catch (e) { alert('SP 크롤 실패: ' + (e && e.message)); return; }
-      if (!r || !r.ok) { alert('SP 크롤 실패 (로그인 상태/페이지 확인).'); return; }
-      const nowIsoSp = new Date().toISOString();
-      const spRows = (r.charts || [])
-        .filter((c) => (c.exScore > 0 || c.lampNum > 0) && c.gameLevel >= 10 && c.gameLevel <= 12)
-        .map((c) => ({
-          played_version: SERIES, title: c.title, iidx_id: spIidx, diff: c.diff,
-          game_level: c.gameLevel, ex_score: c.exScore != null ? c.exScore : null,
-          lamp: c.lamp || null, play_style: 0, date: nowIsoSp,
-        }));
-      if (spRows.length === 0) { alert('업로드할 SP 기록이 없어요 (플레이한 SP 10~12 곡 없음).'); return; }
-      try {
-        const res = await window.OhsorryDb.upsertUserChartScores(spRows);
-        if (res && res.ok) alert('SP 업로드 완료 — ' + spRows.length + '건 처리 (매칭 실패 ' + (res.unmatched || 0) + ').');
-        else alert('SP 업로드 실패: ' + (res && res.error));
-      } catch (e) { alert('SP 업로드 예외: ' + (e && e.message)); }
-    };
-  }
-
   // result 객체 — render 가 받아서 panel + supabase upload 진행
   const result = {
     mode, isRival, dbData, wrapperVersion, dbVersionString,
@@ -1678,6 +1678,32 @@ window.OhsorryCore = {
     await window.OhsorryRender.show(result, { statsOnly });
   } else {
     console.error('[OhsorryCore] window.OhsorryRender 가 없습니다. wrapper 가 ohsorryRender.js 를 fetch 하지 않았을 수 있어요.');
+  }
+
+  // 라이벌도 SP 같이 — DP 분석/업로드 후, 라이벌 SP10~12 도 크롤해 play_style:0 으로 업로드(웹 SP 표시용).
+  //   라이벌은 토글 없이 항상 둘 다. (본인 SP 는 위 isSpMode 경량 분기에서 처리.) 표시는 DP 패널 그대로.
+  if (isRival && !dbData && profile && profile.iidxId
+      && window.OhsorryEagateFetch && window.OhsorryEagateFetch.collectCharts
+      && window.OhsorryDb && window.OhsorryDb.upsertUserChartScores) {
+    try {
+      const spR = await window.OhsorryEagateFetch.collectCharts({
+        fetchMode: 'level', levels: [12, 11, 10], series: SERIES,
+        style: '0', disp, isRival: true, rivalToken,
+        updateProgress: (msg) => console.log('[rival SP]', msg),
+      });
+      if (spR && spR.ok) {
+        const spIid = profile.iidxId.replace(/-/g, '');
+        const nowIsoR = new Date().toISOString();
+        const spRows = (spR.charts || [])
+          .filter((c) => (c.exScore > 0 || c.lampNum > 0) && c.gameLevel >= 10 && c.gameLevel <= 12)
+          .map((c) => ({
+            played_version: SERIES, title: c.title, iidx_id: spIid, diff: c.diff,
+            game_level: c.gameLevel, ex_score: c.exScore != null ? c.exScore : null,
+            lamp: c.lamp || null, play_style: 0, date: nowIsoR,
+          }));
+        if (spRows.length) await window.OhsorryDb.upsertUserChartScores(spRows);
+      }
+    } catch (e) { console.warn('[rival SP] 실패:', e && e.message); }
   }
 
   __ohsorryHideSpinner();
