@@ -2,6 +2,9 @@
 
 ohSorry 의 변경 이력입니다. 사용방법은 [README.md](README.md) 를 참고하세요.
 
+### 2026-06-14 — dbConn(v0.0.408): scores upsert 에 play_style 통과 (SP/DP 공존 대비)
+- [dbConn.js](modules/dbConn.js) `upsertUserChartScores`: row 의 `play_style`(0=SP / 1=DP, 기본 1)을 upsert_scores 에 통과시키고 dedup PK 에 포함. DP 단독 적재 동작은 불변(전부 1). scores 04 마이그레이션(ohSorryAdmin) 대응 — 실제 SP10~12 적재는 calcOhsorryCore 의 SP 크롤 패스(예정)에서 play_style:0 으로 전달.
+
 ### 2026-06-14 — ohsorryShelf: 서열표 모바일 2번째 줄 재배치 ("C+13  1756")
 - [ohsorryShelf.js](modules/ohsorryShelf.js): 모바일 곡 타일 2번째 줄을 왼쪽=DJ등급(색)+작은 회색 +컷대비, 오른쪽=흰색 EXScore(우측정렬)로 재배치. `meta-diff` 에서 앞 등급 글자 제거(+167 만), `meta-ex` 흰색·`margin-left:auto`, DOM 순서 dj→diff→ex. DP·SP 서열표 공통.
 

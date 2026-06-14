@@ -1,4 +1,6 @@
-// dbConn.js — 오소리 DB 통신 모듈 (v0.0.404)
+// dbConn.js — 오소리 DB 통신 모듈 (v0.0.408)
+// v0.0.408 — upsertUserChartScores 가 row 의 play_style(0=SP/1=DP, 기본 1) 통과 + dedup PK 에 play_style 포함.
+//            (scores 04 마이그레이션 대응. SP 행 적재는 calcOhsorryCore 의 SP 크롤 패스에서 play_style:0 으로 전달.)
 //
 // 새 디비 (users + user_radars + scores) 로 마이그레이션.
 //   - upsertUserProfile: upsert_user + upsert_user_radar (sp/dp)
@@ -367,6 +369,7 @@ window.OhsorryDb = (function () {
         }
         const lampInt = r.lamp != null && LAMP_MAP[r.lamp] != null ? LAMP_MAP[r.lamp] : null;
         const exScore = r.ex_score != null ? Number(r.ex_score) : null;
+        const playStyle = (r.play_style === 0 || r.play_style === '0') ? 0 : 1;  // 0=SP, 1=DP(기본)
         const newRow = {
           song_id: songId,
           iidx_id: r.iidx_id,
@@ -374,9 +377,10 @@ window.OhsorryDb = (function () {
           lamp: lampInt,
           ex_score: exScore,
           played_version: playedVersion,
+          play_style: playStyle,
           date: r.date,
         };
-        const pk = `${songId}|${r.iidx_id}|${diffInt}|${playedVersion}`;
+        const pk = `${songId}|${r.iidx_id}|${diffInt}|${playedVersion}|${playStyle}`;
         const prev = dedup.get(pk);
         if (!prev) {
           dedup.set(pk, newRow);
