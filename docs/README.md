@@ -16,6 +16,7 @@
 | [modules.md](modules.md) | 각 모듈의 주요 export 함수/객체·책임·입출력 데이터 구조 (calcOhsorryCore / recommend / calcWeakness / dbConn / render / eagateFetch / normTitle / shelf) |
 | [algorithms.md](algorithms.md) | 별값(★) 추정(onlyOSR/onlyOSRtoEreter, adopt fallback), 추천곡 파이프라인(buildPools→8 component 가중합→sample15→8배치), 28차 피쳐 점수, 약점 분석(calcWeakness)의 단계·가중치·임계값 |
 | [data-pipeline.md](data-pipeline.md) | 관리자 수집 스크립트(1/3 번호 파일), gist 배포 흐름, 데이터 파일 스키마(ereter-data / zasa-data / 외부 lib·patterns·feature-scores) |
+| [sp.md](sp.md) | **SP(싱글) 모드** — 모달 DP/SP 탭, 본인 경량 SP 크롤(★/추천 스킵), 라이벌 DP+SP 자동 업로드, `dbConn` `play_style` PK 분리(`scores` SP/DP 공존). 본체는 데이터 생산만, 표시는 웹 |
 
 ---
 
