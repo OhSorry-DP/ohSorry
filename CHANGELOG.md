@@ -2,6 +2,11 @@
 
 ohSorry 의 변경 이력입니다. 사용방법은 [README.md](README.md) 를 참고하세요.
 
+### 2026-06-14 — 본체 SP10~12 기록 별도 업로드 (core 0.0.392 / render 0.0.364)
+- [calcOhsorryCore.js](modules/calcOhsorryCore.js): 본인(own) 모드에서 `window.OhsorryUploadSP()` 노출 — eagate SP(style=0) lv12·11·10 별도 크롤 → gameLevel 10~12 필터 → `play_style:0`(played_version=SERIES)으로 `upsert_scores`. DP 분석 흐름과 완전 분리(원할 때만 실행).
+- [ohsorryRender.js](modules/ohsorryRender.js): 결과 패널 헤더(닫기 옆)에 **'SP 업로드' 버튼**(own 모드만) → `window.OhsorryUploadSP`. DBR/DB 모드·라이벌엔 미노출.
+- 적재된 SP 는 오소리웹 DP 화면에 안 섞임(RPC play_style=1 필터, sql/04·05). 웹 SP Recent 가 이 데이터를 표시.
+
 ### 2026-06-14 — dbConn(v0.0.408): scores upsert 에 play_style 통과 (SP/DP 공존 대비)
 - [dbConn.js](modules/dbConn.js) `upsertUserChartScores`: row 의 `play_style`(0=SP / 1=DP, 기본 1)을 upsert_scores 에 통과시키고 dedup PK 에 포함. DP 단독 적재 동작은 불변(전부 1). scores 04 마이그레이션(ohSorryAdmin) 대응 — 실제 SP10~12 적재는 calcOhsorryCore 의 SP 크롤 패스(예정)에서 play_style:0 으로 전달.
 

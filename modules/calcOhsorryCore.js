@@ -72,7 +72,7 @@ window.OhsorryCore = {
   // noRender — show(패널 렌더)를 건너뛰고 result 만 반환. 2차 백그라운드 full compute(패턴분석 userVec 만 필요)에서
   //   전체화면 패널이 깜빡이지 않도록 사용. statsOnly 와 독립.
   const noRender = !!opts.noRender;
-  const CORE_VERSION_SHORT = '0.0.391'.replace(/^0\.0\./, '');  // '391'
+  const CORE_VERSION_SHORT = '0.0.392'.replace(/^0\.0\./, '');  // '392' — SP10~12 별도 업로드(window.OhsorryUploadSP)
   const dbVersionString = `${wrapperVersion}-core${CORE_VERSION_SHORT}`;
   dbData = dbData || null;
   // 추천 풀의 chart 마다 c.layoutLabel (= w8.bestLabel) 가 채워지면 이 closure map 에도 동시에 기록.
@@ -1606,6 +1606,41 @@ window.OhsorryCore = {
         date: nowIso,
       };
     });
+  }
+
+  // SP10~12 기록 별도 업로드 — 별도 트리거(결과 패널 'SP 업로드' 버튼 / 콘솔 window.OhsorryUploadSP()).
+  //   DP 분석과 분리: eagate SP(style=0) lv12·11·10 크롤 → play_style:0 으로 upsert_scores. 본인(own) 모드만.
+  if (!dbData && !isRival && profile && profile.iidxId) {
+    window.OhsorryUploadSP = async function () {
+      if (!window.OhsorryEagateFetch || !window.OhsorryEagateFetch.collectCharts) { alert('eagateFetch 모듈이 안 떠있어요. 새로고침 후 재시도.'); return; }
+      if (!window.OhsorryDb || !window.OhsorryDb.upsertUserChartScores) { alert('dbConn 모듈이 안 떠있어요.'); return; }
+      if (!location.hostname.endsWith('p.eagate.573.jp')) { alert('p.eagate.573.jp 에서 실행해주세요.'); return; }
+      if (!window.confirm('SP 10·11·12 레벨 기록을 크롤해서 업로드할까요? (몇 분 걸릴 수 있어요)')) return;
+      const spIidx = profile.iidxId.replace(/-/g, '');
+      let r;
+      try {
+        r = await window.OhsorryEagateFetch.collectCharts({
+          fetchMode: 'level', levels: [12, 11, 10], series: SERIES,
+          style: '0', disp, isRival: false,
+          updateProgress: (msg) => console.log('[OhsorryUploadSP]', msg),
+        });
+      } catch (e) { alert('SP 크롤 실패: ' + (e && e.message)); return; }
+      if (!r || !r.ok) { alert('SP 크롤 실패 (로그인 상태/페이지 확인).'); return; }
+      const nowIsoSp = new Date().toISOString();
+      const spRows = (r.charts || [])
+        .filter((c) => (c.exScore > 0 || c.lampNum > 0) && c.gameLevel >= 10 && c.gameLevel <= 12)
+        .map((c) => ({
+          played_version: SERIES, title: c.title, iidx_id: spIidx, diff: c.diff,
+          game_level: c.gameLevel, ex_score: c.exScore != null ? c.exScore : null,
+          lamp: c.lamp || null, play_style: 0, date: nowIsoSp,
+        }));
+      if (spRows.length === 0) { alert('업로드할 SP 기록이 없어요 (플레이한 SP 10~12 곡 없음).'); return; }
+      try {
+        const res = await window.OhsorryDb.upsertUserChartScores(spRows);
+        if (res && res.ok) alert('SP 업로드 완료 — ' + spRows.length + '건 처리 (매칭 실패 ' + (res.unmatched || 0) + ').');
+        else alert('SP 업로드 실패: ' + (res && res.error));
+      } catch (e) { alert('SP 업로드 예외: ' + (e && e.message)); }
+    };
   }
 
   // result 객체 — render 가 받아서 panel + supabase upload 진행

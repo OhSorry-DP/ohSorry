@@ -30,7 +30,7 @@
 // ============================================================
 
 window.OhsorryRender = {
-  VERSION: '0.0.363',
+  VERSION: '0.0.364',
 
   // 진행률 UI — core 의 onProgress 콜백에서 호출
   showProgress: function (msg, pct) {
@@ -396,6 +396,7 @@ window.OhsorryRender = {
         #__dp_score_panel .rec-item .rec-level { flex: 0 0 32px; text-align: right; color: #888; font-variant-numeric: tabular-nums; font-size: 11px; }
         #__dp_score_panel .rec-item .rec-chart { flex: 0 0 12px; text-align: center; font-weight: 600; font-size: 11px; }
       </style>
+      ${(!dbData && !isRival) ? `<button class="__dp_sp_upload" onclick="if(window.OhsorryUploadSP)window.OhsorryUploadSP()" title="SP 10·11·12 기록을 크롤해서 업로드" style="position:absolute;top:11px;right:46px;background:#2b2f36;border:1px solid #495057;color:#74c0fc;padding:3px 9px;border-radius:5px;cursor:pointer;font-size:11px;font-weight:700;font-family:inherit;z-index:2">SP 업로드</button>` : ''}
       <button class="close" onclick="document.getElementById('__dp_score_panel').remove()" title="닫기">×</button>
 
       ${profile ? `
