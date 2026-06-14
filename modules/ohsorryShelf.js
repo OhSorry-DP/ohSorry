@@ -237,11 +237,12 @@
       '  .shelf-song-text { align-self: stretch; white-space: nowrap; overflow: hidden; text-overflow: clip; line-height: 1.25; font-size: 13px; }',
       // PC 우측 오버레이 숨기고, 세 번째 줄 meta 로 EX스코어(좌)+DJ레벨(우) 동시 표시.
       '  .shelf-song-djlv { display: none; }',
-      '  .shelf-song-meta { display: flex; justify-content: flex-start; align-items: baseline; gap: 4px; margin-top: auto; font-size: 11px; font-weight: 700; line-height: 1; white-space: nowrap; overflow: hidden; }',
+      // 2번째 줄: 왼쪽=DJ등급(색)+작은 회색 +컷대비, 오른쪽=흰색 EXScore.
+      '  .shelf-song-meta { display: flex; justify-content: flex-start; align-items: baseline; gap: 2px; margin-top: auto; font-size: 11px; font-weight: 700; line-height: 1; white-space: nowrap; overflow: hidden; }',
       '  .shelf-song-meta-dj { flex-shrink: 0; }',
-      // EX스코어 — 기본색을 brightness 로 살짝 어둡게 (곡명보다 한 단계 어둡게).
-      '  .shelf-song-meta-ex { color: #e9ecef; font-variant-numeric: tabular-nums; filter: brightness(0.8); }',
-      // 등급+컷대비 (예: B+167) — EX스코어보다 더 작고 더 어둡게.
+      // EX스코어 — 흰색, 우측 정렬(margin-left:auto).
+      '  .shelf-song-meta-ex { color: #f8f9fa; font-variant-numeric: tabular-nums; margin-left: auto; }',
+      // +컷대비 (예: +167) — 더 작고 회색.
       '  .shelf-song-meta-diff { font-size: 9px; color: #888; font-variant-numeric: tabular-nums; }',
       // meta(EX/DJ) 가 빈 셀 — meta 줄 숨기고 곡명을 2줄까지 (말줄임표 없이 끝 잘림). 셀 높이는 min-height 로 2줄 유지.
       '  .shelf-song-nometa .shelf-song-meta { display: none; }',
@@ -407,20 +408,20 @@
         var nc = (typeof sc.noteCount === 'number' && sc.noteCount > 0) ? sc.noteCount : 0;
         var metaGrade = (exText && nc) ? djLevelFromScore(sc.exScore, nc) : dj;
         var metaGradeStyle = metaGrade ? ' style="color:' + letterColor(metaGrade) + '"' : '';
-        var metaDiff = '';
+        var metaDiff = '';  // +컷대비 (등급 글자 없이 "+167" 만 — 등급은 meta-dj 가 색으로 표시)
         if (exText && nc && metaGrade) {
           var gmin = djGradeMinEx(metaGrade, nc);
-          if (gmin != null && sc.exScore - gmin >= 0) metaDiff = metaGrade + '+' + (sc.exScore - gmin);
+          if (gmin != null && sc.exScore - gmin >= 0) metaDiff = '+' + (sc.exScore - gmin);
         }
         songsHtml += '<div class="shelf-song' + clickClass + noMetaClass + ' slot-' + escHtml(scSlot) + ' lamp-' + lampBox + '" data-ck="' + ck + '" title="' + tooltip + '">'
           + '<span class="shelf-song-lampbox" style="background:' + LAMP_BG[lampBox] + '"></span>'
           + '<span class="shelf-song-text">' + (isLegg ? '† ' : '') + escHtml(sc.title) + '</span>'
           + '<span class="shelf-song-djlv"' + djStyle + '>' + escHtml(rightText) + '</span>'
-          // 모바일 meta 줄 — DJ등급 + EX스코어 + 등급컷대비. PC 에선 CSS 로 숨김.
+          // 모바일 meta 줄 — 왼쪽: DJ등급(색)+작은 회색 +컷대비, 오른쪽: 흰색 EXScore. PC 에선 CSS 로 숨김.
           + '<span class="shelf-song-meta">'
           + (metaGrade ? '<span class="shelf-song-meta-dj"' + metaGradeStyle + '>' + escHtml(metaGrade) + '</span>' : '')
-          + (exText ? '<span class="shelf-song-meta-ex">' + escHtml(exText) + '</span>' : '')
           + (metaDiff ? '<span class="shelf-song-meta-diff">' + escHtml(metaDiff) + '</span>' : '')
+          + (exText ? '<span class="shelf-song-meta-ex">' + escHtml(exText) + '</span>' : '')
           + '</span>'
           + '</div>';
       }

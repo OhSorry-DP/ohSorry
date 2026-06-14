@@ -2,6 +2,9 @@
 
 ohSorry 의 변경 이력입니다. 사용방법은 [README.md](README.md) 를 참고하세요.
 
+### 2026-06-14 — ohsorryShelf: 서열표 모바일 2번째 줄 재배치 ("C+13  1756")
+- [ohsorryShelf.js](modules/ohsorryShelf.js): 모바일 곡 타일 2번째 줄을 왼쪽=DJ등급(색)+작은 회색 +컷대비, 오른쪽=흰색 EXScore(우측정렬)로 재배치. `meta-diff` 에서 앞 등급 글자 제거(+167 만), `meta-ex` 흰색·`margin-left:auto`, DOM 순서 dj→diff→ex. DP·SP 서열표 공통.
+
 ### 2026-06-14 — 연습추천 개별 건반 피처 모드: 2단계(피처 게이트 → 개인적합)
 - [recommend.js](modules/recommend.js) `buildWeaknessRecs`: 개별 건반 피처(NOTES/CHORD/PEAK/PHRASE/JACK/TRILL/RAND) 선택 시 점수식에 피처를 약하게(~32%) 섞어 성향이 묻히던 것을 **2단계로 분리**. ① `featStrength`(featScore 절대 × 곡내 특화도=7건반 평균 대비 +30점 만점) 상위 `GATE_K`(=max topN×8, 40) **게이트**로 "그 피처 강한 곡" 확정 → ② 그 안에서 `난이도적합·미플레이·미클리어·배치이득·마스터감점`으로 개인적합 정렬. 하드 임계 컷 대신 상대 상위라 후보 고갈 없음. `KB_FEAT_MODES` 분기 — **all·개인차 모드 + 메인(`mode:'all'`)은 불변**.
 
