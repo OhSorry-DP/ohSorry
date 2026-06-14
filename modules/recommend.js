@@ -160,6 +160,8 @@
       SCRATCH:   ['SCRATCH'],
       'SOF-LAN': ['SOF-LAN'],
     };
+    // 개별 건반 피처 모드 — 선택 시 2단계(선택피처 강한 곡 게이트 → 개인적합 정렬)로 분기. 개인차/all 제외.
+    var KB_FEAT_MODES = { NOTES: 1, CHORD: 1, PEAK: 1, PHRASE: 1, JACK: 1, TRILL: 1, RAND: 1 };
 
     // maxClearGameLevel — 사용자가 EC 이상 클리어한 차트 중 최고 game level. low-level 추천 + practiceZasaDefault 산정용.
     var maxClearGameLevel = (function () {
@@ -1092,6 +1094,39 @@
           cp2.bestTotal = 0;
           cp2.layoutBaseTotal = 0;
           cp2.layoutGain = 0;
+        }
+      }
+      // 개별 건반 피처 모드 — 2단계: ① 선택 피처 강한 곡 게이트 ② 그 안에서 개인적합 정렬.
+      //   all·개인차 모드는 위 v1/v2 practiceScore 그대로. "그 피처 성향 곡" 을 점수식에 묻지 않고 먼저 확정해 결과를 확실히 한다.
+      if (KB_FEAT_MODES[mode]) {
+        var selFeat = mode;
+        for (var gi = 0; gi < pool.length; gi++) {
+          var gp = pool[gi];
+          var fAbs = (gp.featScores && typeof gp.featScores[selFeat] === 'number') ? gp.featScores[selFeat] : 0;
+          // 특화도 — 그 곡 7건반 평균 대비 선택 피처가 두드러진 정도 (모든 피처 높은 종합곡보다 그 피처 특화곡 우대).
+          var fmSum = 0, fmN = 0;
+          for (var fmi = 0; fmi < WEAKNESS_FEATS.length; fmi++) {
+            var fv = gp.featScores ? gp.featScores[WEAKNESS_FEATS[fmi]] : null;
+            if (typeof fv === 'number') { fmSum += fv; fmN++; }
+          }
+          var chartMean = fmN > 0 ? fmSum / fmN : 0;
+          var spec = clamp((fAbs - chartMean) / 30, 0, 1);     // +30점 두드러지면 특화 만점
+          gp.featStrength = (fAbs / 100) * (0.6 + 0.4 * spec); // 절대 강도 위주 + 특화 가산
+        }
+        // ① 게이트 — featStrength 상위 GATE_K 곡만 (하드 임계 컷 대신 상대 상위 → 후보 고갈 없이 항상 채워짐).
+        pool.sort(function (a, b) { return (b.featStrength || 0) - (a.featStrength || 0); });
+        var GATE_K = Math.max(topN * 8, 40);
+        if (pool.length > GATE_K) pool.length = GATE_K;
+        // ② 개인적합 정렬 — 피처는 게이트가 확정했으니, 강도 순위 일부 유지 + 난이도적합·미플레이·미클리어·배치이득, 마스터곡 감점.
+        for (var hi = 0; hi < pool.length; hi++) {
+          var hp = pool[hi];
+          hp.practiceScore =
+            (hp.featStrength || 0)    * 0.35 +
+            hp._difficultyFit         * 0.28 +
+            hp._unplayedBonus +
+            hp._lampNeed +
+            (hp.layoutGainScore || 0) * 0.06 -
+            hp._alreadyGoodPenalty;
         }
       }
       pool.sort(function (a, b) { return (b.practiceScore - a.practiceScore) || (a.zasa - b.zasa); });

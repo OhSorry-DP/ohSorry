@@ -2,6 +2,9 @@
 
 ohSorry 의 변경 이력입니다. 사용방법은 [README.md](README.md) 를 참고하세요.
 
+### 2026-06-14 — 연습추천 개별 건반 피처 모드: 2단계(피처 게이트 → 개인적합)
+- [recommend.js](modules/recommend.js) `buildWeaknessRecs`: 개별 건반 피처(NOTES/CHORD/PEAK/PHRASE/JACK/TRILL/RAND) 선택 시 점수식에 피처를 약하게(~32%) 섞어 성향이 묻히던 것을 **2단계로 분리**. ① `featStrength`(featScore 절대 × 곡내 특화도=7건반 평균 대비 +30점 만점) 상위 `GATE_K`(=max topN×8, 40) **게이트**로 "그 피처 강한 곡" 확정 → ② 그 안에서 `난이도적합·미플레이·미클리어·배치이득·마스터감점`으로 개인적합 정렬. 하드 임계 컷 대신 상대 상위라 후보 고갈 없음. `KB_FEAT_MODES` 분기 — **all·개인차 모드 + 메인(`mode:'all'`)은 불변**.
+
 ### 2026-06-14 — analysisRender 0.0.64: 개인평가 막대 + 이유배지 usernorm 정규화
 - [analysisRender.js](modules/analysisRender.js): 개인평가 막대 10피처를 usernorm z 스케일로 통일 — 7건반은 `normalizeWeaknessVec`(popMean 빼고 손별 유저내 z), 개인차 3개(롱노트·스크래치·변속)는 popMean·손분리 개념이 없어 **7건반 raw 잔차 분포 sd 로 z 근사**(중심 보정은 막대의 userMean 차감이 처리) → 막대 길이 비교 일관. 잔차 이유배지도 같은 base(`personalUsernormVec`)로 부호·색 일치. `opts.weaknessPopMean` 없으면 raw fallback(기존 동작). ③④추천(7건반+mirror)엔 안 씀 — 막대/이유배지 전용.
 
