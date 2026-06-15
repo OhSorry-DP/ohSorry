@@ -2,6 +2,9 @@
 
 ohSorry 의 변경 이력입니다. 사용방법은 [README.md](README.md) 를 참고하세요.
 
+### 2026-06-15 — 통계 범례 색 박스 가로 절반
+- [ohsorryRender.js](modules/ohsorryRender.js) `renderLegend`: 난이도별 클리어램프·DJ LEVEL 범례의 색 박스를 `9×9` 정사각 → **`4.5×9`(가로만 절반, 세로 직사각)** 로. gist(`c3da608…`) 재배포로 게스트 페이지(ohSorryWeb)·본체 동시 반영.
+
 ### 2026-06-15 — SP 모드 본인 업로드 시 users 프로필도 저장 (core 0.0.394 / dbConn 0.0.411)
 - 증상: SP만 긁으면 status(djName·SP단위·radar)는 fetch 되지만 `users` 테이블에 저장 안 됨. SP 분기가 `upsertUserChartScores`(scores)만 호출하고 `upsertUserProfile` 은 안 불렀음(early return 으로 일반 흐름의 업로드 블록을 안 탐).
 - [calcOhsorryCore.js](modules/calcOhsorryCore.js) SP 분기: 본인(own) 업로드 시 `upsertUserProfile` 호출 추가 — `dj_name`/`sp_rank`/`dp_rank`/`notes_radar`(SP·DP) 갱신.

@@ -1114,7 +1114,7 @@ window.OhsorryRender = {
           const renderLegend = (palette) => `
             <div style="display:flex;flex-wrap:nowrap;gap:6px 10px;font-size:10px;color:#666;margin-bottom:6px;white-space:nowrap;overflow:hidden">
               ${palette.map(p => `<span style="display:inline-flex;align-items:center;gap:3px">
-                <span style="display:inline-block;width:9px;height:9px;background:${p.color};border-radius:1px"></span>
+                <span style="display:inline-block;width:4.5px;height:9px;background:${p.color};border-radius:1px"></span>
                 ${p.label}
               </span>`).join('')}
             </div>`;
