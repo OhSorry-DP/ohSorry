@@ -72,7 +72,7 @@ window.OhsorryCore = {
   // noRender — show(패널 렌더)를 건너뛰고 result 만 반환. 2차 백그라운드 full compute(패턴분석 userVec 만 필요)에서
   //   전체화면 패널이 깜빡이지 않도록 사용. statsOnly 와 독립.
   const noRender = !!opts.noRender;
-  const CORE_VERSION_SHORT = '0.0.393'.replace(/^0\.0\./, '');  // '393' — SP 모드(playStyle:'SP' 경량 크롤+본인 업로드+오소리웹 이동)
+  const CORE_VERSION_SHORT = '0.0.394'.replace(/^0\.0\./, '');  // '394' — SP 모드 본인 업로드 시 users 프로필(dj_name/단위/radar)도 저장(star/ereter_star 기존값 보존)
   const dbVersionString = `${wrapperVersion}-core${CORE_VERSION_SHORT}`;
   dbData = dbData || null;
   // 추천 풀의 chart 마다 c.layoutLabel (= w8.bestLabel) 가 채워지면 이 closure map 에도 동시에 기록.
@@ -1274,6 +1274,28 @@ window.OhsorryCore = {
     const spPlayed = (allCharts || []).filter((c) => c.exScore > 0 || c.lampNum > 0);
     let spUploaded = null;
     if (!dbData && !isRival && spIidx && window.OhsorryDb && window.OhsorryDb.upsertUserChartScores) {
+      // 5.6b. 프로필(users + user_radars) 저장 — SP 모드는 ★분석을 안 하므로 star/ereter_star 를 새로
+      //   계산하지 않는다. upsert_user 가 그 둘을 EXCLUDED 로 무조건 덮어쓰는 정책(02_users.sql)이라,
+      //   기존 값을 조회해 그대로 재전송(없으면 null). dj_name/sp_rank/dp_rank/radar 는 status fetch 값으로 갱신.
+      try {
+        let prevStar = null, prevEreterStar = null;
+        if (window.OhsorryDb.fetchUserStars) {
+          const prev = await window.OhsorryDb.fetchUserStars(spIidx);
+          if (prev) { prevStar = prev.star; prevEreterStar = prev.ereter_star; }
+        }
+        await window.OhsorryDb.upsertUserProfile({
+          iidx_id: spIidx,
+          dj_name: profile.djName || null,
+          star_estimate: prevStar,       // 기존값 보존 (없으면 null)
+          ereter_star: prevEreterStar,   // 기존값 보존 (없으면 null)
+          sp_rank: profile.spRank || null,
+          dp_rank: profile.dpRank || null,
+          notes_radar: profileHasRadar
+            ? { sp: hasRadarData(profile.spRadar) ? profile.spRadar : null, dp: hasRadarData(profile.dpRadar) ? profile.dpRadar : null }
+            : null,
+        });
+      } catch (e) { console.warn('[SP profile upsert]', e && e.message); }
+
       const nowIsoSp = new Date().toISOString();
       const spRows = spPlayed
         .filter((c) => c.gameLevel >= 10 && c.gameLevel <= 12)

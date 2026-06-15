@@ -448,6 +448,30 @@ window.OhsorryDb = (function () {
     return data;
   }
 
+  // 기존 user row 의 star / ereter_star 만 조회 (없으면 둘 다 null).
+  //   upsert_user 는 star / ereter_star 를 EXCLUDED 로 무조건 덮어쓰는 정책(02_users.sql)이라,
+  //   ★분석을 안 하는 SP 모드에서 프로필을 저장할 때 기존 값을 SELECT 해 그대로 재전송해야 보존됨.
+  //   (users RLS: FOR SELECT USING(true) + anon GRANT → anon key 로 조회 가능. dbr_pw 만 제외.)
+  async function fetchUserStars(iidxId) {
+    const id = String(iidxId || '').trim().replace(/-/g, '');
+    if (!id) return { star: null, ereter_star: null };
+    try {
+      const url = SUPABASE_URL + '/rest/v1/users'
+        + `?iidx_id=eq.${encodeURIComponent(id)}&select=star,ereter_star&limit=1`;
+      const res = await fetch(url, { headers: HEADERS });
+      if (!res.ok) return { star: null, ereter_star: null };
+      const rows = await res.json();
+      const r = Array.isArray(rows) && rows.length ? rows[0] : null;
+      return {
+        star: r && r.star != null ? r.star : null,
+        ereter_star: r && r.ereter_star != null ? r.ereter_star : null,
+      };
+    } catch (e) {
+      console.warn('[OhsorryDb] fetchUserStars 실패:', e && e.message);
+      return { star: null, ereter_star: null };
+    }
+  }
+
   // ============================================================
   // uploadResult — 결과 패널 렌더 직후의 supabase 업로드 trigger.
   // ohsorryRender 의 supabase upload 블록을 흡수. DB 모드 (dbData 있음) 자동 skip.
@@ -671,11 +695,12 @@ window.OhsorryDb = (function () {
   }
 
   return {
-    VERSION: '0.0.410',
+    VERSION: '0.0.411',
     upsertUserProfile: upsertUserProfile,
     upsertUserChartScores: upsertUserChartScores,
     uploadResult: uploadResult,
     fetchUserProfile: fetchUserProfile,
+    fetchUserStars: fetchUserStars,
     fetchServiceStatus: fetchServiceStatus,
     getSongsByNorm: getSongsCache,  // Map<normKey, [{ song_id, title, ac, legen }]> — INF/AC 차트 단위 필터링용
   };

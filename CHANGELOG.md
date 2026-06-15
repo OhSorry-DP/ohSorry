@@ -2,6 +2,12 @@
 
 ohSorry 의 변경 이력입니다. 사용방법은 [README.md](README.md) 를 참고하세요.
 
+### 2026-06-15 — SP 모드 본인 업로드 시 users 프로필도 저장 (core 0.0.394 / dbConn 0.0.411)
+- 증상: SP만 긁으면 status(djName·SP단위·radar)는 fetch 되지만 `users` 테이블에 저장 안 됨. SP 분기가 `upsertUserChartScores`(scores)만 호출하고 `upsertUserProfile` 은 안 불렀음(early return 으로 일반 흐름의 업로드 블록을 안 탐).
+- [calcOhsorryCore.js](modules/calcOhsorryCore.js) SP 분기: 본인(own) 업로드 시 `upsertUserProfile` 호출 추가 — `dj_name`/`sp_rank`/`dp_rank`/`notes_radar`(SP·DP) 갱신.
+  - **`star`/`ereter_star` 는 SP 모드가 ★분석을 안 하므로 새로 계산하지 않음.** `upsert_user` 가 그 둘을 `EXCLUDED` 로 무조건 덮어쓰는 정책([02_users.sql](../ohSorryAdmin/sql/02_users.sql))이라, null 을 보내면 기존 DP 분석값이 소실됨 → **기존 값을 조회해 그대로 재전송**(없으면 null). `native_star` 는 COALESCE 라 미전송 시 자동 보존.
+- [dbConn.js](modules/dbConn.js): `fetchUserStars(iidxId)` 추가 — `/rest/v1/users?select=star,ereter_star` 로 기존값 조회(anon 가능, users RLS `FOR SELECT USING(true)`). getInfRadar batch 의 보존 패턴과 동일.
+
 ### 2026-06-14 — 본체 SP 모드 (core 0.0.393 / render 0.0.365)
 - [ohsorry.js](ohsorry.js): 곡 데이터 모달 상단에 **DP / SP 탭**(본인 모드만). SP 선택 시 레벨/전곡 선택 숨기고 "SP는 10·11·12 자동" 안내 → `opts.playStyle='SP'`.
 - [calcOhsorryCore.js](modules/calcOhsorryCore.js): `playStyle==='SP'` → **SP 경량 분기**(★추정·추천 전부 스킵) — style=0 크롤, 본인은 SP10~12 `play_style:0` 자동 업로드, 최소 result(`spMode`). **라이벌은 토글 없이 DP 분석/업로드 후 SP10~12 도 자동 크롤·업로드**(웹 SP 표시용, 표시는 DP 패널 그대로).
