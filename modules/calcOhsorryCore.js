@@ -72,6 +72,9 @@ window.OhsorryCore = {
   // noRender — show(패널 렌더)를 건너뛰고 result 만 반환. 2차 백그라운드 full compute(패턴분석 userVec 만 필요)에서
   //   전체화면 패널이 깜빡이지 않도록 사용. statsOnly 와 독립.
   const noRender = !!opts.noRender;
+  // headless — [구조개편 Phase 2A] 결과 패널 렌더 없이 업로드만 (헤드리스 크롤러). render 경유가 아니라
+  //   OhsorryDb.uploadResult 직접 호출 → "업로드↔렌더 결합" 분리. 기본 off(동작 불변). 2B 에서 wrapper 가 켠다.
+  const headless = !!opts.headless;
   const CORE_VERSION_SHORT = '0.0.394'.replace(/^0\.0\./, '');  // '394' — SP 모드 본인 업로드 시 users 프로필(dj_name/단위/radar)도 저장(star/ereter_star 기존값 보존)
   const dbVersionString = `${wrapperVersion}-core${CORE_VERSION_SHORT}`;
   dbData = dbData || null;
@@ -1494,11 +1497,26 @@ window.OhsorryCore = {
     layoutMap: __pdLayoutMap,   // ohSorryWeb PlayData 탭 — (norm(title) + '|' + diff) → bestLabel
   };
 
-  // ohsorryRender 모듈은 wrapper 가 미리 fetch 해서 window.OhsorryRender 로 노출했다고 가정.
-  // wrapper 가 안 띄웠다면 console.error 만 — 결과 객체는 return 으로 반환되니 호출자가 처리 가능.
-  if (!noRender && window.OhsorryRender && window.OhsorryRender.show) {
+  // [Phase 2A] 헤드리스 — 결과 패널 없이 업로드만. render(웹 정본 gist) 의 내부 upsert 트리거에 의존하지 않고
+  //   OhsorryDb.uploadResult 를 직접 호출 (업로드↔렌더 분리). DB 모드(다른 유저 열람)는 uploadResult 가 자동 skip.
+  //   풀 모드와 상호배타 → 이중 업로드 없음. 기본 off 라 아래 풀 모드 경로는 동작 불변.
+  if (headless) {
+    if (window.OhsorryDb && window.OhsorryDb.uploadResult) {
+      try {
+        const up = await window.OhsorryDb.uploadResult(result, { dbData });
+        if (up && up.skipped) console.log(`[오소리] 헤드리스 — 업로드 skip (${up.reason})`);
+        else console.log('[오소리] 업로드 완료 — 결과는 https://ohsorry.iidx.in 에서 확인하세요.');
+      } catch (e) {
+        console.warn('[OhsorryCore] headless uploadResult 예외:', e && e.message);
+      }
+    } else {
+      console.warn('[OhsorryCore] headless: OhsorryDb.uploadResult 없음 — 업로드 못 함');
+    }
+  } else if (!noRender && window.OhsorryRender && window.OhsorryRender.show) {
+    // ohsorryRender 모듈은 wrapper 가 미리 fetch 해서 window.OhsorryRender 로 노출했다고 가정.
     await window.OhsorryRender.show(result, { statsOnly });
   } else {
+    // wrapper 가 안 띄웠거나 noRender — 결과 객체는 return 으로 반환되니 호출자가 처리 가능. (원래 동작 유지)
     console.error('[OhsorryCore] window.OhsorryRender 가 없습니다. wrapper 가 ohsorryRender.js 를 fetch 하지 않았을 수 있어요.');
   }
 

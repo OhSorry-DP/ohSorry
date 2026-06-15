@@ -2,6 +2,11 @@
 
 ohSorry 의 변경 이력입니다. 사용방법은 [README.md](README.md) 를 참고하세요.
 
+### 2026-06-16 — 구조개편 Phase 2A: 업로드↔렌더 분리 (헤드리스 직접 업로드 경로)
+- [calcOhsorryCore.js](modules/calcOhsorryCore.js): `opts.headless` 플래그 추가 + 결과 패널 렌더 호출부에 헤드리스 분기 신설. 헤드리스 시 `OhsorryRender.show`(웹 정본 gist, 내부 upsert 트리거) 대신 **`OhsorryDb.uploadResult` 직접 호출** → "업로드↔렌더 결합" 분리. UX(A): 업로드 후 `ohsorry.iidx.in` 안내 로그.
+- 풀 모드와 상호배타(headless=skip render / 풀=core 직접호출 안 함) → 이중 업로드 없음. **기본 off 라 비-헤드리스 경로 동작 불변**(렌더→업로드 그대로). wrapper 가 headless 를 켜는 건 Phase 2B.
+- 검증: `node --check` OK. `uploadResult` 는 자족적(dbPayload+chartScoreRows 만, DB모드 자동 skip — §6 조사)이라 추가 의존 없음.
+
 ### 2026-06-16 — 구조개편 Phase 2-0: 별값 구 lib(oldOSR/osr/adopt) 로드·계산 제거 (경량화)
 - 별값이 v3.4.0 에서 `onlyOSR + onlyOSRtoEreter + OSR13.5+` 로 바뀐 뒤, 구 `oldOSR`/`osr`/`adopt` 채택 로직(~160줄)이 **결과가 onlyOSRtoEreter 에 override 돼 사장**된 채 남아 있던 것 정리.
 - [calcOhsorryCore.js](modules/calcOhsorryCore.js): 구 3 lib gist fetch+eval **제거**(URL 상수·로드 try·변수 포함), 구 채택 계산 블록(oldOSR→osr→OSR135-blend→adopt, 974~1136) 제거, result 의 `starEstimateOld`/`EreterOnly`/`Lv12Only`/`All` 비교 필드 제거. **유지**: `OSR13.5+`(onlyOSRtoEreter 13.5 tier 의존)·`onlyOSR`·`onlyOSRtoEreter`.
