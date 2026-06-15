@@ -275,13 +275,9 @@ window.OhsorryCore = {
   //   fetch 실패 시 localStorage 캐시 사용. 캐시도 없으면 ohSorry 동작 불가 (에러 표시).
   const GIST_RAW = 'https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw';
   const OHSORRY_RATING_URL = GIST_RAW + '/ohSorryRating.json';
-  const CALC_OLD_OSR_URL = GIST_RAW + '/oldOSR.js';
-  const CALC_OSR_URL = GIST_RAW + '/osr.js';
-  // v3.3.5: OSR13.5+ (bin50 + 50% 임계 + 상향 bin 부분 보너스) — 13.5 이상 시 ensemble 오버라이드
+  // v3.3.5: OSR13.5+ (bin50 + 50% 임계 + 상향 bin 부분 보너스) — onlyOSRtoEreter 의 13.5 tier 의존
   const CALC_OSR135_URL = GIST_RAW + '/OSR13.5%2B.js';
-  // v3.3.7: adopt.js — v335E 채택 분기 (세 lib raw 값 → 최종 ★) 통합 lib
-  const CALC_ADOPT_URL = GIST_RAW + '/adopt.js';
-  // v3.4.0: onlyOSR (전체곡 50% native) + onlyOSRtoEreter (ereter★ 변환, OSR13.5 tier) — adopt 대체
+  // v3.4.0: onlyOSR (전체곡 50% native) + onlyOSRtoEreter (ereter★ 변환, OSR13.5 tier). [Phase 2-0] oldOSR/osr/adopt 제거
   const CALC_ONLYOSR_URL = GIST_RAW + '/onlyOSR.js';
   const CALC_ONLYOSR2E_URL = GIST_RAW + '/onlyOSRtoEreter.js';
   // ohsorryShelf.js — renderChartRow (추천곡 곡명 클릭 토스트용). 실패해도 무시.
@@ -354,35 +350,13 @@ window.OhsorryCore = {
     console.error('[step2] ohSorryRating 로드 실패:', e.message);
   }
 
-  // oldOSR.js (v3.3.3 모델) + osr.js (v0.0.2 모델) + OSR13.5+.js + adopt.js lib fetch + eval
-  //   eval 은 UMD wrapper 라 window.oldOSR / window.ohSorryRating / window.OSR135 / window.adopt 글로벌 등록
-  // v3.3.8: DB 모드 (dbData 있음 = ohSorryWeb 게스트 페이지 / INF) 일 때는 fetch 자체 skip.
-  //   ★ 추정은 dbData.star_estimate 를 그대로 사용하므로 4 lib (oldOSR / osr / OSR13.5+ / adopt) 다 필요 없음.
-  //   ohSorryWeb 게스트 페이지 진입 시 그만큼 다운로드 절감 + lib eval 비용 절감.
-  let oldOSR = null, ohSorryRatingLib = null, osr135Lib = null, shelfLib = null;
-  let adoptLib = null;
-  let onlyOSRLib = null, onlyOSR2eLib = null;  // v3.4.0
+  // [Phase 2-0] 별값 lib: OSR13.5+ + onlyOSR + onlyOSRtoEreter (구 oldOSR/osr/adopt 제거 — 결과가 사장됐었음).
+  //   eval 은 UMD wrapper 라 window.OSR135 / window.onlyOSR / window.onlyOSRtoEreter 글로벌 등록.
+  // DB 모드 (ohSorryWeb 게스트 / INF) 면 fetch 자체 skip — dbData.star_estimate/native_star 그대로 사용.
+  let osr135Lib = null, shelfLib = null;
+  let onlyOSRLib = null, onlyOSR2eLib = null;  // v3.4.0 (+ Phase 2-0)
   if (!dbData) {
-    try {
-      const { data: oldOSRSrc, source: oldSrc } = await loadWithCache(CALC_OLD_OSR_URL, 'ohSorry:libOldOSR', false);
-      // UMD 가 window 에 등록 — IIFE 실행
-      (new Function(oldOSRSrc))();
-      oldOSR = window.oldOSR;
-      if (!oldOSR) throw new Error('oldOSR global 등록 실패');
-      console.log(`[step2] oldOSR.js v${oldOSR.version} 로드 (${oldSrc})`);
-    } catch (e) {
-      console.error('[step2] oldOSR.js 로드 실패:', e.message);
-    }
-    try {
-      const { data: osrSrc, source: newSrc } = await loadWithCache(CALC_OSR_URL, 'ohSorry:libOSR', false);
-      (new Function(osrSrc))();
-      ohSorryRatingLib = window.ohSorryRating;
-      if (!ohSorryRatingLib) throw new Error('ohSorryRating global 등록 실패');
-      console.log(`[step2] osr.js 로드 (${newSrc})`);
-    } catch (e) {
-      console.error('[step2] osr.js 로드 실패:', e.message);
-    }
-    // v3.3.5: OSR13.5+ lib (13.5 이상 ★ 정확도 ↑)
+    // v3.3.5: OSR13.5+ lib (13.5 이상 ★ 정확도 ↑) — onlyOSRtoEreter 13.5 tier 의 window.OSR135 의존
     try {
       const { data: osr135Src, source: src135 } = await loadWithCache(CALC_OSR135_URL, 'ohSorry:libOSR135', false);
       (new Function(osr135Src))();
@@ -391,16 +365,6 @@ window.OhsorryCore = {
       console.log(`[step2] OSR13.5+.js v${osr135Lib.version} 로드 (${src135})`);
     } catch (e) {
       console.error('[step2] OSR13.5+.js 로드 실패:', e.message);
-    }
-    // v3.3.7: adopt.js — v335E 채택 분기 통합 lib (세 lib raw → 최종 ★)
-    try {
-      const { data: adoptSrc, source: srcAdopt } = await loadWithCache(CALC_ADOPT_URL, 'ohSorry:libAdopt', false);
-      (new Function(adoptSrc))();
-      adoptLib = window.adopt;
-      if (!adoptLib) throw new Error('adopt global 등록 실패');
-      console.log(`[step2] adopt.js v${adoptLib.version} 로드 (${srcAdopt})`);
-    } catch (e) {
-      console.error('[step2] adopt.js 로드 실패:', e.message, '— 본체 inline 분기 fallback');
     }
     // v3.4.0: onlyOSR + onlyOSRtoEreter (★ = native 50% → ereter 변환, OSR13.5 tier). window.OhsorryNorm/OSR135 선행 필요(이미 로드됨).
     try {
@@ -414,10 +378,10 @@ window.OhsorryCore = {
       if (!onlyOSR2eLib) throw new Error('onlyOSRtoEreter global 등록 실패');
       console.log(`[step2] onlyOSR v${onlyOSRLib.version} + onlyOSRtoEreter v${onlyOSR2eLib.version} 로드`);
     } catch (e) {
-      console.error('[step2] onlyOSR/onlyOSRtoEreter 로드 실패 — adopt 값 유지:', e.message);
+      console.warn('[step2] onlyOSR/onlyOSRtoEreter 로드 실패 — ★/native_star 미산출(기존 supabase 값 보존):', e.message);
     }
   } else {
-    console.log('[step2] DB 모드 — ★ 추정 lib 4종 (oldOSR / osr / OSR13.5+ / adopt) fetch skip');
+    console.log('[step2] DB 모드 — ★ 추정 lib (OSR13.5+ / onlyOSR / onlyOSRtoEreter) fetch skip');
   }
   // ohsorryShelf.js — 추천곡 곡명 클릭 토스트 (renderChartRow) 용. 실패해도 무시 (토스트만 비활성).
   try {
@@ -944,19 +908,11 @@ window.OhsorryCore = {
   // v3.3.4: ★ 추정 모델 (runStarModel) 은 외부 lib (oldOSR.js, osr.js) 으로 분리됨.
   //   본체에는 stub 만 — 아래 dead code 는 일괄 제거. 외부 lib fetch + ensemble 흐름은 step2 끝에서 처리.
 
-  // ----- v3.3.5: 외부 lib 3종 (oldOSR + OSR + OSR135) 분기 채택 -----
-  //   oldOSR (v3.3.3): runStarModel — fallback 용 (OSR 실패 시)
-  //   OSR (v0.0.2):    IRT + ridge OLS 기반 user★ 추정 (ereter scale) — 13 미만 영역 메인
-  //   OSR135 (v0.0.2): bin50 + 50% 임계 + 상향 bin 부분 보너스 — 13+ 영역 메인 (14+ MAE 0.014)
-  //   분기 (D2): OSR135 ≥ 13.0 → OSR135 / else → OSR / 둘 다 없으면 oldOSR
+  // ----- 별값 (★) — v3.4.0 / Phase 2-0: onlyOSR(native) + onlyOSRtoEreter(ereter★, OSR13.5 tier) -----
+  //   비-DB: 아래 v3.4.0 블록이 산출. DB: supabase 저장 star_estimate/native_star 그대로.
   let starEstimate = null;
   let starRaw = null;
-  let starEstimateOld = null;
-  let starEstimateNew = null;
-  // 4종 모드별 비교용 (상세통계 패널에 작은 텍스트 표시 유지)
-  let starEstimateEreterOnly = null;
-  let starEstimateLv12Only = null;
-  let starEstimateAll = null;
+  let starEstimateNew = null;  // 추천 풀 baseStar (= native, onlyOSR) — v3.4.0 블록에서 셋업
   // INF DB 데이터 판별 — INFOhSorry 가 series:'INF' / version:'INFv...' 로 업로드함 (로그 라벨 분기 용)
   const isInfData = !!dbData && (dbData.series === 'INF' ||
     (typeof dbData.version === 'string' && dbData.version.indexOf('INF') === 0));
@@ -970,174 +926,15 @@ window.OhsorryCore = {
     starEstimateNew = starEstimate;  // 추천 풀 baseStar (ohsorryRecBase) 용 — supabase 저장 ★ 와 동일
     const label = isInfData ? 'INF DB' : 'AC DB';
     console.log(`[오소리] ${label} 데이터 — ★ 모델 스킵, supabase 저장 ★${starEstimate != null ? starEstimate.toFixed(2) : 'N/A'} 그대로 사용`);
-  } else {
-  if (oldOSR && ratingData && Array.isArray(ereterData) && ereterData.length > 0) {
-    try {
-      const ereterPayload = { charts: ereterData, players: ereterPlayers || {} };
-      const r = oldOSR.inferUser(allCharts, ratingData, ereterPayload);
-      starEstimateOld = r.starEstimate;
-      starRaw = r.starRaw;
-      starEstimateEreterOnly = r.starEstimates?.ereterOnly ?? null;
-      starEstimateLv12Only = r.starEstimates?.lv12Only ?? null;
-      starEstimateAll = r.starEstimates?.all ?? null;
-      console.log(`[step2] oldOSR (v3.3.3): ★${starEstimateOld != null ? starEstimateOld.toFixed(2) : 'N/A'} (raw=${starRaw != null ? starRaw.toFixed(2) : 'N/A'}, adopted=${r.adopted}, n=${r.fitLen}, lamps=${r.validStages.join('/')})`);
-    } catch (e) {
-      console.error('[step2] oldOSR.inferUser 실패:', e.message);
-    }
   }
-  let osrGroup = null;  // tiered 그룹 (A/B/C) — 표기 분기에서 사용
-  if (ohSorryRatingLib && ratingData) {
-    try {
-      // v3.3.4: tiered 사용 (그룹별 scope + B 보정) — lib 에 inferUserTiered 가 있으면 사용
-      const useTiered = typeof ohSorryRatingLib.inferUserTiered === 'function';
-      const r = useTiered ? ohSorryRatingLib.inferUserTiered(allCharts, ratingData) : ohSorryRatingLib.inferUser(allCharts, ratingData);
-      starEstimateNew = typeof r.ereterCompatStar === 'number' ? r.ereterCompatStar : null;
-      osrGroup = r.group || null;
-      const tieredInfo = useTiered && r.group ? ` [tiered:${r.group} lv12cl=${r.nLv12Cleared} z12cl=${r.nZ12_0upCleared} corr=${r.bandCorrection >= 0 ? '+' : ''}${r.bandCorrection?.toFixed(3) ?? 0}]` : '';
-      console.log(`[step2] OSR (v0.0.2${useTiered ? ' tiered' : ''}): ★${starEstimateNew != null ? starEstimateNew.toFixed(2) : 'N/A'}${tieredInfo} (native=${typeof r.nativeStar === 'number' ? r.nativeStar.toFixed(2) : 'N/A'}, n_enriched=${r.nEnriched || 0})`);
-    } catch (e) {
-      console.error('[step2] ohSorryRating.inferUser 실패:', e.message);
-    }
-  }
-  // v3.3.5: OSR13.5+ 계산 — OSR >= 13.5 + OSR135 >= 13.5 면 오버라이드, 아니면 oldOSR
-  let starEstimate135 = null;
-  let osr135Meta = null;  // { ec, hc, exh } — spread gate 용 (세 분기 일관성 판정)
-  if (osr135Lib && ereterData && Array.isArray(ereterData) && ereterData.length > 0) {
-    try {
-      const r135 = osr135Lib.inferUser(allCharts, { charts: ereterData });
-      starEstimate135 = r135.starEstimate;
-      osr135Meta = { ec: r135.ec.final, hc: r135.hc.final, exh: r135.exh.final };
-      console.log(`[step2] OSR13.5+ (v${osr135Lib.version}): ★${starEstimate135 != null ? starEstimate135.toFixed(2) : 'N/A'} (adopted=${r135.adopted}, EC=${r135.ec.final.toFixed(2)}, HC=${r135.hc.final.toFixed(2)}, EXH=${r135.exh.final.toFixed(2)})`);
-    } catch (e) {
-      console.error('[step2] OSR13.5+.inferUser 실패:', e.message);
-    }
-  }
+  // [Phase 2-0, 2026-06-16] 구 별값 채택(oldOSR/osr/OSR13.5+/adopt) 제거.
+  //   v3.4.0 부터 결과가 아래 onlyOSRtoEreter 에 override 돼 사장됐던 ~160줄. 비-DB 별값은
+  //   아래 v3.4.0 블록(onlyOSR native + onlyOSRtoEreter, OSR13.5 tier)이 산출한다.
+  //   실패 시 starEstimate/nativeStar = null → 기존 supabase 값 보존(아래 dbPayload) + console.warn.
 
-  // v3.3.7: adopt.js (lib) 사용 가능하면 v335E 채택 분기 lib 호출. 실패 시 본체 inline fallback.
-  //   adopt 안에서 group C 2-scope max + baseStar2 + spread gate + under-blend 다 처리.
-  if (adoptLib) {
-    const r = adoptLib.adoptStar({
-      starOld: starEstimateOld, starNew: starEstimateNew, star135: starEstimate135,
-      starEreterOnly: starEstimateEreterOnly, starLv12Only: starEstimateLv12Only,
-      osr135Stages: osr135Meta, group: osrGroup,
-    });
-    starEstimate = r.star;
-    starEstimateOld = r.oldStarUsed;  // group C 2-scope 적용 후 값 (UI 표시 일관성)
-    console.log(`[step2] ★ = ${r.adoptedLib} ${typeof r.star === 'number' ? r.star.toFixed(2) : 'N/A'} ` +
-      `(adopt v${adoptLib.version}, group ${osrGroup}, OSR135=${typeof starEstimate135 === 'number' ? starEstimate135.toFixed(2) : 'N/A'} ` +
-      `OSR=${typeof starEstimateNew === 'number' ? starEstimateNew.toFixed(2) : 'N/A'} ` +
-      `old=${typeof r.oldStarUsed === 'number' ? r.oldStarUsed.toFixed(2) : 'N/A'}` +
-      (r.osr135Trusted ? '' : ' ⚠ OSR135 spread > 2.5') + ')');
-  } else {
-  // ===== adopt.js fetch 실패 시 inline fallback (이전 분기 로직 그대로) =====
-  // group C 인 경우 oldOSR 의 4종 max 에서 all-11.6+ scope 제외 — ereterOnly / lv12Only 중 max 로 재계산
-  //   이유: group C (12.0+ 클리어 ≥ 30) 고수는 ratingMap 의 lv11 추정곡 보강이 오히려 잡음
-  //   group C 면 useOnlyLv12=true 보장 (12.0+ 클리어 30+ → lv12 플레이 30+) → primary === lv12Only 라 추가 채택 불필요
-  if (osrGroup === 'C' && (starEstimateEreterOnly != null || starEstimateLv12Only != null)) {
-    const cands = [starEstimateEreterOnly, starEstimateLv12Only].filter(x => typeof x === 'number');
-    const newOldStar = Math.max(...cands);
-    console.log(`[step2] group C → oldOSR all-11.6+ 제외, max(ereter=${starEstimateEreterOnly?.toFixed(2) ?? 'N/A'}, lv12=${starEstimateLv12Only?.toFixed(2) ?? 'N/A'}) = ${newOldStar.toFixed(2)} (기존 4종 max ${starEstimateOld?.toFixed(2) ?? 'N/A'})`);
-    starEstimateOld = newOldStar;
-  }
-
-  // 채택 로직 (v335E — 1021명 검증 통과) — D3 분기 + spread gate:
-  //   [신뢰도 게이트] OSR135 세 분기(EC/HC/EXH) 중 0(데이터 없음) 제외, max-min spread > 2.5 면
-  //                  OSR135 내부 불일치 → 신뢰 X → baseStar2 직행
-  //   spread ≤ 2.5 일 때만 OSR135 사용:
-  //     ≥13.5            → OSR135 직행 (14+ 정확도 핵심)
-  //     12.5 ≤ x < 13.5  → 블렌드 구간:
-  //         osr > osr135 → 기본 OSR135 직행. 단, OSR135 ≥ 13.0 + gap ≥ 0.35 면 낮은 base 와 제한 블렌드
-  //         diffBlend = baseStar2 ↔ osr135 (osr135 위치로 12.5~13.5 선형)
-  //         gapW = clamp((osr135 - osr) / 3) — gap 작으면 diffBlend, 크면 (osr 망가짐) osr135 직행
-  //         최종 = diffBlend × (1-gapW) + osr135 × gapW
-  //     < 12.5           → baseStar2
-  //   group 별 base 값 (baseStar2):
-  //     group A·B → OSR  (없으면 oldOSR fallback)
-  //     group C   → OSR값 ≥ 11.0 → OSR / < 11.0 → oldOSR / 10.5~11.0 보간
-  // 내부 계산용 starEstimateNew (OSR) 는 그대로 유지 — 추천 풀 baseStar (ohsorryRecBase) 에서 사용
-  const OSR135_TH = 13.5;       // OSR135 직행 하한
-  const BLEND_W = 1.0;          // 12.5~13.5 블렌드 폭
-  const GAP_GUARD = 3.0;        // OSR135-OSR gap (osr 망가짐 판정)
-  const SPREAD_MAX = 2.5;       // OSR135 세 분기 spread 신뢰 상한
-  const OSR135_UNDER_TH = 13.0;  // OSR>OSR135 과소평가 보정 하한 (12점대 과상승 방지)
-  const OSR135_UNDER_GAP = 0.35; // OSR 과 OSR135 차이가 충분히 큰 경우만 보정
-  const isAB135 = osrGroup === 'A' || osrGroup === 'B';
-  // group 별 base 값 (baseStar2) + 로그 라벨 (groupLib)
-  let baseStar2, groupLib;
-  if (isAB135) {
-    baseStar2 = starEstimateNew != null ? starEstimateNew : starEstimateOld;
-    groupLib = starEstimateNew != null ? 'OSR' : 'oldOSR(fb)';
-  } else {
-    // group C: 11~13 은 OSR 가 최강 → OSR값 ≥ 11.0 → OSR / < 11.0 → oldOSR / 10.5~11.0 보간
-    const C_TH = 11.0, C_W = 0.5;
-    if (starEstimateNew != null && starEstimateNew >= C_TH) {
-      baseStar2 = starEstimateNew; groupLib = 'OSR(C)';
-    } else if (starEstimateNew != null && starEstimateNew >= C_TH - C_W && starEstimateOld != null) {
-      const ct = (starEstimateNew - (C_TH - C_W)) / C_W;
-      baseStar2 = starEstimateOld * (1 - ct) + starEstimateNew * ct;
-      groupLib = 'OSR↔oldOSR(C)';
-    } else if (starEstimateOld != null) {
-      baseStar2 = starEstimateOld; groupLib = 'oldOSR(C)';
-    } else {
-      baseStar2 = starEstimateNew; groupLib = 'OSR(C,fb)';
-    }
-  }
-  // OSR135 신뢰도 게이트 — 세 분기 spread > 2.5 면 OSR135 안 씀
-  let osr135Trusted = true;
-  if (osr135Meta) {
-    const stages = [osr135Meta.ec, osr135Meta.hc, osr135Meta.exh].filter((v) => typeof v === 'number' && v > 0.01);
-    if (stages.length >= 2 && (Math.max(...stages) - Math.min(...stages)) > SPREAD_MAX) osr135Trusted = false;
-  }
-  // 채택 분기 (v335E 와 동일)
-  if (starEstimate135 == null) {
-    starEstimate = baseStar2;
-    if (baseStar2 != null) console.log(`[step2] ★ = ${groupLib} ${starEstimate.toFixed(2)} (group ${osrGroup}, OSR135 결과 없음)`);
-    else console.error('[step2] 모든 lib 실패 — ★ 추정 불가. lib fetch + localStorage 캐시 모두 실패 가능성');
-  } else if (!osr135Trusted) {
-    starEstimate = baseStar2 != null ? baseStar2 : starEstimate135;
-    const lib = baseStar2 != null ? groupLib : 'OSR13.5+(fb)';
-    console.log(`[step2] ★ = ${lib} ${starEstimate.toFixed(2)} (OSR135 spread > ${SPREAD_MAX} → 불신, 세 분기 ${osr135Meta.ec.toFixed(2)}/${osr135Meta.hc.toFixed(2)}/${osr135Meta.exh.toFixed(2)})`);
-  } else if (starEstimate135 >= OSR135_TH) {
-    starEstimate = starEstimate135;
-    console.log(`[step2] ★ = OSR13.5+ ${starEstimate.toFixed(2)} (≥ ${OSR135_TH})`);
-  } else if (starEstimate135 < OSR135_TH - BLEND_W || baseStar2 == null) {
-    starEstimate = baseStar2 != null ? baseStar2 : starEstimate135;
-    const lib = baseStar2 != null ? groupLib : 'OSR13.5+(fb)';
-    const reason = baseStar2 != null ? `OSR135 ${starEstimate135.toFixed(2)} < ${OSR135_TH - BLEND_W}` : 'group lib 없음';
-    console.log(`[step2] ★ = ${lib} ${starEstimate.toFixed(2)} (${reason})`);
-  } else if (starEstimateNew != null && starEstimateNew > starEstimate135) {
-    const lowBase = Math.min(
-      starEstimateNew,
-      starEstimateOld != null ? starEstimateOld : starEstimateNew,
-    );
-    if (
-      starEstimate135 >= OSR135_UNDER_TH &&
-      starEstimateNew - starEstimate135 >= OSR135_UNDER_GAP &&
-      lowBase > starEstimate135
-    ) {
-      starEstimate = starEstimate135 * 0.35 + lowBase * 0.65;
-      console.log(`[step2] ★ = OSR13.5+ under-blend ${starEstimate.toFixed(2)} (osr ${starEstimateNew.toFixed(2)} > osr135 ${starEstimate135.toFixed(2)}, lowBase ${lowBase.toFixed(2)})`);
-    } else {
-      starEstimate = starEstimate135;
-      console.log(`[step2] ★ = OSR13.5+ ${starEstimate.toFixed(2)} (osr ${starEstimateNew.toFixed(2)} > osr135 → 직행)`);
-    }
-  } else {
-    const t = (starEstimate135 - (OSR135_TH - BLEND_W)) / BLEND_W;
-    const diffBlend = baseStar2 * (1 - t) + starEstimate135 * t;
-    if (starEstimateNew == null) {
-      starEstimate = diffBlend;
-      console.log(`[step2] ★ = diffBlend ${starEstimate.toFixed(2)} (OSR135 ${starEstimate135.toFixed(2)} ↔ ${groupLib} ${baseStar2.toFixed(2)}, t=${t.toFixed(2)})`);
-    } else {
-      const gapW = Math.max(0, Math.min((starEstimate135 - starEstimateNew) / GAP_GUARD, 1));
-      starEstimate = diffBlend * (1 - gapW) + starEstimate135 * gapW;
-      console.log(`[step2] ★ = blend ${starEstimate.toFixed(2)} (OSR135 ${starEstimate135.toFixed(2)} ↔ ${groupLib} ${baseStar2.toFixed(2)}, t=${t.toFixed(2)}, gapW=${gapW.toFixed(2)}, group ${osrGroup})`);
-    }
-  }
-  }  // ← adopt.js fetch 실패 시 inline fallback 블록 끝
-  }
-
-  // v3.4.0: 별값 최종 = onlyOSR(전체곡 native 50%) + onlyOSRtoEreter(ereter★, OSR13.5≥13.5 tier).
-  //   adopt 결과를 override. DB 모드: dbData.native_star 읽어 추천 baseStar 로. 비-DB: toEreter 계산.
+  // v3.4.0 / Phase 2-0: 별값 = onlyOSR(전체곡 native 50%) + onlyOSRtoEreter(ereter★, OSR13.5≥13.5 tier).
+  //   DB 모드: dbData.native_star 읽어 추천 baseStar 로. 비-DB: toEreter 계산.
+  //   실패/미로드 시: star/native_star = null → 업로드에서 기존 supabase 값 보존 (dbPayload), console.warn.
   let nativeStar = null;
   if (dbData) {
     nativeStar = typeof dbData.native_star === 'number' ? dbData.native_star : null;
@@ -1150,8 +947,12 @@ window.OhsorryCore = {
         nativeStar = typeof r2e.ohsorryStar === 'number' ? r2e.ohsorryStar : null;
         starEstimateNew = nativeStar != null ? nativeStar : starEstimate;  // 추천 baseStar = native(onlyOSR)
         console.log(`[step2] ★ = onlyOSRtoEreter ${starEstimate.toFixed(2)} (native ${nativeStar != null ? nativeStar.toFixed(2) : 'N/A'}, tier ${r2e.tier})`);
+      } else {
+        console.warn('[step2] onlyOSRtoEreter ereterStar 없음 — ★/native_star 미산출(기존 supabase 값 보존)');
       }
-    } catch (e) { console.error('[step2] onlyOSRtoEreter override 실패 — 기존 ★ 유지:', e.message); }
+    } catch (e) { console.warn('[step2] onlyOSRtoEreter 실패 — ★/native_star 미산출(기존 supabase 값 보존):', e.message); }
+  } else if (!dbData) {
+    console.warn('[step2] onlyOSRtoEreter 미로드 — ★/native_star 미산출(기존 supabase 값 보존)');
   }
 
   // -------- 5.6. status 페이지에서 프로필 정보 fetch --------
@@ -1669,8 +1470,7 @@ window.OhsorryCore = {
   const result = {
     mode, isRival, dbData, wrapperVersion, dbVersionString,
     profile, profileHasRadar, hasRadarData,
-    starEstimate, starRaw, starEstimateNew, starEstimateOld,
-    starEstimateEreterOnly, starEstimateLv12Only, starEstimateAll, eraterTrueStar,
+    starEstimate, starRaw, starEstimateNew, eraterTrueStar,
     allCharts,
     ereterData, zasaSupplemental, ereterMap, zasaMap, ratingMap, ereterExtractedAt,
     gameLevelTotals, isInfUser,

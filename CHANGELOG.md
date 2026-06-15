@@ -2,6 +2,13 @@
 
 ohSorry 의 변경 이력입니다. 사용방법은 [README.md](README.md) 를 참고하세요.
 
+### 2026-06-16 — 구조개편 Phase 2-0: 별값 구 lib(oldOSR/osr/adopt) 로드·계산 제거 (경량화)
+- 별값이 v3.4.0 에서 `onlyOSR + onlyOSRtoEreter + OSR13.5+` 로 바뀐 뒤, 구 `oldOSR`/`osr`/`adopt` 채택 로직(~160줄)이 **결과가 onlyOSRtoEreter 에 override 돼 사장**된 채 남아 있던 것 정리.
+- [calcOhsorryCore.js](modules/calcOhsorryCore.js): 구 3 lib gist fetch+eval **제거**(URL 상수·로드 try·변수 포함), 구 채택 계산 블록(oldOSR→osr→OSR135-blend→adopt, 974~1136) 제거, result 의 `starEstimateOld`/`EreterOnly`/`Lv12Only`/`All` 비교 필드 제거. **유지**: `OSR13.5+`(onlyOSRtoEreter 13.5 tier 의존)·`onlyOSR`·`onlyOSRtoEreter`.
+- fallback: onlyOSRtoEreter 실패/미로드 시 star/native_star = null → 업로드에서 기존 supabase 값 보존, `console.warn` 만.
+- 절감: 비-DB 본체 실행마다 gist fetch+eval 3개 + 계산 ~160줄. 웹/INF(DB 모드)는 원래 구 lib 미로드라 무영향.
+- 검증: `node --check` OK + 제거 식별자 잔존 참조 0 + 대표 4명 별값을 onlyOSRtoEreter 단독으로 산출(native_star DB 일치, star 차이는 데이터 드리프트). 구조개편 정본 [docs ROADMAP §0 / restructure-phase2 §2-0](../docs/restructure-phase2.md).
+
 ### 2026-06-16 — 구조개편 §0 Phase1B: normTitle 마스터 레이팅으로 이전 (본체는 동기 사본)
 - `normTitle.js` 의 **마스터가 ohSorryRating 으로 이전** — 본체는 크롤 매칭에 필요하므로 파일은 유지하되 **동기 사본**(직접 수정 금지). `syncNormTitle.js` 방향 반전으로 레이팅 마스터에서 전파받음.
 - 본체 `modules/normTitle.js`: 헤더 주석이 마스터 표기 정정본으로 갱신됨(norm 로직 불변). 런타임은 gist fetch 라 동작 영향 0.
