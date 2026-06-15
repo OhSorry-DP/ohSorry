@@ -96,9 +96,11 @@
 
 ---
 
-## normTitle.js — 곡명 정규화
+## normTitle.js — 곡명 정규화 (정본=ohSorryRating, 본체는 동기 사본)
 
-- 등록: `window.OhsorryNorm`, `VERSION: '0.0.6'` (`normTitle.js:165`; 헤더 주석 v0.0.5 와 불일치)
+> 구조개편(ROADMAP §0) Phase 1B, 2026-06-16: **마스터가 ohSorryRating 으로 이전**(레이팅=공용 도메인 로직). 본체는 크롤 매칭에 normTitle 이 필요하므로 **동기 사본을 유지**(삭제 안 함) — 본체에서 직접 수정 금지, 레이팅 마스터 수정 후 `ohSorryAdmin/scripts/syncNormTitle.js`(방향 반전됨) 로 전파받는다. 본체 런타임은 gist fetch(`window.OhsorryNorm`).
+
+- 등록: `window.OhsorryNorm`, `VERSION: '0.0.6'` (`normTitle.js:166`; 헤더 주석 v0.0.5 와 불일치)
 - export: `VERSION`, `norm(s)`, `denorm(k)`
 - `norm` 단계(`:140`): `TITLE_ALIASES` raw 치환 → `NORM_OVERRIDES` 강제키 → `basicNorm`(lowercase + NFD diacritic 제거 + 공백/기호 통일 + homoglyph→ASCII + NFKC).
 - `TITLE_ALIASES`(`:42-51`): eagate raw → textage raw (예: `火影→焱影`, `VOID→VØID`, `Xlo→Xlø`).

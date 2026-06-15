@@ -2,6 +2,11 @@
 
 ohSorry 의 변경 이력입니다. 사용방법은 [README.md](README.md) 를 참고하세요.
 
+### 2026-06-16 — 구조개편 §0 Phase1B: normTitle 마스터 레이팅으로 이전 (본체는 동기 사본)
+- `normTitle.js` 의 **마스터가 ohSorryRating 으로 이전** — 본체는 크롤 매칭에 필요하므로 파일은 유지하되 **동기 사본**(직접 수정 금지). `syncNormTitle.js` 방향 반전으로 레이팅 마스터에서 전파받음.
+- 본체 `modules/normTitle.js`: 헤더 주석이 마스터 표기 정정본으로 갱신됨(norm 로직 불변). 런타임은 gist fetch 라 동작 영향 0.
+- [docs/modules.md](docs/modules.md): normTitle 섹션에 마스터=레이팅 명시.
+
 ### 2026-06-16 — 구조개편 §0 Phase1A: recommend·calcWeakness 본체에서 제거 (→ ohSorryRating 이관)
 - 추천 `recommend.js` + 약점/강점 `calcWeakness.js`(+`calcWeakness.md`) 의 정본을 ohSorryRating 으로 이관(도메인 로직) → 본체 `modules/` 에서 삭제.
 - 본체는 이 둘을 **gist 에서 fetch** 해 별값/추천 계산에 계속 사용 — 로컬 require 아님. gist URL·내용 불변이라 동작 그대로. 본체의 추천 계산 자체 제거는 Phase 2.
