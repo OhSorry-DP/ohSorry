@@ -2,6 +2,11 @@
 
 ohSorry 의 변경 이력입니다. 사용방법은 [README.md](README.md) 를 참고하세요.
 
+### 2026-06-15 — 구조개편 §0 Phase1: analysisRender.js 본체에서 제거 (→ ohSorryWeb 이관)
+- 레포 책임 재배치(통합문서 ROADMAP §0)의 첫 이전. **분석탭 HTML 빌더 `analysisRender.js` 는 표시 책임**이라 ohSorryWeb 가 정본으로 흡수 → 본체 `modules/analysisRender.js` 삭제.
+- 본체는 이 모듈을 런타임에서 사용하지 않았음(gist push 용으로만 얹혀 있던 파일). gist(`c3da608…/analysisRender.js`) URL·내용 불변이라 웹·INF 동작 영향 0 — gist push 없이 정본 위치만 이동.
+- [docs/modules.md](docs/modules.md): analysisRender 섹션을 이관 안내로 교체.
+
 ### 2026-06-15 — 통계 범례 색 박스 가로 절반
 - [ohsorryRender.js](modules/ohsorryRender.js) `renderLegend`: 난이도별 클리어램프·DJ LEVEL 범례의 색 박스를 `9×9` 정사각 → **`4.5×9`(가로만 절반, 세로 직사각)** 로. gist(`c3da608…`) 재배포로 게스트 페이지(ohSorryWeb)·본체 동시 반영.
 

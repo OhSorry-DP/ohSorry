@@ -103,12 +103,9 @@
 
 ---
 
-## analysisRender.js — 분석 탭(vec 막대/percentile/기여곡)
+## analysisRender.js — (이관됨 → ohSorryWeb)
 
-- 등록: `window.OhsorryAnalysisRender`, `VERSION: '0.0.63'` (`analysisRender.js:126`)
-- export(`:664-669`): `VERSION`, `FEATS`, `buildAnalysisHTML(opts)`, `attachClickHandlers(rootEl, opts, handlers)`
-- `FEATS` 는 **10개**(`:138-149`, NOTES~SOF-LAN). 막대그래프는 이 10 feature 기준 — `relative`(percentile 기반 상위 N%) / `personal`(userVec 잔차) 두 모드. percentile 행 + 기여곡 표는 `userVec.__entries` 사용.
-  - (조망/인덱스 문서가 "28차 막대그래프"라 표기하나, 이 모듈의 그래프 feature 자체는 10개입니다. 28차 손별은 supabase upsert 용 `computePatternScoreVec` 산출물이며 analysisRender 막대와 별개.)
+> 구조개편(ROADMAP §0) Phase 1, 2026-06-15: 분석탭 렌더는 **표시 책임**이라 ohSorryWeb 가 정본으로 흡수(`ohSorryWeb/gist-modules/analysisRender.js`). 본체는 이 모듈을 런타임에서 쓰지 않으므로 제거. gist(`c3da608…/analysisRender.js`) URL·내용 불변(웹이 향후 `push:gist-modules` 로 갱신).
 
 ---
 
