@@ -31,37 +31,15 @@
 
 ---
 
-## recommend.js — 추천 알고리즘
+## recommend.js — (이관됨 → ohSorryRating)
 
-- 등록: `window.OhsorryRecommend`, `VERSION: '0.0.10'` (`recommend.js:33`, `:1201`)
-- 최상위 export: `createContext`, `FEAT_TAG_MAP`, `CATEGORY_TAG_MAP`, `PRACTICE_TAG_MAP`, `HAND_BIAS_THRESHOLD` (`recommend.js:1200-1208`)
-- `createContext(deps)` 반환 객체(`:1183-1197`): `chartStrengthMatch`, `chartStrengthMatchByHand`, `computeChartTags`, `computeRecHashtags`, `buildPools`, `buildRecs`, `buildRecsWithPool`, `buildWeaknessRecs`, `setLayoutMode`/`getLayoutMode`, `practiceZasaDefault`, `maxClearGameLevel`
-
-### createContext(deps) 의 deps (`recommend.js:104-124`)
-`userVec`, `weaknessLib`, `patternsMap`(songId→{t,c:{DP_NOR,DP_HYP,DP_ANO,DP_LEG}}), `patternsTitleMap`(norm→songId), `normFn`, `seriesNames`, `textageSeriesByNorm`, `allCharts`, `ereterMap`, `ratingMap`, `zasaMap`, `zasaAvgByGameLv`, `featureScoresMap`, `isInfChartInSeries`(INF 유저 차트 필터), `pdLayoutMap`(layoutLabel 기록용 외부 객체).
-
-알고리즘 상세는 [algorithms.md](algorithms.md#2-추천곡-파이프라인).
+> 구조개편(ROADMAP §0) Phase 1A, 2026-06-15: 추천 알고리즘은 **도메인 로직**이라 ohSorryRating 가 정본으로 흡수(`ohSorryRating/modules/recommend.js`). 본체 `calcOhsorryCore` 는 여전히 gist 에서 fetch 해 추천을 계산하지만(동작 불변), 본체의 추천 계산 자체 제거는 Phase 2. gist(`c3da608…/recommend.js`) URL·내용 불변. 알고리즘 상세는 [ohSorryRating/docs/](../../ohSorryRating/docs/).
 
 ---
 
-## calcWeakness.js — 약점/강점 분석
+## calcWeakness.js — (이관됨 → ohSorryRating)
 
-- 등록: `window.OhsorryWeakness` (UMD). export 목록(`calcWeakness.js:1021-1037`):
-  `FEATS`, `DIFF2CHART`, `DEFAULT_PATTERNS_URL`, `avgPt`, `calcUserWeakness`, `chartStrengthMatch`, `chartWeaknessMatch`, `chartStrengthMatchByHand`, `chartStrengthMatch8Way`, `chartWeaknessMatch8Way`, `chartWeaknessMatchByHand`, `computePatternScoreVec`, `fetchPatternsMap`, `fetchAndCalcWeakness`, `analyzeFeature`
-- 설계 메모: [`modules/calcWeakness.md`](../modules/calcWeakness.md) (단, 8배치/손별 18차/penalty 가 문서에 미반영 — 코드가 정본).
-
-### feature 차원
-- `FEATS` — mirror-invariant 10차 (`calcWeakness.js:31`): `NOTES, CHORD, PEAK, CHARGE, SCRATCH, SOF-LAN, PHRASE, JACK, TRILL, RAND`
-- `UPSERT_FEATS` — 28차 (`:35-39`): 위 10 + 손별 18 (`STAIR_UP_L/R`, `STAIR_DN_L/R`, `K1_L/R`~`K7_L/R`). supabase `user_ohsorry_radars` 컬럼과 매칭.
-- `MIRROR_STEMS` (`:44-54`): mirror 시 변하는 9 stem 의 차트 데이터 source 정의(STAIR_UP/DN, K1~K7 = DENSITY[0..6]).
-
-### calcUserWeakness 반환 userVec 구조
-`calcUserWeakness({allCharts, patternsMap, normFn, ratingMap, zasaMap, rateRef, minLv})` (`:138-336`).
-- 10 feature 키(NOTES~RAND) + mirror 18 키 : 각각 EX rate 잔차 가중평균(음수=약점/양수=강점)
-- `__vecL`/`__vecR` (`:333-334`) : 손별 10 feature 벡터
-- `__meta`(`:320`) `{matched, entries, mode, lvCounts, buckets}`, `__entries`(`:328`) 전체 entry 배열, `__bucketAgg`/`__refCache`/`__byLv`
-
-값 계산·8배치 penalty 는 [algorithms.md](algorithms.md#4-약점-분석-calcweakness).
+> 구조개편(ROADMAP §0) Phase 1A, 2026-06-15: 약점/강점 분석(`calcUserWeakness`·`chartStrengthMatch8Way`·`computePatternScoreVec` 등)은 **도메인 로직**이라 ohSorryRating 가 정본으로 흡수(`ohSorryRating/modules/calcWeakness.js`, 설계메모 동소 `calcWeakness.md`). 본체는 여전히 gist fetch 로 계산에 사용(동작 불변). 본체 `dbConn` 의 업로드용 `computePatternScoreVec` 와의 단일화는 Phase 3(0-3 ①). gist URL·내용 불변. 상세는 [ohSorryRating/docs/](../../ohSorryRating/docs/).
 
 ---
 
