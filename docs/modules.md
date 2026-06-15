@@ -93,13 +93,9 @@
 
 ---
 
-## ohsorryRender.js — 결과 패널/추천곡/업로드 렌더
+## ohsorryRender.js — (이관됨 → ohSorryWeb)
 
-- 등록: `window.OhsorryRender`, `VERSION: '0.0.363'` (`ohsorryRender.js:33`; 헤더 주석 `v0.0.378` 과 불일치 — 객체값이 정본)
-- export: `showProgress(msg,pct)`(`:36`), `hideProgress()`(`:58`), `confirmRedirect(message,targetUrl)`(`:64`), `show(result, opts)`(`:90`)
-- `show()` 가 그리는 섹션: ① 프로필 카드(SP/DP 랭크, `★{starEstimate}` + ereter 대비 차이) ② 노트레이더(`buildRadarSection`, DB 노트레이더 SVG) ③ 추천곡 sortable(EC/HC/EXH 스테이지 + weakness 모드 토글) ④ 통계 탭(★구간 버킷 막대, DP12/DP11/ALL 전환, ★추정 비교 details)
-- `opts.statsOnly`(`:116`)면 추천 빌드/핸들러/업로드 skip. `show()` 끝(`:1255`)에서 `uploadResult` 위임.
-- `window.__dp_*` 콜백 다수 등록(리롤·토글·재계산) — core 콜백 호출 후 `__dp_renderRecItems` 로 부분 갱신.
+> 구조개편(ROADMAP §0) Phase 1, 2026-06-15: 결과 렌더는 **표시 책임**이라 ohSorryWeb 가 정본으로 흡수(`ohSorryWeb/gist-modules/ohsorryRender.js`). 본체(`ohsorry.js`/`rivalOhsorry.js`)는 여전히 gist 에서 fetch 해 콘솔 UI 를 그리지만(동작 불변), 정본 편집·push 는 웹이 담당. 본체의 콘솔 UI 자체 제거는 Phase 2(본체 슬림화)에서. gist(`c3da608…/ohsorryRender.js`) URL·내용 불변.
 
 ---
 
@@ -133,8 +129,6 @@
 
 ---
 
-## ohsorryShelf.js — 서열표 격자 렌더 lib
+## ohsorryShelf.js — (이관됨 → ohSorryWeb)
 
-- 등록: `window.OhSorryShelf`, `version: '0.0.26'` (`ohsorryShelf.js:589`)
-- export(`:588-598`): `version`, `injectStyle`, `LAMP_BG`, `djLevelFromScore`, `renderShelf`, `renderLegend`, `renderStackbar`, `renderChartRow`, `enrichChartsWithZasa`
-- 책임: DP12 서열표를 standalone 으로 — `renderShelf(charts, opts)` 가 곡을 레벨별 그룹화해 격자 HTML 생성(각 셀 lamp 색 + djlv/exscore 오버레이). ohSorry 본체·ohSorryWeb·INFOhSorry 공유. core 는 추천곡 곡명 클릭 토스트(`renderChartRow`)에만 사용.
+> 구조개편(ROADMAP §0) Phase 1, 2026-06-15: 서열표 격자 렌더는 **표시 책임**이라 ohSorryWeb 가 정본으로 흡수(`ohSorryWeb/gist-modules/ohsorryShelf.js`). 본체 `calcOhsorryCore` 는 여전히 gist 에서 fetch 해 추천곡 토스트(`renderChartRow`)에만 사용(동작 불변). 정본 편집·push 는 웹. gist(`c3da608…/ohsorryShelf.js`) URL·내용 불변.

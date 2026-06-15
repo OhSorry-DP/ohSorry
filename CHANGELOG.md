@@ -2,6 +2,11 @@
 
 ohSorry 의 변경 이력입니다. 사용방법은 [README.md](README.md) 를 참고하세요.
 
+### 2026-06-15 — 구조개편 §0 Phase1: ohsorryRender·ohsorryShelf 본체에서 제거 (→ ohSorryWeb 이관)
+- 표시 책임 모듈 2종 `ohsorryRender.js`·`ohsorryShelf.js` 의 정본을 ohSorryWeb 로 이관 → 본체 `modules/` 에서 삭제.
+- 본체는 이 둘을 **gist 에서 fetch** 해 사용(`ohsorry.js`/`rivalOhsorry.js` 콘솔 UI 렌더, `calcOhsorryCore` 추천곡 토스트) — 로컬 require 아님. gist URL·내용 불변이라 **본체 동작 그대로**(정본 위치·편집권만 웹으로). 본체 콘솔 UI 제거는 Phase 2.
+- [docs/modules.md](docs/modules.md): 두 섹션을 이관 안내로 교체.
+
 ### 2026-06-15 — 구조개편 §0 Phase1: analysisRender.js 본체에서 제거 (→ ohSorryWeb 이관)
 - 레포 책임 재배치(통합문서 ROADMAP §0)의 첫 이전. **분석탭 HTML 빌더 `analysisRender.js` 는 표시 책임**이라 ohSorryWeb 가 정본으로 흡수 → 본체 `modules/analysisRender.js` 삭제.
 - 본체는 이 모듈을 런타임에서 사용하지 않았음(gist push 용으로만 얹혀 있던 파일). gist(`c3da608…/analysisRender.js`) URL·내용 불변이라 웹·INF 동작 영향 0 — gist push 없이 정본 위치만 이동.
