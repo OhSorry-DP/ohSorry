@@ -67,10 +67,10 @@
     document.getElementById('__dp_progress')?.remove();
   }
 
-  // eagate fetch 모드 — 무조건 시리즈 (전곡, 약 1분). 레벨별 선택 모달 제거 (사용자 결정으로 단순화).
-  //   호출처 (__dp_batch_rival_by_iidx / __dp_render_rival) 흐름 유지 위해 Promise 시그니처만 유지.
+  // 라이벌은 series 전곡 고정 (전체 시리즈). seriesList 생략 → core 가 전체 33개로 처리.
+  //   호출처(__dp_batch_rival_by_iidx / __dp_render_rival) 흐름 유지 위해 Promise 시그니처만 유지.
   function askFetchOptions() {
-    return Promise.resolve({ fetchMode: 'series', levels: undefined });
+    return Promise.resolve({ seriesList: undefined });
   }
 
   // IIDX ID (8자리 숫자) → 라이벌 토큰 조회 헬퍼.
@@ -253,8 +253,7 @@
         mode: 'rival',
         rivalToken: rivalToken,
         wrapperVersion: WRAPPER_VERSION,
-        fetchMode: fetchOpts ? fetchOpts.fetchMode : undefined,
-        levels: fetchOpts ? fetchOpts.levels : undefined,
+        seriesList: fetchOpts ? fetchOpts.seriesList : undefined,   // 생략 시 core 가 전체 시리즈
       });
     } finally {
       // Core.compute 호출 직후 로딩 박스 제거 — 이어서 Core 가 OhsorryRender.showProgress 로

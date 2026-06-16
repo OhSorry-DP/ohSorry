@@ -66,10 +66,25 @@
     document.getElementById('__dp_progress')?.remove();
   }
 
-  // eagate fetch 모드에서 곡 데이터 수집 범위를 묻는 모달.
-  //   - 레벨별 : 선택한 LEVEL 폴더만 (difficulty.html / 라이벌은 difficulty_rival.html). 기본 11·12 체크.
-  //   - 전곡   : 시리즈 폴더 전체 (series.html, 약 1분).
-  // resolve 값 → Core.compute 의 opts.fetchMode / opts.levels 로 전달.
+  // 수집할 시리즈를 고르는 모달 (series 단일 모드). 기본 전체 선택.
+  //   체크된 series_no → list 값(series_no-1) 배열로 resolve. SP/DP 탭 공통.
+  // resolve 값 → Core.compute 의 opts.seriesList / opts.playStyle 로 전달.
+  const SERIES_NAMES = {
+    1: '1st & substream', 2: '2nd style', 3: '3rd style', 4: '4th style', 5: '5th style',
+    6: '6th style', 7: '7th style', 8: '8th style', 9: '9th style', 10: '10th style',
+    11: 'IIDX RED', 12: 'HAPPY SKY', 13: 'DistorteD', 14: 'GOLD', 15: 'DJ TROOPERS',
+    16: 'EMPRESS', 17: 'SIRIUS', 18: 'Resort Anthem', 19: 'Lincle', 20: 'tricoro',
+    21: 'SPADA', 22: 'PENDUAL', 23: 'copula', 24: 'SINOBUZ', 25: 'CANNON BALLERS',
+    26: 'Rootage', 27: 'HEROIC VERSE', 28: 'BISTROVER', 29: 'CastHour', 30: 'RESIDENT',
+    31: 'EPOLIS', 32: 'Pinky Crush', 33: 'Sparkle Shower',
+  };
+  // 10시리즈 단위 그룹 (역순 — 최신 위). 각 그룹에 전체 토글 체크박스.
+  const SERIES_GROUPS = [
+    { label: '30~최신', from: 30, to: 33 },
+    { label: '21~29',  from: 21, to: 29 },
+    { label: '11~20',  from: 11, to: 20 },
+    { label: '1~10',   from: 1,  to: 10 },
+  ];
   function askFetchOptions(isRival) {
     return new Promise((resolve) => {
       document.getElementById('__dp_fetch_modal')?.remove();
@@ -77,89 +92,80 @@
       ov.id = '__dp_fetch_modal';
       ov.style.cssText =
         'position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif';
-      // 레벨 — 체크박스는 숨기고 label 클릭으로 토글. 선택 상태는 paintLv 가 글자색/굵기로 표시.
-      const lvBtns = [12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1].map((lv) =>
-        '<label style="display:inline-flex;align-items:center;justify-content:center;' +
-        'min-width:24px;padding:4px 6px;font-size:13px;cursor:pointer;user-select:none">' +
-        `<input type="checkbox" class="__dplv" value="${lv}"${lv >= 11 ? ' checked' : ''} style="display:none">${lv}</label>`,
-      ).join('');
-      const titleText = isRival ? '라이벌 오소리 — 곡 데이터 불러오기' : '오소리 — 곡 데이터 불러오기';
+      // 그룹별 HTML — 그룹 헤더(전체 토글) + 시리즈 체크박스(그룹 내 newest-first). 기본 전부 checked.
+      const groupsHtml = SERIES_GROUPS.map((g) => {
+        const items = [];
+        for (let sn = g.to; sn >= g.from; sn--) {
+          items.push(
+            `<label style="display:flex;align-items:center;gap:7px;padding:3px 6px;cursor:pointer;font-size:12.5px">` +
+            `<input type="checkbox" class="__dpsr __dpgrp${g.from}" value="${sn}" checked>` +
+            `<span style="color:#868e96;font-variant-numeric:tabular-nums;min-width:18px;text-align:right">${sn}</span>` +
+            `<span>${SERIES_NAMES[sn]}</span></label>`,
+          );
+        }
+        return (
+          `<div style="margin-bottom:6px">` +
+          `<label style="display:flex;align-items:center;gap:7px;padding:4px 6px;cursor:pointer;background:#f1f3f5;border-radius:6px;font-size:12px;font-weight:700;color:#495057">` +
+          `<input type="checkbox" class="__dpgrptog" data-grp="${g.from}" checked><span>${g.label}</span></label>` +
+          items.join('') +
+          `</div>`
+        );
+      }).join('');
+      const titleText = isRival ? '라이벌 오소리 — 시리즈 선택' : '오소리 — 시리즈 선택';
       ov.innerHTML = `
-        <div style="background:#fff;border-radius:12px;padding:22px 24px;width:330px;max-width:calc(100vw - 32px);box-sizing:border-box;box-shadow:0 8px 32px rgba(0,0,0,.25);color:#212529">
+        <div style="background:#fff;border-radius:12px;padding:20px 22px;width:340px;max-width:calc(100vw - 32px);box-sizing:border-box;box-shadow:0 8px 32px rgba(0,0,0,.25);color:#212529;display:flex;flex-direction:column;max-height:calc(100vh - 48px)">
           <div style="font-size:15px;font-weight:700;margin-bottom:3px">${titleText}</div>
-          <div style="font-size:12px;color:#888;margin-bottom:12px">어떤 곡을 가져올까요?</div>
-          ${isRival ? '' : `<div id="__dp_ps_tabs" style="display:flex;margin-bottom:16px;border:1px solid #dee2e6;border-radius:8px;overflow:hidden">
+          <div style="font-size:12px;color:#888;margin-bottom:12px">가져올 시리즈를 고르세요 (기본 전체 — 전곡은 약 1분).</div>
+          ${isRival ? '' : `<div id="__dp_ps_tabs" style="display:flex;margin-bottom:12px;border:1px solid #dee2e6;border-radius:8px;overflow:hidden;flex:none">
             <button type="button" class="__dp_ps_tab" data-ps="DP" style="flex:1;padding:8px 0;border:0;background:#1d9e75;color:#fff;font-size:13px;font-weight:700;cursor:pointer">DP</button>
             <button type="button" class="__dp_ps_tab" data-ps="SP" style="flex:1;padding:8px 0;border:0;background:#f1f3f5;color:#868e96;font-size:13px;font-weight:700;cursor:pointer">SP</button>
           </div>`}
-          <div id="__dp_fm_section">
-            <label style="display:flex;align-items:flex-start;gap:8px;margin-bottom:8px;cursor:pointer">
-              <input type="radio" name="__dpfm" value="level" checked style="margin-top:2px">
-              <span><b style="font-size:13px">레벨별</b><br><span style="font-size:11px;color:#888">선택한 LEVEL 폴더만 (빠름)</span></span>
-            </label>
-            <div id="__dp_lv_box" style="display:flex;flex-wrap:wrap;gap:8px 10px;padding:6px 10px 12px 28px">${lvBtns}</div>
-            <label style="display:flex;align-items:flex-start;gap:8px;margin-bottom:18px;cursor:pointer">
-              <input type="radio" name="__dpfm" value="series" style="margin-top:2px">
-              <span><b style="font-size:13px">전곡</b><br><span style="font-size:11px;color:#888">시리즈 폴더 전체 — 약 1분 소요</span></span>
-            </label>
-          </div>
-          <div id="__dp_sp_note" style="display:none;font-size:12px;color:#1d9e75;background:#e9f7f1;border-radius:8px;padding:11px 13px;margin-bottom:18px;line-height:1.45">SP는 <b>10·11·12</b> 레벨 기록을 자동으로 가져옵니다.<br><span style="color:#888">(★추정 없이 점수·단위만 — 상세는 오소리웹)</span></div>
-          <button id="__dp_fetch_ok" style="width:100%;padding:9px 0;border:0;border-radius:7px;background:#1d9e75;color:#fff;font-size:13px;font-weight:600;cursor:pointer">시작</button>
+          <label style="display:flex;align-items:center;gap:7px;padding:4px 6px;margin-bottom:6px;cursor:pointer;font-size:12px;font-weight:700;color:#1d9e75;flex:none">
+            <input type="checkbox" id="__dp_all" checked><span>전체</span></label>
+          <div id="__dp_series_box" style="overflow-y:auto;border:1px solid #e9ecef;border-radius:8px;padding:6px 4px;margin-bottom:14px">${groupsHtml}</div>
+          <button id="__dp_fetch_ok" style="width:100%;padding:9px 0;border:0;border-radius:7px;background:#1d9e75;color:#fff;font-size:13px;font-weight:600;cursor:pointer;flex:none">시작</button>
         </div>
       `;
       document.body.appendChild(ov);
-      // DP / SP 탭 — 기본 DP. SP 선택 시 style=0 크롤 (★분석 없이 점수/단위 + 오소리웹 이동).
       let playStyle = 'DP';
-      const paintPs = () => {
-        ov.querySelectorAll('.__dp_ps_tab').forEach((b) => {
-          const on = b.dataset.ps === playStyle;
-          b.style.background = on ? '#1d9e75' : '#f1f3f5';
-          b.style.color = on ? '#fff' : '#868e96';
-        });
-        // SP 는 10~12 고정 → 레벨/전곡 선택 숨기고 안내 표시.
-        const fm = ov.querySelector('#__dp_fm_section');
-        const note = ov.querySelector('#__dp_sp_note');
-        if (fm) fm.style.display = playStyle === 'SP' ? 'none' : '';
-        if (note) note.style.display = playStyle === 'SP' ? 'block' : 'none';
-      };
-      ov.querySelectorAll('.__dp_ps_tab').forEach((b) => { b.onclick = () => { playStyle = b.dataset.ps; paintPs(); }; });
-      paintPs();
-      const lvBox = ov.querySelector('#__dp_lv_box');
-      // 레벨 선택 표시 — 꺼짐: 연한 글자 / 켜짐: 진한 + 볼드. (기본 체크박스가 한눈에 안 보여서)
-      const paintLv = (label) => {
-        const on = label.querySelector('input').checked;
-        label.style.color = on ? '#212529' : '#ced4da';
-        label.style.fontWeight = on ? '700' : '400';
-      };
-      ov.querySelectorAll('#__dp_lv_box label').forEach((label) => {
-        paintLv(label);
-        label.querySelector('input').addEventListener('change', () => paintLv(label));
+      ov.querySelectorAll('.__dp_ps_tab').forEach((b) => {
+        b.onclick = () => {
+          playStyle = b.dataset.ps;
+          ov.querySelectorAll('.__dp_ps_tab').forEach((x) => {
+            const on = x.dataset.ps === playStyle;
+            x.style.background = on ? '#1d9e75' : '#f1f3f5';
+            x.style.color = on ? '#fff' : '#868e96';
+          });
+        };
       });
-      // 레벨별 라디오가 선택됐을 때만 레벨 체크박스 활성화
-      const syncLvBox = () => {
-        const isLevel = ov.querySelector('input[name="__dpfm"]:checked').value === 'level';
-        lvBox.style.opacity = isLevel ? '1' : '.35';
-        lvBox.style.pointerEvents = isLevel ? 'auto' : 'none';
+      const allCbs = () => [...ov.querySelectorAll('.__dpsr')];
+      // 그룹 토글 → 그룹 내 전부 on/off
+      ov.querySelectorAll('.__dpgrptog').forEach((g) => {
+        g.addEventListener('change', () => {
+          ov.querySelectorAll('.__dpgrp' + g.dataset.grp).forEach((c) => { c.checked = g.checked; });
+          syncTop();
+        });
+      });
+      // 개별 체크 → 그룹/전체 토글 상태 갱신
+      const syncTop = () => {
+        SERIES_GROUPS.forEach((g) => {
+          const tog = ov.querySelector(`.__dpgrptog[data-grp="${g.from}"]`);
+          const box = [...ov.querySelectorAll('.__dpgrp' + g.from)];
+          if (tog) tog.checked = box.length > 0 && box.every((c) => c.checked);
+        });
+        const all = ov.querySelector('#__dp_all');
+        if (all) all.checked = allCbs().every((c) => c.checked);
       };
-      ov.querySelectorAll('input[name="__dpfm"]').forEach((r) => { r.onchange = syncLvBox; });
-      syncLvBox();
+      allCbs().forEach((c) => c.addEventListener('change', syncTop));
+      ov.querySelector('#__dp_all').addEventListener('change', (e) => {
+        allCbs().forEach((c) => { c.checked = e.target.checked; });
+        ov.querySelectorAll('.__dpgrptog').forEach((g) => { g.checked = e.target.checked; });
+      });
       ov.querySelector('#__dp_fetch_ok').onclick = () => {
-        if (playStyle === 'SP') {   // SP 는 레벨 선택 무시 — 항상 10~12
-          ov.remove();
-          resolve({ fetchMode: 'level', levels: [12, 11, 10], playStyle: 'SP' });
-          return;
-        }
-        const mode = ov.querySelector('input[name="__dpfm"]:checked').value;
-        let levels = [];
-        if (mode === 'level') {
-          levels = [...ov.querySelectorAll('.__dplv:checked')].map((c) => Number(c.value));
-          if (levels.length === 0) {
-            alert('레벨을 하나 이상 선택하거나 전곡을 골라주세요.');
-            return;
-          }
-        }
+        const seriesList = allCbs().filter((c) => c.checked).map((c) => Number(c.value) - 1);  // series_no → list 값
+        if (seriesList.length === 0) { alert('시리즈를 하나 이상 선택해주세요.'); return; }
         ov.remove();
-        resolve({ fetchMode: mode, levels, playStyle });
+        resolve({ seriesList, playStyle });
       };
     });
   }
@@ -196,9 +202,8 @@
         mode: isRival ? 'rival' : 'own',
         rivalToken: rivalToken || undefined,
         wrapperVersion: WRAPPER_VERSION,
-        fetchMode: fetchOpts ? fetchOpts.fetchMode : undefined,
-        levels: fetchOpts ? fetchOpts.levels : undefined,
-        playStyle: fetchOpts ? fetchOpts.playStyle : undefined,   // 'SP' | 'DP'(기본)
+        seriesList: fetchOpts ? fetchOpts.seriesList : undefined,   // eamuse list 값(0~32) 배열, 생략 시 전체
+        playStyle: fetchOpts ? fetchOpts.playStyle : undefined,     // 'SP' | 'DP'(기본)
       });
     } finally {
       // Core.compute 호출 직후 로딩 박스 제거 — 이어서 Core 가 OhsorryRender.showProgress 로

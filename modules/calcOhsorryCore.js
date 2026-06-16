@@ -6,7 +6,7 @@
 //
 // 동작:
 //   1. Gist 에서 ereter / zasa / textage / ohSorryRating JSON + 별값 lib(OSR13.5+/onlyOSR/onlyOSRtoEreter) fetch
-//   2. eagateFetch 모듈로 difficulty.html / series.html 크롤 (클리어램프 + EX점수 + 차트)
+//   2. eagateFetch 모듈로 series.html 시리즈 폴더 크롤 (클리어램프 + EX점수 + 차트). gameLevel 은 textage 역추정.
 //   3. 별값(★) 추정 = onlyOSRtoEreter (native onlyOSR → ereter★, OSR13.5 tier)
 //   4. status.html 로 프로필(DJ명 / IIDX ID / SP·DP 단위 / 노트레이더) 추출
 //   5. dbConn.uploadResult 직접 호출 — users 프로필 + scores + 28피처(user_ohsorry_radars) 업로드
@@ -15,7 +15,7 @@
 // opts:
 //   mode: 'own' | 'rival'  (기본 'own')
 //   rivalToken: rival 모드 시 URL 의 rival 토큰 (옵션 — 본인 모드는 무시)
-//   fetchMode / levels / playStyle: 크롤 범위 (wrapper 모달이 결정)
+//   seriesList / playStyle: 크롤 범위 (wrapper 모달이 결정 — 시리즈 list 값 0~32, 생략 시 전체)
 //   wrapperVersion: wrapper 자기 버전 — supabase version 컬럼은
 //                   `${wrapperVersion}-core${CORE_VERSION_SHORT}` 조합 (예: 'v3.4.0-core396')
 // 콘솔에서 직접 실행 시 (eamuse 페이지 / 운영자 진단 / ohSorryWeb 사이드 카드 등) lib 로드 + step2 진행 동안
@@ -71,7 +71,7 @@ function __ohsorryShowDone(profile, style) {
 }
 
 window.OhsorryCore = {
-  VERSION: '0.0.396',
+  VERSION: '0.0.397',
   compute: async (opts) => {
   __ohsorryShowSpinner();
   opts = opts || {};
@@ -79,7 +79,7 @@ window.OhsorryCore = {
   const isRival = mode === 'rival';
   const rivalToken = opts.rivalToken || null;
   const wrapperVersion = opts.wrapperVersion || 'unknown';
-  const CORE_VERSION_SHORT = '0.0.396'.replace(/^0\.0\./, '');  // '396' — [구조개편 2C] 크롤→별값→업로드 전용으로 축소: 추천/렌더/dbData/statsOnly/runFromDb 제거, norm=normTitle 정본
+  const CORE_VERSION_SHORT = '0.0.397'.replace(/^0\.0\./, '');  // '397' — [구조개편 2C] 크롤 series 단일화(level 폐기) + seriesList 선택 + SP/DP textage gameLevel 역추정
   const dbVersionString = `${wrapperVersion}-core${CORE_VERSION_SHORT}`;
   // -------- 0. ereter 데이터 로드 (Gist 에서 자동 fetch) --------
   // ereter.net 데이터는 Gist 에 ereter-data.json 으로 올려둔 걸 가져옵니다.
@@ -322,32 +322,17 @@ window.OhsorryCore = {
     ratingMap.set(norm(r.title) + '|' + r.diff, r);
   }
 
-  // -------- 2. 대상 페이지 설정 (수집 모드: level / series) --------
-  // p.eagate.573.jp 도메인 안 어느 페이지에서나 실행 가능.
-  // 수집 모드 (opts.fetchMode):
-  //   'level'  (기본) : difficulty.html 의 레벨별 페이지 fetch.
-  //                     opts.levels (게임레벨 배열, 예: [12,11]) — 없으면 [12,11].
-  //                     difficult 파라미터 = 게임레벨 - 1 (0-indexed, 11=LEVEL 12).
-  //                     style 0=SP / 1=DP.
-  //   'series' : series.html 에 list=0..32 POST → 시리즈 폴더 전곡 + 클리어램프 + 점수.
-  //              한 곡 row 에 BEGINNER~LEGGENDARIA 5개 차트. getAcSongList.js 와 동일 방식.
-  // opts 를 안 주면 (rival wrapper / DB 모드 등) 'level' + [12,11] — 기존 동작 그대로.
-  //
-  // LEVEL 11 도 가져오는 이유: zasa★ 11.6~12.1 인 어려운 lv11 차트의 lamp 데이터를
-  //                          ohSorryRating fallback 으로 ★ 추정 / EC·HC 추천에 활용.
-  const fetchMode = (opts.playStyle === 'SP') ? 'level' : (opts.fetchMode === 'series' ? 'series' : 'level');  // SP 는 항상 level(10~12)
+  // -------- 2. 대상 페이지 설정 (series 단일 모드) --------
+  // [2026-06-16] level 모드 폐기 — series.html 시리즈 폴더 단위만. 시리즈가 seriesNo 를 주므로
+  //   dbConn 의 song_id / textage_song_id / series_no 매칭이 정확. gameLevel 은 textage 로 역추정(4.5).
+  //   wrapper 모달이 수집할 시리즈를 고름 — opts.seriesList(eamuse list 값 0~32 배열). 생략 시 전체 33개.
   const SERIES = '33';            // 현재 시즌 (Sparkle Shower)
   const isSpMode = opts.playStyle === 'SP';   // SP 모드 — style=0 크롤 + ★분석 스킵(경량)
   const style = isSpMode ? '0' : '1';         // 0=SP / 1=DP
   const disp = '1';
-  // level 모드 — 가져올 게임레벨 목록 (1~12 만 허용, 내림차순 정렬, 중복 제거).
-  //   eagateFetch.collectCharts 가 ctx.levels 로 받아 자체적으로 LEVELS_TO_FETCH / URL 빌드.
-  //   core 는 fetchMode 만 유지 (이후 4.6 단계에서 series 모드 유령 차트 제거 분기에 사용).
-  const requestedLevels = isSpMode
-    ? [12, 11, 10]   // SP 는 항상 10~12 고정
-    : ((Array.isArray(opts.levels) && opts.levels.length > 0)
-        ? [...new Set(opts.levels.map(Number).filter((n) => n >= 1 && n <= 12))].sort((a, b) => b - a)
-        : [12, 11]);
+  const seriesList = (Array.isArray(opts.seriesList) && opts.seriesList.length > 0)
+    ? [...new Set(opts.seriesList.map(Number).filter((n) => n >= 0 && n <= 32))].sort((a, b) => a - b)
+    : Array.from({ length: 33 }, (_, i) => i);   // 전체 33개 (기본)
 
   // 도메인 체크 — eagate(p.eagate.573.jp) 에서만 의미 있음. 다른 도메인이면 안내 후 이동.
   if (!location.hostname.endsWith('p.eagate.573.jp')) {
@@ -399,8 +384,7 @@ window.OhsorryCore = {
     return;
   }
   const r = await window.OhsorryEagateFetch.collectCharts({
-    fetchMode,
-    levels: requestedLevels,
+    seriesList,
     series: SERIES,
     style, disp,
     isRival, rivalToken,
@@ -409,8 +393,7 @@ window.OhsorryCore = {
   if (!r.ok) return;  // 수집 실패 → 중단 (alert 는 eagateFetch 내부에서 이미 표시)
   allCharts = r.charts;
   pageCount = r.pageCount;
-  const unit = fetchMode === 'series' ? '시리즈' : '페이지';
-  updateProgress(`완료! ${pageCount}${unit} ${allCharts.length}곡`, 100);
+  updateProgress(`완료! 시리즈 ${pageCount}개 ${allCharts.length}곡`, 100);
   // 잠시 후 진행 패널 제거 (점수 패널이 같은 위치에 뜨므로)
   await new Promise((rs) => setTimeout(rs, 500));
   document.getElementById('__dp_progress')?.remove();
@@ -420,54 +403,40 @@ window.OhsorryCore = {
     return;
   }
 
-  // -------- 4.5. textage 채보 메타로 noteCount 보강 --------
-  // textage notes (DN/DH/DA/DX) → noteCount. 이미 있으면 (INF charts) 유지, 없으면 (오소리) textage 로 채움.
-  //
-  // missCount 는 보강 X — IIDX 판정은 Pgreat/Great/Good/Bad/Poor 이고 MISS COUNT(BP) = Bad+Poor 인데
-  // EX 표기 2392(986/420) 에선 Pgreat/Great 만 알 수 있고 Good 을 모름 → BP 계산 불가.
-  // (noteCount - pgreat - great = Good+Bad+Poor 라 MISS 가 아님.) EXH 추천은 rate(%) 로 정렬.
-  //
-  // 매칭 주의:
-  //   - textage title 에 HTML 태그 (<font ...>) 가 섞인 곡 多 → norm 전에 태그 제거.
-  //   - norm 충돌 (예: "Fly Away" lv8 ↔ "FlyAway" lv12 둘 다 norm "flyaway") → 한 키에 엔트리 배열로
-  //     보관하고, 매칭 시 levels[slot] 이 차트 gameLevel 과 일치하는 엔트리를 우선 선택.
-  //     (안 그러면 lv12 곡이 lv8 노트수에 매칭돼 rate 가 100% 초과 등 오류)
+  // -------- 4.5. textage 로 gameLevel 역추정 (series 페이지엔 레벨 정보 없음) --------
+  //   series.html 은 게임레벨(★)을 안 주므로 textage levels 로 채운다. style 별 키: SP=S* / DP=D*.
+  //   gameLevel 용도: dbPayload lv12 카운트 + chartScoreRows.game_level + SP 점수 필터.
+  //   (noteCount 는 업로드에 안 쓰여 미보강 — 피처는 dbConn 이 자체 계산.)
+  //   동명이곡(norm 충돌, 한 키에 여러 엔트리)은 해당 diff 채보가 실재(레벨≥1)하는 엔트리 우선.
+  const SP_DIFF_KEY = { NORMAL: 'SN', HYPER: 'SH', ANOTHER: 'SA', LEGGENDARIA: 'SX', BEGINNER: 'SB' };
+  const DP_DIFF_KEY = { NORMAL: 'DN', HYPER: 'DH', ANOTHER: 'DA', LEGGENDARIA: 'DX', BEGINNER: 'DB' };
+  let textageLevelsByNorm = null;
   if (textageSongs) {
     const stripHtml = (s) => (s || '').replace(/<[^>]*>/g, '');
-    // norm(태그제거 title) → [{ notes, levels }, ...]
-    const textageMap = {};
+    textageLevelsByNorm = {};
     for (const id in textageSongs) {
       const s = textageSongs[id];
-      if (!s || !s.notes || !s.title) continue;
+      if (!s || !s.levels || !s.title) continue;
       const key = norm(stripHtml(s.title));
-      (textageMap[key] = textageMap[key] || []).push({ notes: s.notes, levels: s.levels || {} });
+      (textageLevelsByNorm[key] = textageLevelsByNorm[key] || []).push(s.levels);
     }
-    const DIFF_TO_TEXTAGE = { NORMAL: 'DN', HYPER: 'DH', ANOTHER: 'DA', LEGGENDARIA: 'DX', BEGINNER: 'DB' };
-    let filledNote = 0, filledLevel = 0;
-    for (const c of allCharts) {
-      const entries = textageMap[norm(c.title)];
-      if (!entries) continue;
-      const tKey = DIFF_TO_TEXTAGE[c.diff];
-      if (!tKey) continue;
-      // norm 충돌 시 — gameLevel 이 있으면 (level 모드) levels[slot] 일치 엔트리 우선,
-      //               없으면 (series 모드) 해당 diff 채보가 실재하는 엔트리 우선.
-      let chosen = entries[0];
-      if (entries.length > 1) {
-        chosen = entries.find((e) => (c.gameLevel != null
-          ? e.levels[tKey] === c.gameLevel
-          : typeof e.levels[tKey] === 'number')) || entries[0];
-      }
-      // 게임레벨 역추정 — series 모드는 페이지에 레벨이 없어 textage levels 로 채움.
-      if (c.gameLevel == null && typeof chosen.levels[tKey] === 'number') {
-        c.gameLevel = chosen.levels[tKey];
-        filledLevel++;
-      }
-      const nc = chosen.notes[tKey];
-      if (typeof nc !== 'number' || nc <= 0) continue;
-      if (typeof c.noteCount !== 'number') { c.noteCount = nc; filledNote++; }
-    }
-    console.log(`[step2] textage 보강 — noteCount ${filledNote}곡, gameLevel ${filledLevel}곡`);
   }
+  function fillGameLevel(charts, isSp) {
+    if (!textageLevelsByNorm) return;
+    const KEY = isSp ? SP_DIFF_KEY : DP_DIFF_KEY;
+    let filled = 0;
+    for (const c of charts) {
+      if (c.gameLevel != null) continue;
+      const entries = textageLevelsByNorm[norm(c.title)];
+      if (!entries) continue;
+      const tKey = KEY[c.diff];
+      if (!tKey) continue;
+      const chosen = entries.find((e) => typeof e[tKey] === 'number' && e[tKey] >= 1) || entries[0];
+      if (typeof chosen[tKey] === 'number' && chosen[tKey] >= 1) { c.gameLevel = chosen[tKey]; filled++; }
+    }
+    console.log(`[step2] textage gameLevel 역추정(${isSp ? 'SP' : 'DP'}): ${filled}곡`);
+  }
+  fillGameLevel(allCharts, isSpMode);
 
   // -------- 4.6. series 모드 — 실재하지 않는 채보 칸 제거 --------
   // series.html 은 곡마다 BEGINNER~LEGGENDARIA 5칸을 항상 렌더한다 (DP BEGINNER 처럼
@@ -476,7 +445,7 @@ window.OhsorryCore = {
   //   - 플레이 흔적이 있는 차트 — 클리어램프(lampNum>0) 또는 EX점수(exScore>0).
   //     점수 0 이어도 램프(FAILED~FULL COMBO)만 있으면 실재 채보로 보고 유지.
   //   - ereter / rating 에 등록된 차트
-  if (fetchMode === 'series') {
+  {
     const before = allCharts.length;
     allCharts = allCharts.filter((c) =>
       c.gameLevel != null ||
@@ -485,7 +454,7 @@ window.OhsorryCore = {
       ereterMap.has(norm(c.title) + '|' + c.diff) ||
       ratingMap.has(norm(c.title) + '|' + c.diff),
     );
-    console.log(`[step2] series 모드 유령 차트 제거: ${before} → ${allCharts.length}차트`);
+    console.log(`[step2] series 유령 차트 제거: ${before} → ${allCharts.length}차트`);
   }
 
   // -------- 5. lv12-only 판정 (업로드 lv12 카운트 분기용) --------
@@ -761,18 +730,19 @@ window.OhsorryCore = {
     console.warn('[OhsorryCore] OhsorryDb.uploadResult 없음 — 업로드 못 함');
   }
 
-  // 라이벌도 SP 같이 — DP 분석/업로드 후, 라이벌 SP10~12 도 크롤해 play_style:0 으로 업로드(웹 SP 표시용).
-  //   라이벌은 토글 없이 항상 둘 다. (본인 SP 는 위 isSpMode 경량 분기에서 처리.) 표시는 DP 패널 그대로.
+  // 라이벌도 SP 같이 — DP 업로드 후 라이벌 SP 도 series 크롤해 play_style:0 으로 업로드(웹 SP 표시용).
+  //   수집 시리즈는 DP 와 동일(seriesList). 점수 행은 아래에서 gameLevel 10~12 로 필터.
   if (isRival && profile && profile.iidxId
       && window.OhsorryEagateFetch && window.OhsorryEagateFetch.collectCharts
       && window.OhsorryDb && window.OhsorryDb.upsertUserChartScores) {
     try {
       const spR = await window.OhsorryEagateFetch.collectCharts({
-        fetchMode: 'level', levels: [12, 11, 10], series: SERIES,
+        seriesList, series: SERIES,
         style: '0', disp, isRival: true, rivalToken,
         updateProgress: (msg) => console.log('[rival SP]', msg),
       });
       if (spR && spR.ok) {
+        fillGameLevel(spR.charts || [], true);   // series 페이지엔 레벨 없음 → SP textage 레벨로 역추정 (필터용)
         const spIid = profile.iidxId.replace(/-/g, '');
         const nowIsoR = new Date().toISOString();
         const spRows = (spR.charts || [])

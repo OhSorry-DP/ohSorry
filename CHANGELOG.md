@@ -2,6 +2,13 @@
 
 ohSorry 의 변경 이력입니다. 사용방법은 [README.md](README.md) 를 참고하세요.
 
+### 2026-06-16 — 크롤 모드 level→series 단일화 + 시리즈 선택 모달
+- 목표: level(difficulty.html) 크롤 폐기, series.html 시리즈 폴더 단위만. 시리즈가 `seriesNo` 를 주므로 dbConn 의 song_id / **textage_song_id** / series_no 매칭이 정확해짐(동명이곡 구분).
+- [eagateFetch.js](modules/eagateFetch.js) v0.0.2: level 코드(parseDoc/fetchOneLevel/collectByLevel ~250줄) 제거. `collectCharts({ seriesList })` — eamuse list 값(0~32) 부분집합 수집(생략 시 전체 33개). SP(style=0)도 series 지원.
+- [calcOhsorryCore.js](modules/calcOhsorryCore.js) core 0.0.397: `opts.seriesList`(생략 시 전체) 로 series 크롤. **gameLevel 역추정**을 style 별 키로(SP=SN/SH/SA/SX/SB, DP=DN/DH/DA/DX/DB) — series 페이지엔 레벨이 없어 textage levels 로 채움. SP own + rival SP 보강 둘 다 `fillGameLevel(..., true)`. (noteCount 보강은 업로드에 안 쓰여 제거.)
+- [ohsorry.js](ohsorry.js) wrapper 모달 교체: 레벨별/전곡 → **시리즈 체크박스 33개**(기본 전체). 10시리즈 단위 그룹 토글(역순 30~최신/21~29/11~20/1~10) + 전체 토글 + DP/SP 탭. 체크된 series_no → list 값(series_no-1) 으로 `seriesList` resolve. [rivalOhsorry.js](modules/rivalOhsorry.js) 라이벌은 전체 시리즈 고정.
+- 검증: `node --check` 4파일 OK + textage gameLevel 역추정(冥 DP/SP=12, Mosaic=11) + seriesList 매핑(전체=[0..32], 30~최신=[29..32]) node 검증. 별값은 inferEreter 가 전체 차트로 산출(supabase 데이터와 동일 입력 — level [12,11] 부분수집보다 정합). **크롤 자체는 eagate 실행 테스트 필요**. gist push 미실행.
+
 ### 2026-06-16 — 구조개편 2C: calcOhsorryCore 를 크롤→별값→업로드 전용으로 축소 (1660→796줄)
 - 목표: core 를 "수집/업로더" 한 가지 책임으로. 표시·추천은 ohSorryWeb·ohSorryRating(gist 모듈) 정본이 담당, **웹·INF 는 이미 코어-free**(2026-06-03)라 코어는 eagate 업로더에서만 실행 → 그 외 경로 전부 죽은 코드.
 - **제거** ([calcOhsorryCore.js](modules/calcOhsorryCore.js), core 0.0.396):
