@@ -50,6 +50,8 @@ function __ohsorryShowDone(profile, style) {
   const p = profile || {};
   const dj = (p.djName || '?').replace(/[<>]/g, '');
   const id = p.iidxId || '';
+  const idNorm = id.replace(/-/g, '');   // 딥링크/표시는 하이픈 제거(supabase iidx_id 형식)
+  const webUrl = idNorm ? `https://iidx.in/#user@${idNorm}#tab@recent` : 'https://iidx.in/';
   const rankRaw = (style === 'SP' ? p.spRank : p.dpRank) || '';
   const hasRank = rankRaw && rankRaw !== '---' && rankRaw !== '-';
   const rankLine = hasRank ? `<span style="font-weight:700">${(style === 'SP' ? 'SP' : 'DP')} ${String(rankRaw).replace(/[<>]/g, '')}</span>` : '';
@@ -64,14 +66,14 @@ function __ohsorryShowDone(profile, style) {
     `<div style="font-size:13px;font-weight:600;word-break:break-all">${dj}</div>` +
     (id ? `<div style="font-size:11px;color:#868e96;font-family:monospace;margin-top:1px">${id}</div>` : '') +
     (rankLine ? `<div style="font-size:12px;margin-top:4px">${rankLine}</div>` : '') +
-    '<a href="https://ohsorry.iidx.in" target="_blank" rel="noopener" ' +
-      'style="display:block;margin-top:12px;padding:8px 0;text-align:center;background:#1d9e75;color:#fff;font-size:12.5px;font-weight:600;border-radius:6px;text-decoration:none">오소리웹에서 결과 보기 →</a>';
+    `<a href="${webUrl}" target="_blank" rel="noopener" ` +
+      'style="display:block;margin-top:12px;padding:8px 0;text-align:center;background:#1d9e75;color:#fff;font-size:12.5px;font-weight:600;border-radius:6px;text-decoration:none">오소리웹에서 내 카드 보기 →</a>';
   document.body.appendChild(el);
   el.querySelector('#__ohsorry_done_x')?.addEventListener('click', () => el.remove());
 }
 
 window.OhsorryCore = {
-  VERSION: '0.0.397',
+  VERSION: '0.0.398',
   compute: async (opts) => {
   __ohsorryShowSpinner();
   opts = opts || {};
@@ -79,7 +81,7 @@ window.OhsorryCore = {
   const isRival = mode === 'rival';
   const rivalToken = opts.rivalToken || null;
   const wrapperVersion = opts.wrapperVersion || 'unknown';
-  const CORE_VERSION_SHORT = '0.0.397'.replace(/^0\.0\./, '');  // '397' — [구조개편 2C] 크롤 series 단일화(level 폐기) + seriesList 선택 + SP/DP textage gameLevel 역추정
+  const CORE_VERSION_SHORT = '0.0.398'.replace(/^0\.0\./, '');  // '398' — series 단일화 + seriesList 선택 + SP/DP gameLevel 역추정 + 완료박스 내 카드 딥링크(iidx.in)
   const dbVersionString = `${wrapperVersion}-core${CORE_VERSION_SHORT}`;
   // -------- 0. ereter 데이터 로드 (Gist 에서 자동 fetch) --------
   // ereter.net 데이터는 Gist 에 ereter-data.json 으로 올려둔 걸 가져옵니다.
@@ -720,7 +722,7 @@ window.OhsorryCore = {
       const up = await window.OhsorryDb.uploadResult(result);
       if (up && up.skipped) console.log(`[오소리] 업로드 skip (${up.reason})`);
       else {
-        console.log('[오소리] 업로드 완료 — 결과는 https://ohsorry.iidx.in 에서 확인하세요.');
+        console.log('[오소리] 업로드 완료 — https://iidx.in 에서 내 카드 확인.');
         if (!isRival) __ohsorryShowDone(profile, 'DP');
       }
     } catch (e) {
