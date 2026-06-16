@@ -11,7 +11,7 @@
 사용자가 p.eagate.573.jp 콘솔/북마크렛에서 실행
   → gist:2-calc-score.js  (호환 redirect, 9줄)
       ohsorry.js:6  gist:ohsorry.js fetch + eval
-  → ohsorry.js  (wrapper, v3.3.9)
+  → ohsorry.js  (wrapper, v3.4.0)
       모듈을 gist 에서 순서대로 fetch+eval (window 전역 등록):
         ohsorry.js:159  OhsorryNorm   (normTitle.js)
         ohsorry.js:161  OhsorryDb     (dbConn.js)
@@ -21,7 +21,7 @@
       → OhsorryCore.compute({ mode, rivalToken, dbData, wrapperVersion, fetchMode, levels, statsOnly, noRender })
 ```
 
-- 루트 [`2-calc-score.js`](../2-calc-score.js) 는 legacy gist URL 호환용 redirect 뿐입니다(`2-calc-score.js:6`).
+- 루트 `2-calc-score.js`(legacy gist URL 호환 redirect)는 레포에서 아카이브됨(`dpdata/oldOhSorry/`). **gist 의 같은 파일은 유지** — 옛 북마크릿 URL 진입점이라 gist:2-calc-score.js → gist:ohsorry.js 로 redirect 계속 동작.
 - [`ohsorry.js`](../ohsorry.js) 가 실제 wrapper. `loadModule(url, globalName)` 가 `window[globalName]` 캐시 후 fetch+eval (`ohsorry.js:31-40`).
 - **DB 모드**(dbData 있음 = ohSorryWeb 게스트 / INFOhSorry)면 `eagateFetch` 를 받지 않습니다(`ohsorry.js:168`) — supabase `charts_json` 으로 채우므로 eagate 페이지 fetch 가 불필요. 다운로드 절감.
 - wrapper 가 `window.__dp_render(dbData, renderOpts)` 를 노출(`ohsorry.js:140`). eagate 도메인이면 `__dp_render(null)` 자동 실행(`ohsorry.js:194`), 그 외 도메인은 외부에서 `__dp_render(dbData)` 로 호출.

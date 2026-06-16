@@ -1,4 +1,4 @@
-// 2-calc-score.js — 오소리 본체 wrapper (v3.3.9)
+// ohsorry.js — 오소리 본체 wrapper (v3.4.0). (legacy gist URL 2-calc-score.js 가 이 파일로 redirect)
 //
 // 모듈 분리:
 //   - calcOhsorryCore.js (v0.0.346) : 계산 (★ 추정 + 추천곡 + result build) — DB 모드면 ★ lib fetch 도 skip

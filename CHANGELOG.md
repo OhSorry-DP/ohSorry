@@ -2,6 +2,11 @@
 
 ohSorry 의 변경 이력입니다. 사용방법은 [README.md](README.md) 를 참고하세요.
 
+### 2026-06-16 — 레포 정리: legacy 수집 스크립트·redirect 아카이브 (2C 일부)
+- 추적 6개 삭제(`git rm`) → `D:\work\dpdata\oldOhSorry` 로 이관: `2-calc-score.js`(호환 redirect), `old/1-fetch-ereter.js`·`old/2-calc-score-dev.js`·`old/3-fetch-lv11-batch.js`·`old/3-fetch-lv12-batch.js`·`old/3-fetch-zasa.js`. (그 외 `.gitignore` 대상 데이터/학습 폴더 — dataset/ereter-data/zasa-data/raw/scripts/source/logic/archive 등 — 도 함께 물리 이동, git 무영향.)
+- **런타임 무영향**: 라이브 도구는 gist 호스팅 `modules/*` + `ohsorry.js`. 옮긴 건 옛 수집 IIFE·로컬 데이터 사본뿐(런타임은 ereter/zasa 도 gist 에서 fetch). **gist 의 `2-calc-score.js` redirect 파일은 유지** — 기존 유저 북마크릿 URL 진입점.
+- 깨진 로컬 참조 정리: `package.json` `main` → `ohsorry.js`, `docs/data-pipeline.md`·`docs/architecture.md`·`docs/README.md`·`README.md` 의 `old/`·`2-calc-score.js`·데이터 파일 링크를 아카이브 안내로 교체. (CHANGELOG 과거 이력 항목의 링크는 기록이라 보존.)
+
 ### 2026-06-16 — 구조개편 Phase 2B: 헤드리스 모드 활성화 (eagate 실행 = 업로더)
 - 결정: wrapper 가 `headless` 를 켜는 시점 = **(a) eagate 실행 전부**(own+rival). 구현은 `headless: !dbData` — eagate 자동실행(dbData 없음)은 헤드리스, DB 모드(웹·INF 뷰어)는 비-헤드리스 유지(render 표시 경로 보존).
 - [ohsorry.js](ohsorry.js)·[rivalOhsorry.js](modules/rivalOhsorry.js): `Core.compute({ headless: !dbData, ... })` 전달. wrapper 버전 v3.4.0. (ohsorry.js 는 `renderOpts.headless` 로 override 가능.)

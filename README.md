@@ -246,7 +246,7 @@ Gist 데이터가 잘못됐거나 ereter.net 페이지 구조가 바뀐 경우.
 
 데이터를 다시 긁어와야 함:
 1. ereter.net 어느 페이지에서 F12 → Console
-2. `1-fetch-ereter.js` 실행 (자세한 건 "데이터 갱신" 섹션)
+2. `1-fetch-ereter.js` 실행 (레포에서 아카이브됨 → `D:\work\dpdata\oldOhSorry\1-fetch-ereter.js`. 수집 정본은 ohSorryRating)
 3. Gist 의 `ereter-data.json` 갈아끼움
 
 ### 캐시가 안 갱신될 때

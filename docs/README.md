@@ -22,8 +22,8 @@
 
 ## 빠른 좌표
 
-- **마스터 계산 모듈**: [`modules/calcOhsorryCore.js`](../modules/calcOhsorryCore.js) (`window.OhsorryCore`, VERSION `0.0.368`)
-- **wrapper(진입점)**: [`ohsorry.js`](../ohsorry.js) (`v3.3.9`) — gist `2-calc-score.js` 가 이 파일로 redirect
+- **마스터 계산 모듈**: [`modules/calcOhsorryCore.js`](../modules/calcOhsorryCore.js) (`window.OhsorryCore`, VERSION `0.0.395`)
+- **wrapper(진입점)**: [`ohsorry.js`](../ohsorry.js) (`v3.4.0`) — gist `2-calc-score.js`(아카이브됐지만 gist 는 유지) 가 이 파일로 redirect
 - **gist 호스팅**: `OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e` (계산 모듈 + 런타임 데이터 flat 호스팅)
 - **Supabase**: `cvxpeecxiawddmrzbdvn` ([`modules/dbConn.js`](../modules/dbConn.js), VERSION `0.0.410`)
 
