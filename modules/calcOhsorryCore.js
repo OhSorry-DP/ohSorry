@@ -73,7 +73,7 @@ function __ohsorryShowDone(profile, style) {
 }
 
 window.OhsorryCore = {
-  VERSION: '0.0.398',
+  VERSION: '0.0.399',
   compute: async (opts) => {
   __ohsorryShowSpinner();
   opts = opts || {};
@@ -81,7 +81,7 @@ window.OhsorryCore = {
   const isRival = mode === 'rival';
   const rivalToken = opts.rivalToken || null;
   const wrapperVersion = opts.wrapperVersion || 'unknown';
-  const CORE_VERSION_SHORT = '0.0.398'.replace(/^0\.0\./, '');  // '398' — series 단일화 + seriesList 선택 + SP/DP gameLevel 역추정 + 완료박스 내 카드 딥링크(iidx.in)
+  const CORE_VERSION_SHORT = '0.0.399'.replace(/^0\.0\./, '');  // '399' — series 단일화 + seriesList 선택 + SP/DP gameLevel 역추정 + 완료박스 내 카드 딥링크(iidx.in)
   const dbVersionString = `${wrapperVersion}-core${CORE_VERSION_SHORT}`;
   // -------- 0. ereter 데이터 로드 (Gist 에서 자동 fetch) --------
   // ereter.net 데이터는 Gist 에 ereter-data.json 으로 올려둔 걸 가져옵니다.
@@ -335,6 +335,8 @@ window.OhsorryCore = {
   const seriesList = (Array.isArray(opts.seriesList) && opts.seriesList.length > 0)
     ? [...new Set(opts.seriesList.map(Number).filter((n) => n >= 0 && n <= 32))].sort((a, b) => a - b)
     : Array.from({ length: 33 }, (_, i) => i);   // 전체 33개 (기본)
+  // 별값(★)은 전체 차트가 있어야 정확 — 일부 시리즈만 크롤하면 데이터 불완전 → 별값 계산 skip(기존 supabase 값 보존).
+  const fullCrawl = seriesList.length >= 33;
 
   // 도메인 체크 — eagate(p.eagate.573.jp) 에서만 의미 있음. 다른 도메인이면 안내 후 이동.
   if (!location.hostname.endsWith('p.eagate.573.jp')) {
@@ -470,7 +472,9 @@ window.OhsorryCore = {
   let starEstimate = null;
   let starRaw = null;     // raw_s 는 현재 산출 안 함(업로드 시 null) — 컬럼 호환 유지
   let nativeStar = null;
-  if (onlyOSR2eLib && ratingData) {
+  if (!fullCrawl) {
+    console.log('[step2] 일부 시리즈만 크롤 — 별값(★) 계산 skip (전체 차트 필요, 기존 supabase 값 보존)');
+  } else if (onlyOSR2eLib && ratingData) {
     try {
       const r2e = onlyOSR2eLib.inferEreter(allCharts, ratingData, { charts: ereterData, players: ereterPlayers || {} });
       if (typeof r2e.ereterStar === 'number') {
@@ -644,6 +648,12 @@ window.OhsorryCore = {
   if (profile && profile.iidxId) {
     const iidxIdNorm = profile.iidxId.replace(/-/g, '');
     const nowIso = new Date().toISOString();
+    // 부분 크롤이면 별값 미계산 → 기존 star 를 조회해 그대로 재전송(upsert_user 의 star EXCLUDED 덮어쓰기로 null wipe 방지).
+    //   native_star 는 COALESCE 라 null 전송 시 자동 보존. ereter_star 는 ereter 룩업(크롤 무관)이라 그대로.
+    let preservedStar = null;
+    if (!fullCrawl && window.OhsorryDb && window.OhsorryDb.fetchUserStars) {
+      try { const prev = await window.OhsorryDb.fetchUserStars(iidxIdNorm); if (prev && prev.star != null) preservedStar = prev.star; } catch {}
+    }
     let nPlayedLv12 = 0, fcCount = 0, exhCount = 0, hcCount = 0, nClearedLv12 = 0;
     for (const c of allCharts) {
       if (useOnlyLv12 && c.gameLevel !== 12) continue;
@@ -668,8 +678,8 @@ window.OhsorryCore = {
     dbPayload = {
       iidx_id: iidxIdNorm,
       dj_name: profile.djName || null,
-      star_estimate: starEstimate != null ? Number(starEstimate.toFixed(4)) : null,
-      native_star: nativeStar != null ? Number(nativeStar.toFixed(4)) : null,  // v3.4.0: onlyOSR 전체곡 native
+      star_estimate: starEstimate != null ? Number(starEstimate.toFixed(4)) : (preservedStar != null ? Number(preservedStar) : null),  // 부분 크롤이면 기존값 보존
+      native_star: nativeStar != null ? Number(nativeStar.toFixed(4)) : null,  // v3.4.0: onlyOSR 전체곡 native (null → COALESCE 보존)
       ereter_star: eraterTrueStar != null ? Number(eraterTrueStar) : null,
       raw_s: starRaw != null ? Number(starRaw.toFixed(4)) : null,
       version: dbVersionString,
