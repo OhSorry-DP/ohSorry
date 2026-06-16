@@ -113,17 +113,25 @@
       }).join('');
       const titleText = isRival ? '라이벌 오소리 — 시리즈 선택' : '오소리 — 시리즈 선택';
       ov.innerHTML = `
-        <div style="background:#fff;border-radius:12px;padding:20px 22px;width:340px;max-width:calc(100vw - 32px);box-sizing:border-box;box-shadow:0 8px 32px rgba(0,0,0,.25);color:#212529;display:flex;flex-direction:column;max-height:calc(100vh - 48px)">
+        <style>
+          /* PC: 화면 넓이만큼 커져 4컬럼 다 보임(최대 680px). 모바일(≤560px): 풀스크린 모달. */
+          #__dp_fetch_modal .__dp_card{width:min(680px, calc(100vw - 24px))}
+          @media (max-width:560px){
+            #__dp_fetch_modal{align-items:stretch;justify-content:stretch}
+            #__dp_fetch_modal .__dp_card{width:100vw;max-width:100vw;height:100vh;max-height:100vh;border-radius:0;padding:16px 16px env(safe-area-inset-bottom,16px)}
+          }
+        </style>
+        <div class="__dp_card" style="background:#fff;border-radius:12px;padding:20px 22px;box-sizing:border-box;box-shadow:0 8px 32px rgba(0,0,0,.25);color:#212529;display:flex;flex-direction:column;max-height:calc(100vh - 32px)">
           <div style="font-size:15px;font-weight:700;margin-bottom:3px">${titleText}</div>
-          <div style="font-size:12px;color:#888;margin-bottom:12px">가져올 시리즈를 고르세요 (기본 전체 — 전곡은 약 1분). ←→ 가로 스크롤</div>
+          <div style="font-size:12px;color:#888;margin-bottom:12px">가져올 시리즈를 고르세요 (기본 전체 — 전곡은 약 1분). 좁으면 ←→ 가로 스크롤</div>
           ${isRival ? '' : `<div id="__dp_ps_tabs" style="display:flex;margin-bottom:12px;border:1px solid #dee2e6;border-radius:8px;overflow:hidden;flex:none">
             <button type="button" class="__dp_ps_tab" data-ps="DP" style="flex:1;padding:8px 0;border:0;background:#1d9e75;color:#fff;font-size:13px;font-weight:700;cursor:pointer">DP</button>
             <button type="button" class="__dp_ps_tab" data-ps="SP" style="flex:1;padding:8px 0;border:0;background:#f1f3f5;color:#868e96;font-size:13px;font-weight:700;cursor:pointer">SP</button>
           </div>`}
           <label style="display:flex;align-items:center;gap:7px;padding:4px 6px;margin-bottom:6px;cursor:pointer;font-size:12px;font-weight:700;color:#1d9e75;flex:none">
             <input type="checkbox" id="__dp_all" checked><span>전체</span></label>
-          <div id="__dp_series_box" style="display:flex;flex-direction:row;gap:10px;overflow-x:auto;overflow-y:hidden;border:1px solid #e9ecef;border-radius:8px;padding:8px;margin-bottom:14px">${groupsHtml}</div>
-          <button id="__dp_fetch_ok" style="width:100%;padding:9px 0;border:0;border-radius:7px;background:#1d9e75;color:#fff;font-size:13px;font-weight:600;cursor:pointer;flex:none">시작</button>
+          <div id="__dp_series_box" style="display:flex;flex-direction:row;gap:10px;overflow-x:auto;overflow-y:hidden;border:1px solid #e9ecef;border-radius:8px;padding:8px;margin-bottom:14px;flex:1 1 auto;min-height:0">${groupsHtml}</div>
+          <button id="__dp_fetch_ok" style="width:100%;padding:11px 0;border:0;border-radius:7px;background:#1d9e75;color:#fff;font-size:13.5px;font-weight:600;cursor:pointer;flex:none">시작</button>
         </div>
       `;
       document.body.appendChild(ov);
