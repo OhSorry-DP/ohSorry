@@ -10,12 +10,13 @@
 //   3. 별값(★) 추정 = onlyOSRtoEreter (native onlyOSR → ereter★, OSR13.5 tier)
 //   4. status.html 로 프로필(DJ명 / IIDX ID / SP·DP 단위 / 노트레이더) 추출
 //   5. dbConn.uploadResult 직접 호출 — users 프로필 + scores + 28피처(user_ohsorry_radars) 업로드
-//   6. 완료 박스(djName / iidxId / 단위 + 오소리웹 버튼). own=박스, rival=조용히 업로드(최종 목록은 wrapper)
+//   6. 완료 박스(djName / iidxId / 단위 + 오소리웹 버튼) — own·rival 공통. SP/DP 는 모달 토글대로(DP만/SP만).
 //
 // opts:
 //   mode: 'own' | 'rival'  (기본 'own')
 //   rivalToken: rival 모드 시 URL 의 rival 토큰 (옵션 — 본인 모드는 무시)
 //   seriesList / playStyle: 크롤 범위 (wrapper 모달이 결정 — 시리즈 list 값 0~32, 생략 시 전체)
+//   suppressDone: true 면 완료 박스(__ohsorryShowDone) 생략 — 여러 명 처리 시 wrapper 가 showDoneList 로 한 번에 표시
 //   wrapperVersion: wrapper 자기 버전 — supabase version 컬럼은
 //                   `${wrapperVersion}-core${CORE_VERSION_SHORT}` 조합 (예: 'v3.4.0-core396')
 // 콘솔에서 직접 실행 시 (eamuse 페이지 / 운영자 진단 / ohSorryWeb 사이드 카드 등) lib 로드 + step2 진행 동안
@@ -40,6 +41,12 @@ function __ohsorryShowSpinner() {
 function __ohsorryHideSpinner() {
   document.getElementById('__ohsorry_loading_spinner')?.remove();
 }
+// 완료 박스 "오소리웹 카드" 링크 — SP 면 SP 리센트(#ps@SP), DP 는 기본(웹 기본 모드). idNorm=하이픈 제거 IIDX ID.
+function __ohsorryCardUrl(idNorm, style) {
+  if (!idNorm) return 'https://iidx.in/';
+  const ps = style === 'SP' ? '#ps@SP' : '';
+  return `https://iidx.in/#user@${idNorm}${ps}#tab@recent`;
+}
 // [구조개편 Phase 2B] 헤드리스 업로드 완료 박스 — 추천/렌더 패널 없이 "✅ 업로드 완료 + 식별정보 한 줄 + 오소리웹 버튼".
 //   profile: { djName, iidxId, spRank, dpRank }, style: 'SP' | 'DP'(기본). 단위(rank)는 eagate 段位 한자 문자열('中伝' 등).
 //   별값/피처/점수는 업로드만 하고 상세 표시는 오소리웹으로 위임 (설계서 §5 A+식별정보).
@@ -51,7 +58,7 @@ function __ohsorryShowDone(profile, style) {
   const dj = (p.djName || '?').replace(/[<>]/g, '');
   const id = p.iidxId || '';
   const idNorm = id.replace(/-/g, '');   // 딥링크/표시는 하이픈 제거(supabase iidx_id 형식)
-  const webUrl = idNorm ? `https://iidx.in/#user@${idNorm}#tab@recent` : 'https://iidx.in/';
+  const webUrl = __ohsorryCardUrl(idNorm, style);
   const rankRaw = (style === 'SP' ? p.spRank : p.dpRank) || '';
   const hasRank = rankRaw && rankRaw !== '---' && rankRaw !== '-';
   const rankLine = hasRank ? `<span style="font-weight:700">${(style === 'SP' ? 'SP' : 'DP')} ${String(rankRaw).replace(/[<>]/g, '')}</span>` : '';
@@ -68,6 +75,48 @@ function __ohsorryShowDone(profile, style) {
     (rankLine ? `<div style="font-size:12px;margin-top:4px">${rankLine}</div>` : '') +
     `<a href="${webUrl}" target="_blank" rel="noopener" ` +
       'style="display:block;margin-top:12px;padding:8px 0;text-align:center;background:#1d9e75;color:#fff;font-size:12.5px;font-weight:600;border-radius:6px;text-decoration:none">오소리웹에서 내 카드 보기 →</a>';
+  document.body.appendChild(el);
+  el.querySelector('#__ohsorry_done_x')?.addEventListener('click', () => el.remove());
+}
+
+// 여러 명(IIDX ID 여러 개) 업로드 완료 시 — DJ명 · IIDX ID · 단위 · 이동버튼을 한 줄(가로)로 한 명씩.
+//   entries: [{ profile, style:'SP'|'DP' }]. 1명이면 단일 박스(__ohsorryShowDone)로 위임.
+function __ohsorryShowDoneList(entries) {
+  if (typeof document === 'undefined') return;
+  __ohsorryHideSpinner();
+  document.getElementById('__ohsorry_done')?.remove();
+  const list = (entries || []).filter((e) => e && e.profile);
+  if (list.length === 0) return;
+  if (list.length === 1) { __ohsorryShowDone(list[0].profile, list[0].style); return; }
+  const rowsHtml = list.map((e) => {
+    const p = e.profile || {};
+    const dj = (p.djName || '?').replace(/[<>]/g, '');
+    const id = p.iidxId || '';
+    const idNorm = id.replace(/-/g, '');
+    const webUrl = __ohsorryCardUrl(idNorm, e.style);
+    const rankRaw = (e.style === 'SP' ? p.spRank : p.dpRank) || '';
+    const hasRank = rankRaw && rankRaw !== '---' && rankRaw !== '-';
+    const rankTxt = hasRank ? `${e.style === 'SP' ? 'SP' : 'DP'} ${String(rankRaw).replace(/[<>]/g, '')}` : '';
+    // 한 줄: DJ명(가변·말줄임) · IIDX ID(고정) · 단위(고정) · 이동(고정)
+    return (
+      '<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-top:1px solid #f0f1f3;white-space:nowrap">' +
+        `<span title="${dj}" style="flex:1 1 auto;min-width:40px;overflow:hidden;text-overflow:ellipsis;font-size:13px;font-weight:600">${dj}</span>` +
+        (id ? `<span style="flex:none;font-size:11px;color:#868e96;font-family:monospace">${id}</span>` : '') +
+        (rankTxt ? `<span style="flex:none;font-size:11.5px;color:#495057">${rankTxt}</span>` : '') +
+        `<a href="${webUrl}" target="_blank" rel="noopener" ` +
+          'style="flex:none;padding:6px 9px;background:#1d9e75;color:#fff;font-size:11.5px;font-weight:600;border-radius:6px;text-decoration:none">이동 →</a>' +
+      '</div>'
+    );
+  }).join('');
+  const el = document.createElement('div');
+  el.id = '__ohsorry_done';
+  el.style.cssText = 'position:fixed;top:12px;right:12px;z-index:2147483647;background:#fff;border:1px solid #d7dbe0;border-radius:8px;padding:12px 14px 14px;width:max-content;max-width:min(360px, calc(100vw - 24px));max-height:calc(100vh - 24px);overflow:auto;box-sizing:border-box;box-shadow:0 6px 18px rgba(0,0,0,.18);font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color:#212529';
+  el.innerHTML =
+    '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:2px">' +
+      `<div style="font-size:14px;font-weight:700;color:#1d9e75">✅ 업로드 완료 (${list.length}명)</div>` +
+      '<button id="__ohsorry_done_x" style="background:transparent;border:0;color:#aaa;cursor:pointer;font-size:18px;line-height:1;padding:0 2px">×</button>' +
+    '</div>' +
+    rowsHtml;
   document.body.appendChild(el);
   el.querySelector('#__ohsorry_done_x')?.addEventListener('click', () => el.remove());
 }
@@ -288,10 +337,11 @@ async function __fetchRivalToken(iidxId) {
 }
 
 window.OhsorryCore = {
-  VERSION: '0.0.403',
+  VERSION: '0.0.407',
   prefetch: __loadCoreData,        // 모달 떠 있는 동안 미리 호출 → compute 캐시 hit (로딩 단축)
   fetchProfile: __fetchProfile,    // wrapper 가 모달 상단 프로필 채울 때
   fetchRivalToken: __fetchRivalToken,  // IIDX ID → 라이벌 토큰 (라이벌 모드 판정)
+  showDoneList: __ohsorryShowDoneList, // wrapper 가 여러 명 결과를 한 번에 리스트로 표시
   compute: async (opts) => {
   __ohsorryShowSpinner();
   opts = opts || {};
@@ -299,7 +349,7 @@ window.OhsorryCore = {
   const isRival = mode === 'rival';
   const rivalToken = opts.rivalToken || null;
   const wrapperVersion = opts.wrapperVersion || 'unknown';
-  const CORE_VERSION_SHORT = '0.0.403'.replace(/^0\.0\./, '');  // '403' — 데이터 로딩/프로필/라이벌토큰 함수 분리(prefetch·fetchProfile·fetchRivalToken) + 라이벌 통합
+  const CORE_VERSION_SHORT = '0.0.407'.replace(/^0\.0\./, '');  // '407' — 완료 리스트 폭 축소(max-content, 상한 360px)
   const dbVersionString = `${wrapperVersion}-core${CORE_VERSION_SHORT}`;
 
   // -------- 0. 데이터 로드 (ereter/textage/ohSorryRating + 별값 lib) — 모듈 공유 __loadCoreData --------
@@ -504,12 +554,12 @@ window.OhsorryCore = {
   const profileHasRadar = !!profile && (hasRadarData(profile.spRadar) || hasRadarData(profile.dpRadar));
 
   // ===== SP 모드 (경량) — ★추정/추천 전부 스킵. 점수 크롤 + DJ명/단위 + 오소리웹 이동 패널. =====
-  //   본인(own)이면 SP10~12 자동 업로드(play_style:0). 라이벌/DB모드는 표시만(업로드 X).
+  //   own·rival 모두 SP10~12 자동 업로드(play_style:0) + 완료 박스. (대상 IIDX ID 의 프로필/점수를 갱신.)
   if (isSpMode) {
     const spIidx = profile && profile.iidxId ? profile.iidxId.replace(/-/g, '') : null;
     const spPlayed = (allCharts || []).filter((c) => c.exScore > 0 || c.lampNum > 0);
     let spUploaded = null;
-    if (!isRival && spIidx && window.OhsorryDb && window.OhsorryDb.upsertUserChartScores) {
+    if (spIidx && window.OhsorryDb && window.OhsorryDb.upsertUserChartScores) {
       // 5.6b. 프로필(users + user_radars) 저장 — SP 모드는 ★분석을 안 하므로 star/ereter_star 를 새로
       //   계산하지 않는다. upsert_user 가 그 둘을 EXCLUDED 로 무조건 덮어쓰는 정책(02_users.sql)이라,
       //   기존 값을 조회해 그대로 재전송(없으면 null). dj_name/sp_rank/dp_rank/radar 는 status fetch 값으로 갱신.
@@ -546,11 +596,11 @@ window.OhsorryCore = {
     }
     const spResult = {
       spMode: true, mode, isRival, wrapperVersion, dbVersionString,
-      profile, spRank: profile ? (profile.spRank || null) : null,
+      profile, style: 'SP', spRank: profile ? (profile.spRank || null) : null,
       iidxId: spIidx, spChartCount: spPlayed.length, spUploaded,
     };
-    // own 만 완료 박스(rival SP 는 DP 경로 끝에서 보강 업로드).
-    if (!isRival) __ohsorryShowDone(profile, 'SP');
+    // own·rival 모두 완료 박스(대상 IIDX ID 의 카드로 이동). 여러 명이면 wrapper 가 리스트로(suppressDone).
+    if (!opts.suppressDone) __ohsorryShowDone(profile, 'SP');
     __ohsorryHideSpinner();
     return spResult;
   }
@@ -640,50 +690,24 @@ window.OhsorryCore = {
   }
 
   // result — 업로드 전용. uploadResult 는 dbPayload + chartScoreRows 만 사용(피처는 dbConn 이 iidx_id 로 자체 계산).
-  const result = { dbPayload, chartScoreRows };
+  //   profile/style 은 wrapper 의 여러-명 완료 리스트(showDoneList)용.
+  const result = { dbPayload, chartScoreRows, profile, style: 'DP' };
 
   // -------- 7. 업로드 (users 프로필 + scores + 피처) --------
-  //   own = 완료 박스(djName/iidxId/단위 + 내 카드 버튼), rival = 조용히 업로드(라이벌 데이터만 갱신).
+  //   own·rival 모두 완료 박스(djName/iidxId/단위 + 대상 카드 버튼). 대상 IIDX ID 의 데이터를 갱신.
   if (window.OhsorryDb && window.OhsorryDb.uploadResult) {
     try {
       const up = await window.OhsorryDb.uploadResult(result);
       if (up && up.skipped) console.log(`[오소리] 업로드 skip (${up.reason})`);
       else {
-        console.log('[오소리] 업로드 완료 — https://iidx.in 에서 내 카드 확인.');
-        if (!isRival) __ohsorryShowDone(profile, 'DP');
+        console.log('[오소리] 업로드 완료 — https://iidx.in 에서 카드 확인.');
+        if (!opts.suppressDone) __ohsorryShowDone(profile, 'DP');   // 여러 명이면 wrapper 가 리스트로
       }
     } catch (e) {
       console.warn('[OhsorryCore] uploadResult 예외:', e && e.message);
     }
   } else {
     console.warn('[OhsorryCore] OhsorryDb.uploadResult 없음 — 업로드 못 함');
-  }
-
-  // 라이벌도 SP 같이 — DP 업로드 후 라이벌 SP 도 series 크롤해 play_style:0 으로 업로드(웹 SP 표시용).
-  //   수집 시리즈는 DP 와 동일(seriesList). 점수 행은 아래에서 gameLevel 10~12 로 필터.
-  if (isRival && profile && profile.iidxId
-      && window.OhsorryEagateFetch && window.OhsorryEagateFetch.collectCharts
-      && window.OhsorryDb && window.OhsorryDb.upsertUserChartScores) {
-    try {
-      const spR = await window.OhsorryEagateFetch.collectCharts({
-        seriesList, series: SERIES,
-        style: '0', isRival: true, rivalToken,
-        updateProgress: (msg) => console.log('[rival SP]', msg),
-      });
-      if (spR && spR.ok) {
-        fillGameLevel(spR.charts || [], true);   // series 페이지엔 레벨 없음 → SP textage 레벨로 역추정 (필터용)
-        const spIid = profile.iidxId.replace(/-/g, '');
-        const nowIsoR = new Date().toISOString();
-        const spRows = (spR.charts || [])
-          .filter((c) => (c.exScore > 0 || c.lampNum > 0) && c.gameLevel >= 10 && c.gameLevel <= 12)
-          .map((c) => ({
-            played_version: SERIES, title: c.title, iidx_id: spIid, diff: c.diff,
-            game_level: c.gameLevel, ex_score: c.exScore != null ? c.exScore : null,
-            lamp: c.lamp || null, play_style: 0, date: nowIsoR,
-          }));
-        if (spRows.length) await window.OhsorryDb.upsertUserChartScores(spRows);
-      }
-    } catch (e) { console.warn('[rival SP] 실패:', e && e.message); }
   }
 
   __ohsorryHideSpinner();

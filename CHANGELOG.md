@@ -2,6 +2,15 @@
 
 ohSorry 의 변경 이력입니다. 사용방법은 [README.md](README.md) 를 참고하세요.
 
+### 2026-06-16 — 라이벌도 SP/DP 토글 그대로 + 완료 박스 표시 + IIDX 여러 명 → 완료 리스트
+- **라이벌 SP/DP 통일**: 라이벌도 own 과 똑같이 모달 토글대로 — **DP 누르면 DP만, SP 누르면 SP만** 크롤·업로드. wrapper 가 `playStyle` 을 own·rival 공통 전달(기존엔 rival 은 `undefined` 라 항상 DP + SP 자동 보강). [calcOhsorryCore.js](modules/calcOhsorryCore.js) 의 **DP 뒤 rival SP 자동 보강 블록 제거**(이제 토글이 정함).
+- **라이벌 완료 박스**: rival 도 eagate 크롤 후 완료 박스(DJ명/IIDX ID/단위 + 오소리웹 카드 버튼) 표시 — 기존엔 rival 은 `if (!isRival)` 로 박스가 안 떴음. 대상(라이벌) 카드로 이동.
+- **여러 명 입력 → 완료 리스트**: 모달 IIDX input 에 여러 ID(공백·쉼표 구분) 입력 시 순차 처리 후 한 명당 **한 줄(가로: DJ명 · IIDX ID · 단위 · 이동버튼)** 리스트로 완료 박스 표시(core 0.0.406, 박스 폭 min(440px)). `showDoneList(entries)` 추가, compute 는 `opts.suppressDone` 면 단일 박스 생략하고 `{ profile, style }` 반환 → wrapper 가 모아서 리스트로.
+- [ohsorry.js](ohsorry.js) wrapper v3.5.2: input 파싱(`/[\s,]+/` split + 중복 제거) → 본인 ID 면 own, 그 외는 라이벌 토큰 검색 → 각각 `compute({ suppressDone:true })` → `Core.showDoneList`. 여러 명 중 일부 실패(라이벌 미발견 등)는 건너뛰고 계속.
+- **SP 완료 카드 = SP 리센트**: core 0.0.405 — 완료 박스 카드 버튼이 SP 모드면 `#user@{ID}#ps@SP#tab@recent`(SP 리센트) 로, DP 는 기본. 단일/리스트 공용 헬퍼 `__ohsorryCardUrl(idNorm, style)`.
+- 검증: `node --check` 2파일 OK. **크롤·라이벌·여러 명 동작은 eagate 테스트 필요.** gist push 미실행.
+
+
 ### 2026-06-16 — 프로필-먼저 모달 + IIDX input 라이벌 통합 + prefetch (라이벌 북마크릿 제거)
 - **흐름 변경**: 실행 즉시 모달 표시 → 모듈 로드 → 본인 프로필(DJ명/SP·DP단위/IIDX ID) 을 모달 상단에 채움 → 모달 보는 동안 데이터 백그라운드 prefetch → 시작.
 - **라이벌 통합**: 모달의 IIDX ID input(기본=본인) 을 다른 사람 ID 로 바꾸면 `Core.fetchRivalToken` → rival 모드. **별도 `rivalOhsorry.js` 북마크릿 제거** (IIDX input 으로 일원화). batch/renderRivalList 도 제거.

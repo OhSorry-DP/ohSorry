@@ -1,4 +1,4 @@
-// ohsorry.js — 오소리 본체 wrapper (v3.5.0). (legacy gist URL 2-calc-score.js 가 이 파일로 redirect)
+// ohsorry.js — 오소리 본체 wrapper (v3.5.2). (legacy gist URL 2-calc-score.js 가 이 파일로 redirect)
 //
 // 모듈(gist): normTitle / dbConn / calcOhsorryCore / eagateFetch. (render 안 받음 — 코어가 완료 박스 내장.)
 //
@@ -7,12 +7,13 @@
 //   2. 모듈 로드 → Core.fetchProfile() 로 본인 DJ명/단위/IIDX ID 를 모달 상단에 채움.
 //   3. 데이터(별값 lib/ereter/textage) 백그라운드 prefetch(Core.prefetch) → compute 로딩 단축.
 //   4. 시작 → IIDX input 이 본인이면 own, 다른 사람이면 그 사람을 라이벌로(Core.fetchRivalToken → rival 모드).
+//      SP/DP 토글은 own·rival 공통 — DP 누르면 DP만, SP 누르면 SP만 크롤·업로드.
 //
-// supabase version 컬럼: `${WRAPPER_VERSION}-core${CORE_VERSION_SHORT}` (예: 'v3.5.0-core402')
+// supabase version 컬럼: `${WRAPPER_VERSION}-core${CORE_VERSION_SHORT}` (예: 'v3.5.2-core404')
 // ============================================================
 
 (async function () {
-  const WRAPPER_VERSION = 'v3.5.1';   // [구조개편 2C] 프로필-먼저 모달 + IIDX input 라이벌 통합 + prefetch
+  const WRAPPER_VERSION = 'v3.5.2';   // 라이벌도 SP/DP 토글 그대로 + IIDX 여러 명 입력 → 완료 리스트
   const GIST_BASE = 'https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw';
   const CORE_URL     = GIST_BASE + '/calcOhsorryCore.js';
   const DB_URL       = GIST_BASE + '/dbConn.js';
@@ -119,7 +120,7 @@
           <div id="__dp_prof_name" style="font-size:14px;font-weight:700;word-break:break-all">프로필 불러오는 중...</div>
           <div id="__dp_prof_rank" style="font-size:12px;color:#868e96;margin-top:2px"></div>
         </div>
-        <div style="font-size:11px;color:#888;margin-bottom:4px;flex:none">IIDX ID <span style="color:#1d9e75">— 다른 사람 ID 를 넣으면 그 사람을 라이벌로 분석</span></div>
+        <div style="font-size:11px;color:#888;margin-bottom:4px;flex:none">IIDX ID <span style="color:#1d9e75">— 다른 사람 ID = 라이벌 분석 / 여러 명은 공백·쉼표로 구분</span></div>
         <input id="__dp_iidx" type="text" inputmode="numeric" placeholder="0000-0000" disabled
           style="width:100%;box-sizing:border-box;padding:9px 11px;border:1px solid #ced4da;border-radius:7px;font-size:14px;font-family:monospace;margin-bottom:12px;flex:none">
         <div id="__dp_ps_tabs" style="display:flex;margin-bottom:12px;border:1px solid #dee2e6;border-radius:8px;overflow:hidden;flex:none">
@@ -226,24 +227,45 @@
     // 시작 대기
     const { seriesList, playStyle, targetId } = await ui.choice;
     const ownNorm = ((ownProfile && ownProfile.iidxId) || '').replace(/-/g, '');
-    const targetNorm = (targetId || '').replace(/-/g, '');
-    const isRival = !!targetNorm && targetNorm !== ownNorm;
-    let rivalToken;
-    if (isRival) {
-      showLoadingProgress(`라이벌 ${targetNorm} 검색 중...`, 5);
-      try { rivalToken = await Core.fetchRivalToken(targetNorm); }
-      catch (e) { hideLoadingProgress(); alert('라이벌 검색 실패: ' + (e && e.message)); return; }
-      if (!rivalToken) { hideLoadingProgress(); alert(`IIDX ID ${targetNorm} 의 라이벌을 못 찾았어요.\n(ID 오타 / 라이벌 등록·공개 설정 확인)`); return; }
-    }
+    // 여러 IIDX ID 지원 — 공백·쉼표·줄바꿈으로 구분. 본인 ID 면 own, 그 외는 라이벌. 중복 제거.
+    const rawIds = (targetId || '').split(/[\s,]+/).map((s) => s.replace(/-/g, '').trim()).filter(Boolean);
+    const targets = [...new Set(rawIds.length ? rawIds : (ownNorm ? [ownNorm] : []))];
+    if (targets.length === 0) { alert('IIDX ID 를 입력해주세요.'); return; }
+    const multi = targets.length > 1;
+    const doneEntries = [];   // [{ profile, style }] — 완료 후 한 번에 리스트로 표시
     try {
-      return await Core.compute({
-        mode: isRival ? 'rival' : 'own',
-        rivalToken: rivalToken || undefined,
-        wrapperVersion: WRAPPER_VERSION,
-        seriesList,
-        playStyle: isRival ? undefined : playStyle,   // 라이벌은 DP 분석 + SP 보강(고정)
-        profile: isRival ? undefined : ownProfile,     // own 은 모달에서 받은 프로필 재사용(status 재fetch 안 함)
-      });
+      for (let i = 0; i < targets.length; i++) {
+        const tNorm = targets[i];
+        const isRival = tNorm !== ownNorm;
+        const tag = multi ? ` (${i + 1}/${targets.length})` : '';
+        let rivalToken;
+        if (isRival) {
+          showLoadingProgress(`라이벌 ${tNorm} 검색 중...${tag}`, 5);
+          try { rivalToken = await Core.fetchRivalToken(tNorm); }
+          catch (e) {
+            if (!multi) { hideLoadingProgress(); alert('라이벌 검색 실패: ' + (e && e.message)); return; }
+            console.warn('[오소리] 라이벌 검색 실패', tNorm, e && e.message); continue;
+          }
+          if (!rivalToken) {
+            const msg = `IIDX ID ${tNorm} 의 라이벌을 못 찾았어요.\n(ID 오타 / 라이벌 등록·공개 설정 확인)`;
+            if (!multi) { hideLoadingProgress(); alert(msg); return; }
+            console.warn('[오소리]', msg.replace(/\n/g, ' ')); continue;
+          }
+        }
+        const res = await Core.compute({
+          mode: isRival ? 'rival' : 'own',
+          rivalToken: rivalToken || undefined,
+          wrapperVersion: WRAPPER_VERSION,
+          seriesList,
+          playStyle,                                     // own·rival 공통 — DP 누르면 DP만, SP 누르면 SP만
+          profile: isRival ? undefined : ownProfile,     // own 은 모달에서 받은 프로필 재사용(status 재fetch 안 함)
+          suppressDone: true,                            // 완료 박스는 wrapper 가 아래서 리스트로 한 번에
+        });
+        if (res && res.profile) doneEntries.push({ profile: res.profile, style: res.style || playStyle });
+      }
+      if (doneEntries.length === 0) alert('업로드된 결과가 없어요. (라이벌 미발견 / 곡 수집 실패)');
+      else Core.showDoneList(doneEntries);
+      return doneEntries;
     } finally {
       hideLoadingProgress();
     }
