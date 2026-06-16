@@ -80,10 +80,10 @@
   };
   // 10시리즈 단위 그룹 (역순 — 최신 위). 각 그룹에 전체 토글 체크박스.
   const SERIES_GROUPS = [
-    { label: '30~최신', from: 30, to: 33 },
-    { label: '21~29',  from: 21, to: 29 },
-    { label: '11~20',  from: 11, to: 20 },
-    { label: '1~10',   from: 1,  to: 10 },
+    { label: '최신~30', from: 30, to: 33 },
+    { label: '29~20',  from: 20, to: 29 },
+    { label: '19~10',  from: 10, to: 19 },
+    { label: '9~1',    from: 1,  to: 9 },
   ];
   function askFetchOptions(isRival) {
     return new Promise((resolve) => {
@@ -92,20 +92,20 @@
       ov.id = '__dp_fetch_modal';
       ov.style.cssText =
         'position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif';
-      // 그룹별 HTML — 그룹 헤더(전체 토글) + 시리즈 체크박스(그룹 내 newest-first). 기본 전부 checked.
+      // 그룹별 HTML — 각 그룹이 세로 컬럼(헤더 토글 + 시리즈 newest-first). 컬럼들을 가로로 나열(좌→우 스크롤).
       const groupsHtml = SERIES_GROUPS.map((g) => {
         const items = [];
         for (let sn = g.to; sn >= g.from; sn--) {
           items.push(
-            `<label style="display:flex;align-items:center;gap:7px;padding:3px 6px;cursor:pointer;font-size:12.5px">` +
+            `<label style="display:flex;align-items:center;gap:6px;padding:3px 5px;cursor:pointer;font-size:12px;white-space:nowrap">` +
             `<input type="checkbox" class="__dpsr __dpgrp${g.from}" value="${sn}" checked>` +
-            `<span style="color:#868e96;font-variant-numeric:tabular-nums;min-width:18px;text-align:right">${sn}</span>` +
+            `<span style="color:#868e96;font-variant-numeric:tabular-nums;min-width:16px;text-align:right">${sn}</span>` +
             `<span>${SERIES_NAMES[sn]}</span></label>`,
           );
         }
         return (
-          `<div style="margin-bottom:6px">` +
-          `<label style="display:flex;align-items:center;gap:7px;padding:4px 6px;cursor:pointer;background:#f1f3f5;border-radius:6px;font-size:12px;font-weight:700;color:#495057">` +
+          `<div style="flex:0 0 auto;min-width:138px">` +
+          `<label style="display:flex;align-items:center;gap:6px;padding:4px 5px;margin-bottom:2px;cursor:pointer;background:#f1f3f5;border-radius:6px;font-size:12px;font-weight:700;color:#495057;white-space:nowrap">` +
           `<input type="checkbox" class="__dpgrptog" data-grp="${g.from}" checked><span>${g.label}</span></label>` +
           items.join('') +
           `</div>`
@@ -115,14 +115,14 @@
       ov.innerHTML = `
         <div style="background:#fff;border-radius:12px;padding:20px 22px;width:340px;max-width:calc(100vw - 32px);box-sizing:border-box;box-shadow:0 8px 32px rgba(0,0,0,.25);color:#212529;display:flex;flex-direction:column;max-height:calc(100vh - 48px)">
           <div style="font-size:15px;font-weight:700;margin-bottom:3px">${titleText}</div>
-          <div style="font-size:12px;color:#888;margin-bottom:12px">가져올 시리즈를 고르세요 (기본 전체 — 전곡은 약 1분).</div>
+          <div style="font-size:12px;color:#888;margin-bottom:12px">가져올 시리즈를 고르세요 (기본 전체 — 전곡은 약 1분). ←→ 가로 스크롤</div>
           ${isRival ? '' : `<div id="__dp_ps_tabs" style="display:flex;margin-bottom:12px;border:1px solid #dee2e6;border-radius:8px;overflow:hidden;flex:none">
             <button type="button" class="__dp_ps_tab" data-ps="DP" style="flex:1;padding:8px 0;border:0;background:#1d9e75;color:#fff;font-size:13px;font-weight:700;cursor:pointer">DP</button>
             <button type="button" class="__dp_ps_tab" data-ps="SP" style="flex:1;padding:8px 0;border:0;background:#f1f3f5;color:#868e96;font-size:13px;font-weight:700;cursor:pointer">SP</button>
           </div>`}
           <label style="display:flex;align-items:center;gap:7px;padding:4px 6px;margin-bottom:6px;cursor:pointer;font-size:12px;font-weight:700;color:#1d9e75;flex:none">
             <input type="checkbox" id="__dp_all" checked><span>전체</span></label>
-          <div id="__dp_series_box" style="overflow-y:auto;border:1px solid #e9ecef;border-radius:8px;padding:6px 4px;margin-bottom:14px">${groupsHtml}</div>
+          <div id="__dp_series_box" style="display:flex;flex-direction:row;gap:10px;overflow-x:auto;overflow-y:hidden;border:1px solid #e9ecef;border-radius:8px;padding:8px;margin-bottom:14px">${groupsHtml}</div>
           <button id="__dp_fetch_ok" style="width:100%;padding:9px 0;border:0;border-radius:7px;background:#1d9e75;color:#fff;font-size:13px;font-weight:600;cursor:pointer;flex:none">시작</button>
         </div>
       `;
