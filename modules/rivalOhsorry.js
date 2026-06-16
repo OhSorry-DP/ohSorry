@@ -21,10 +21,9 @@
 // ============================================================
 
 (async function () {
-  const WRAPPER_VERSION = 'v3.4.0';   // [Phase 2B] eagate 라이벌 실행 = 헤드리스 (headless: !dbData)
+  const WRAPPER_VERSION = 'v3.4.0';   // [구조개편 2C] eagate 라이벌 크롤→별값→업로드 전용 (render 모듈 안 받음)
   const GIST_BASE = 'https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw';
   const CORE_URL     = GIST_BASE + '/calcOhsorryCore.js';
-  const RENDER_URL   = GIST_BASE + '/ohsorryRender.js';
   const DB_URL       = GIST_BASE + '/dbConn.js';
   const NORM_URL     = GIST_BASE + '/normTitle.js';
   const EAGATE_URL   = GIST_BASE + '/eagateFetch.js';
@@ -190,23 +189,7 @@
     }
     const fetchOpts = await askFetchOptions();
     console.log(`[라이벌오소리] 일괄 처리 시작 — ${ids.length}명`);
-    const rivals = [];  // 결과 누적 — { iidx_id, dj_name, dp_rank }
-    // ohsorryRender.show 임시 swap — Core.compute 가 자동 호출하는 패널 렌더링 차단.
-    //   ohsorryRender 가 아직 안 load 됐을 수도 있으니 첫 호출 후 swap.
-    let renderShowSwapped = false;
-    const swapRender = () => {
-      if (renderShowSwapped || !window.OhsorryRender || !window.OhsorryRender.show) return;
-      window.OhsorryRender.__origShow = window.OhsorryRender.show;
-      window.OhsorryRender.show = async () => {};  // no-op
-      renderShowSwapped = true;
-    };
-    const restoreRender = () => {
-      if (renderShowSwapped && window.OhsorryRender && window.OhsorryRender.__origShow) {
-        window.OhsorryRender.show = window.OhsorryRender.__origShow;
-        delete window.OhsorryRender.__origShow;
-        renderShowSwapped = false;
-      }
-    };
+    const rivals = [];  // 결과 누적 — { iidx_id, dj_name, dp_rank }. core 가 라이벌마다 직접 업로드(렌더 없음).
     try {
       for (let i = 0; i < ids.length; i++) {
         const id = ids[i];
@@ -221,8 +204,6 @@
           }
           console.log(`[라이벌오소리] IIDX ID ${id} → 토큰 ${token.slice(0, 16)}... 라이벌 오소리 실행`);
           const result = await window.__dp_render_rival(null, token, fetchOpts);
-          // 첫 compute 후 ohsorryRender 가 로드됨 — 그 다음부터 swap.
-          swapRender();
           // result.dbPayload 에서 정보 추출
           if (result && result.dbPayload && result.dbPayload.iidx_id) {
             rivals.push({
@@ -237,11 +218,8 @@
       }
     } finally {
       hideLoadingProgress();
-      restoreRender();
     }
     console.log(`[라이벌오소리] 일괄 처리 완료 — ${ids.length}명 (수집 ${rivals.length}명)`);
-    // 첫 라이벌은 swap 전 패널이 그려졌을 수 있음 — 정리.
-    document.getElementById('__dp_score_panel')?.remove();
     if (rivals.length > 0) renderRivalList(rivals);
   };
 
@@ -263,28 +241,20 @@
     showLoadingProgress('normTitle 로드 중', 5);
     try {
       await loadModule(NORM_URL,   'OhsorryNorm');
-      showLoadingProgress('dbConn 로드 중', 25);
+      showLoadingProgress('dbConn 로드 중', 30);
       await loadModule(DB_URL,     'OhsorryDb');
-      showLoadingProgress('render 로드 중', 50);
-      await loadModule(RENDER_URL, 'OhsorryRender');
-      showLoadingProgress('core 로드 중', 75);
+      showLoadingProgress('core 로드 중', 60);
       const Core = await loadModule(CORE_URL, 'OhsorryCore');
-      // eagateFetch — DB 모드 (dbData 있음) 에선 supabase charts_json 으로 채우므로 불필요. fetch 모드만 load.
-      if (!dbData) {
-        showLoadingProgress('eagateFetch 로드 중', 95);
-        await loadModule(EAGATE_URL, 'OhsorryEagateFetch');
-      }
+      // [구조개편 2C] core 는 크롤→별값→업로드 전용 — render 모듈 불필요.
+      showLoadingProgress('eagateFetch 로드 중', 90);
+      await loadModule(EAGATE_URL, 'OhsorryEagateFetch');
       showLoadingProgress('계산 시작', 100);
       return Core.compute({
         mode: 'rival',
-        dbData: dbData || null,
         rivalToken: rivalToken,
         wrapperVersion: WRAPPER_VERSION,
         fetchMode: fetchOpts ? fetchOpts.fetchMode : undefined,
         levels: fetchOpts ? fetchOpts.levels : undefined,
-        // [구조개편 Phase 2B] eagate 라이벌 실행(dbData 없음)은 헤드리스 — core 가 uploadResult 직접 호출.
-        //   render no-op swap 불필요(render.show 미호출). 완료 박스는 rival 이라 안 뜸 → 최종 renderRivalList 만 표시.
-        headless: !dbData,
       });
     } finally {
       // Core.compute 호출 직후 로딩 박스 제거 — 이어서 Core 가 OhsorryRender.showProgress 로
@@ -297,6 +267,6 @@
   if (location.hostname.endsWith('p.eagate.573.jp')) {
     window.__dp_render_rival(null);
   } else {
-    console.log('[오소리/라이벌 v3.3.8] eagate 외 도메인 — window.__dp_render_rival(dbData) 로 DB 데이터를 넘겨 호출하세요.');
+    console.log('[오소리/라이벌 v3.4.0] eagate(p.eagate.573.jp) 에서 실행하세요.');
   }
 })();

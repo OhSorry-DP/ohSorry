@@ -2,6 +2,18 @@
 
 ohSorry 의 변경 이력입니다. 사용방법은 [README.md](README.md) 를 참고하세요.
 
+### 2026-06-16 — 구조개편 2C: calcOhsorryCore 를 크롤→별값→업로드 전용으로 축소 (1660→796줄)
+- 목표: core 를 "수집/업로더" 한 가지 책임으로. 표시·추천은 ohSorryWeb·ohSorryRating(gist 모듈) 정본이 담당, **웹·INF 는 이미 코어-free**(2026-06-03)라 코어는 eagate 업로더에서만 실행 → 그 외 경로 전부 죽은 코드.
+- **제거** ([calcOhsorryCore.js](modules/calcOhsorryCore.js), core 0.0.396):
+  - **render 전부**: `OhsorryRender.show`(SP/DP) · `confirmRedirect` · `runFromDb`(게스트 렌더). 결과는 `dbConn.uploadResult` 직접 호출 + 완료 박스(`__ohsorryShowDone`).
+  - **추천 스택**: recommend/calcWeakness/shelf/patterns/feature-scores/rate-ref/popmean lib·데이터 fetch + `userVec`/`recommendCtx`/`buildRecs`/`buildWeaknessRecs`/reroll 콜백 + 관련 result 필드.
+  - **죽은 모드**: `dbData`(웹 게스트 뷰) · `statsOnly` · `noRender` · `headless`(이제 항상 업로드) 분기 전부.
+  - **렌더 전용 잔재**: zasa fetch+map+supplemental, `zasaAvgByGameLv`, `starDistanceWeight`, `textageSeriesByNorm`, series-name fetch, service-status fetch, 점수 통계 loop(`details`/`perLamp`/`matched`/`total`), 옛 별값 모델 이력 주석(~80줄).
+  - **유지**: eagateFetch 크롤 → 별값(OSR13.5+/onlyOSR/onlyOSRtoEreter) → dbPayload+chartScoreRows → uploadResult + SP 경량 업로드 + rival SP 보강 + textage noteCount/gameLevel 보강(업로드 `game_level` 용).
+- **norm 정본화**: core 인라인 "간이 norm"(Ø→o) 폐기 → `window.OhsorryNorm.norm`(normTitle 단일 정본, Ø→0) 사용. dbConn 은 이미 OhsorryNorm 사용 중이라 이로써 본체 norm 단일화. **별값(star/native_star) 영향 0** — `onlyOSRtoEreter.inferEreter` 가 레이팅 lib 자체 norm 으로 매칭(core norm 미참조). 영향 범위는 ereterMap/ratingMap(=chartScoreRows.level + series 유령필터)뿐(강한 norm 으로 매칭 정확도 ↑). 별값 하니스 4명 baseline 완전 일치.
+- wrapper ([ohsorry.js](ohsorry.js)·[rivalOhsorry.js](modules/rivalOhsorry.js), v3.4.0): RENDER_URL fetch 제거(코어가 render 안 씀) + 죽은 compute opts(dbData/statsOnly/noRender/headless) 제거 + rival 배치의 render no-op swap машинери 제거.
+- 검증: `node --check` 3파일 OK + 별값 baseline 일치 + 죽은 식별자 잔존 0. gist push 미실행. (남은 작업: 크롤 모드 level→series 전환은 별도.)
+
 ### 2026-06-16 — 레포 정리: legacy 수집 스크립트·redirect 아카이브 (2C 일부)
 - 추적 6개 삭제(`git rm`) → `D:\work\dpdata\oldOhSorry` 로 이관: `2-calc-score.js`(호환 redirect), `old/1-fetch-ereter.js`·`old/2-calc-score-dev.js`·`old/3-fetch-lv11-batch.js`·`old/3-fetch-lv12-batch.js`·`old/3-fetch-zasa.js`. (그 외 `.gitignore` 대상 데이터/학습 폴더 — dataset/ereter-data/zasa-data/raw/scripts/source/logic/archive 등 — 도 함께 물리 이동, git 무영향.)
 - **런타임 무영향**: 라이브 도구는 gist 호스팅 `modules/*` + `ohsorry.js`. 옮긴 건 옛 수집 IIFE·로컬 데이터 사본뿐(런타임은 ereter/zasa 도 gist 에서 fetch). **gist 의 `2-calc-score.js` redirect 파일은 유지** — 기존 유저 북마크릿 URL 진입점.

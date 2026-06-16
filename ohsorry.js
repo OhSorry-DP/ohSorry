@@ -20,10 +20,9 @@
 // ============================================================
 
 (async function () {
-  const WRAPPER_VERSION = 'v3.4.0';   // [Phase 2B] eagate 실행 = 헤드리스 업로더 (headless: !dbData)
+  const WRAPPER_VERSION = 'v3.4.0';   // [구조개편 2C] eagate 크롤→별값→업로드 전용 (render 모듈 안 받음)
   const GIST_BASE = 'https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw';
   const CORE_URL     = GIST_BASE + '/calcOhsorryCore.js';
-  const RENDER_URL   = GIST_BASE + '/ohsorryRender.js';
   const DB_URL       = GIST_BASE + '/dbConn.js';
   const NORM_URL     = GIST_BASE + '/normTitle.js';
   const EAGATE_URL   = GIST_BASE + '/eagateFetch.js';
@@ -185,33 +184,21 @@
     showLoadingProgress(isRival ? '라이벌 오소리 시작' : 'normTitle 로드 중', 5);
     try {
       await loadModule(NORM_URL,   'OhsorryNorm');
-      showLoadingProgress('dbConn 로드 중', 25);
+      showLoadingProgress('dbConn 로드 중', 30);
       await loadModule(DB_URL,     'OhsorryDb');
-      showLoadingProgress('render 로드 중', 50);
-      await loadModule(RENDER_URL, 'OhsorryRender');
-      showLoadingProgress('core 로드 중', 75);
+      showLoadingProgress('core 로드 중', 60);
       const Core = await loadModule(CORE_URL, 'OhsorryCore');
-      // eagateFetch — DB 모드 (dbData 있음 = ohSorryWeb 게스트 페이지) 일 때는 받지 않음.
-      // DB 모드는 supabase 의 charts_json 으로 채우므로 eagate 페이지 fetch 가 필요 없음 → 다운로드 절감.
-      if (!dbData) {
-        showLoadingProgress('eagateFetch 로드 중', 95);
-        await loadModule(EAGATE_URL, 'OhsorryEagateFetch');
-      }
+      // [구조개편 2C] core 는 크롤→별값→업로드 전용 — render 모듈 불필요(완료 박스는 core 내장).
+      showLoadingProgress('eagateFetch 로드 중', 90);
+      await loadModule(EAGATE_URL, 'OhsorryEagateFetch');
       showLoadingProgress('계산 시작', 100);
       return Core.compute({
         mode: isRival ? 'rival' : 'own',
         rivalToken: rivalToken || undefined,
-        dbData: dbData || null,
         wrapperVersion: WRAPPER_VERSION,
         fetchMode: fetchOpts ? fetchOpts.fetchMode : undefined,
         levels: fetchOpts ? fetchOpts.levels : undefined,
         playStyle: fetchOpts ? fetchOpts.playStyle : undefined,   // 'SP' | 'DP'(기본)
-        // statsOnly — 게스트 페이지에서 __dp_render(dbData, { statsOnly:true }) 로 호출 시 통계만 즉시 렌더.
-        statsOnly: renderOpts ? !!renderOpts.statsOnly : false,
-        noRender: renderOpts ? !!renderOpts.noRender : false,
-        // [구조개편 Phase 2B] eagate 실행(dbData 없음)은 헤드리스 업로더 — 추천/렌더 없이 업로드 + 완료 박스.
-        //   DB 모드(웹·INF 뷰어, dbData 있음)는 비-헤드리스 유지(render 로 표시). renderOpts.headless 로 강제 override 가능.
-        headless: renderOpts && typeof renderOpts.headless === 'boolean' ? renderOpts.headless : !dbData,
       });
     } finally {
       // Core.compute 호출 직후 로딩 박스 제거 — 이어서 Core 가 OhsorryRender.showProgress 로

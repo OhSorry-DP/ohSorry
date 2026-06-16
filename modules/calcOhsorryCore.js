@@ -1,38 +1,23 @@
 // ============================================================
-// STEP 2: p.eagate.573.jp 도메인 어느 페이지에서나 실행 가능
+// calcOhsorryCore — 오소리 본체 / 라이벌오소리 크롤러의 핵심 모듈.
 // ============================================================
-// 자동으로 LEVEL 12 / DP 의 difficulty.html 페이지를 fetch 합니다.
-// ereter 데이터도 Gist 에서 자동으로 불러옵니다 (사전 작업 불필요).
+// [구조개편 2C] 크롤 → 별값(★) → supabase 업로드 전용. 추천/렌더/표시는 ohSorryWeb·ohSorryRating(gist 모듈)이 담당.
+//   웹·INF 는 코어를 안 쓰고(코어-free, ohsorryRender 직접 호출), 코어는 eagate 업로더에서만 실행된다.
 //
 // 동작:
-//   1. Gist 에서 ereter JSON 데이터 fetch (localStorage 에 24시간 캐시)
-//   2. difficulty.html?difficult=11&style=1&disp=1&offset=0 부터 fetch
-//   3. NEXT 링크 없을 때까지 offset 증가시키며 순회
-//      각 페이지 사이 3~6초 랜덤 대기 (봇 의심 회피)
-//   4. 모든 곡의 클리어램프 + 차트 추출 후 ereter diff 와 매칭
-//   5. ★값 추정 (사용자 실력 지표)
-//   6. status.html fetch 로 프로필 정보 (DJ 이름, IIDX ID, SP/DP 단위, 쿠프로) 추출
-//   7. 추천곡 계산: 안 친 곡 (NO PLAY) 중 ★값 근처 EXH 난이도의 10곡
-//   8. 화면에 프로필 카드 + ★값 + 추천곡 표시
+//   1. Gist 에서 ereter / zasa / textage / ohSorryRating JSON + 별값 lib(OSR13.5+/onlyOSR/onlyOSRtoEreter) fetch
+//   2. eagateFetch 모듈로 difficulty.html / series.html 크롤 (클리어램프 + EX점수 + 차트)
+//   3. 별값(★) 추정 = onlyOSRtoEreter (native onlyOSR → ereter★, OSR13.5 tier)
+//   4. status.html 로 프로필(DJ명 / IIDX ID / SP·DP 단위 / 노트레이더) 추출
+//   5. dbConn.uploadResult 직접 호출 — users 프로필 + scores + 28피처(user_ohsorry_radars) 업로드
+//   6. 완료 박스(djName / iidxId / 단위 + 오소리웹 버튼). own=박스, rival=조용히 업로드(최종 목록은 wrapper)
 //
-// 다른 레벨/스타일을 보고 싶으면 코드 안의 difficult/style 값 변경
-// 딜레이 조정: DELAY_MIN_MS / DELAY_MAX_MS 변수 변경
-//   기본: 600~1800ms (12레벨 8페이지면 총 약 5~14초)
-// ============================================================
-//
-// [DB 모드] window.__dp_render(dbData) 로 호출하면 eagate fetch 없이
-//   supabase user_profiles row (dbData) 로 바로 렌더 → 아무 사이트에서나 사용 가능.
-//   dbData 없이 호출 (또는 eagate 도메인 자동 실행) 하면 기존 eagate fetch 모드.
-//   dbData 형식: { iidx_id, dj_name, sp_rank, dp_rank, charts_json, notes_radar, ... }
-// ============================================================
-
-// calcOhsorryCore — 오소리 본체 / 라이벌오소리 wrapper 가 공통으로 사용하는 핵심 모듈.
 // opts:
 //   mode: 'own' | 'rival'  (기본 'own')
-//   dbData: supabase row (없으면 eagate fetch 모드)
 //   rivalToken: rival 모드 시 URL 의 rival 토큰 (옵션 — 본인 모드는 무시)
-//   wrapperVersion: wrapper 자기 버전 (예: 'v3.3.6') — supabase version 컬럼은
-//                   `${wrapperVersion}-core${CORE_VERSION_SHORT}` 조합 (예: 'v3.3.6-core335')
+//   fetchMode / levels / playStyle: 크롤 범위 (wrapper 모달이 결정)
+//   wrapperVersion: wrapper 자기 버전 — supabase version 컬럼은
+//                   `${wrapperVersion}-core${CORE_VERSION_SHORT}` 조합 (예: 'v3.4.0-core396')
 // 콘솔에서 직접 실행 시 (eamuse 페이지 / 운영자 진단 / ohSorryWeb 사이드 카드 등) lib 로드 + step2 진행 동안
 // 사용자 가시화용 floating spinner. compute 시작 시 추가 → 끝 / 에러 시 제거.
 function __ohsorryShowSpinner() {
@@ -86,31 +71,16 @@ function __ohsorryShowDone(profile, style) {
 }
 
 window.OhsorryCore = {
-  VERSION: '0.0.395',
+  VERSION: '0.0.396',
   compute: async (opts) => {
   __ohsorryShowSpinner();
   opts = opts || {};
   const mode = opts.mode || 'own';
   const isRival = mode === 'rival';
-  let dbData = opts.dbData || null;
   const rivalToken = opts.rivalToken || null;
   const wrapperVersion = opts.wrapperVersion || 'unknown';
-  // statsOnly — 통계 + 노트레이더만 즉시 렌더하는 경량 모드. userVec(calcWeakness) / recommend / layoutMap
-  //   무거운 계산을 건너뛰고 show 도 statsOnly 로 호출 (추천곡 섹션 + supabase 업로드 스킵).
-  const statsOnly = !!opts.statsOnly;
-  // noRender — show(패널 렌더)를 건너뛰고 result 만 반환. 2차 백그라운드 full compute(패턴분석 userVec 만 필요)에서
-  //   전체화면 패널이 깜빡이지 않도록 사용. statsOnly 와 독립.
-  const noRender = !!opts.noRender;
-  // headless — [구조개편 Phase 2A] 결과 패널 렌더 없이 업로드만 (헤드리스 크롤러). render 경유가 아니라
-  //   OhsorryDb.uploadResult 직접 호출 → "업로드↔렌더 결합" 분리. 기본 off(동작 불변). 2B 에서 wrapper 가 켠다.
-  const headless = !!opts.headless;
-  const CORE_VERSION_SHORT = '0.0.395'.replace(/^0\.0\./, '');  // '395' — [Phase 2B] 헤드리스 모드: 추천/렌더 lib fetch·계산 skip + 완료 박스(djName/iidxId/단위). own=박스, rival=조용히 업로드
+  const CORE_VERSION_SHORT = '0.0.396'.replace(/^0\.0\./, '');  // '396' — [구조개편 2C] 크롤→별값→업로드 전용으로 축소: 추천/렌더/dbData/statsOnly/runFromDb 제거, norm=normTitle 정본
   const dbVersionString = `${wrapperVersion}-core${CORE_VERSION_SHORT}`;
-  dbData = dbData || null;
-  // 추천 풀의 chart 마다 c.layoutLabel (= w8.bestLabel) 가 채워지면 이 closure map 에도 동시에 기록.
-  // ohSorryWeb 의 PlayData 탭이 result.layoutMap 으로 활용 — raw title + '|' + diff 키
-  //   (norm 함수가 ohSorry 간이 / ohSorryWeb 강한 norm 으로 달라 매칭 실패 방지).
-  const __pdLayoutMap = {};
   // -------- 0. ereter 데이터 로드 (Gist 에서 자동 fetch) --------
   // ereter.net 데이터는 Gist 에 ereter-data.json 으로 올려둔 걸 가져옵니다.
   // 형식: { extractedAt: "ISO 일시", source, count, charts: [...] }
@@ -118,16 +88,8 @@ window.OhsorryCore = {
   // 한 번 받으면 24시간 동안 localStorage 에 캐시됨
   // 강제로 새로 받고 싶으면: localStorage.removeItem('ereter_dp_diff_v4'); 후 재실행
   const ERETER_DATA_URL = 'https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw/ereter-data.json';
-  // zasa.sakura.ne.jp 의 비공식 ☆12 난이도표 — ereter 미등록 차트 검증용 (보충).
-  // 추천곡 / ★값 추정에는 사용 X. "★ 단위별 클리어 램프 표" 의 곡 수 보강만.
-  const ZASA_DATA_URL = 'https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw/zasa-data.json';
-  // textage 채보 메타 — 채보별 총 노트 수 (notes.DN/DH/DA/DX). noteCount 보강 + missCount 계산용.
+  // textage 채보 메타 — 채보별 총 노트 수 (notes.DN/DH/DA/DX) + 채보 levels. series 모드 gameLevel 역추정 + noteCount 보강.
   const TEXTAGE_DATA_URL = 'https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw/textage-meta.json';
-  // series-name.json — series_no(int) → 시리즈명(string) 매핑. 추천곡 해시태그 시리즈명 라벨용.
-  //   gist 30c3ba6 (service-status.json 과 같은 운영 gist). DB songs 에는 series 컬럼 없음.
-  const SERIES_NAME_URL = 'https://gist.githubusercontent.com/OhSorry-DP/30c3ba6f87df9847291c42ea216a8d2a/raw/series-name.json';
-  // service-status.json — 운영 toggle + notInINF (INF 미수록 차트 수동 제외 목록. songs.legen 미반영분 보강).
-  const SERVICE_STATUS_URL = 'https://gist.githubusercontent.com/OhSorry-DP/30c3ba6f87df9847291c42ea216a8d2a/raw/service-status.json';
   const CACHE_KEY = 'ereter_dp_diff_v4';
   const CACHE_TTL_MS = 24 * 60 * 60 * 1000;  // 24시간
 
@@ -153,15 +115,13 @@ window.OhsorryCore = {
   let ereterExtractedAt = null;
   let ereterPlayers = null;  // { iidxId: ★ } 매핑 (있으면)
 
-  // 캐시 확인 + 원격 extractedAt 비교
+  // 캐시 확인 + 원격 extractedAt 비교 (extractedAt 만 비교에 사용)
   let cachedExtractedAt = null;
-  let cachedData = null;
   try {
     const stored = localStorage.getItem(CACHE_KEY);
     if (stored) {
       const cached = JSON.parse(stored);
       if (cached && cached.ts && (Date.now() - cached.ts < CACHE_TTL_MS) && Array.isArray(cached.data)) {
-        cachedData = cached.data;
         cachedExtractedAt = cached.extractedAt || null;
       }
     }
@@ -236,28 +196,6 @@ window.OhsorryCore = {
   // 페이지 reload 시 다시 받음 (localStorage 캐시는 24h TTL 별도로 동작).
   window.__ohsorryLibCache = window.__ohsorryLibCache || {};
 
-  // -------- 0.5. zasa 보충 데이터 fetch (선택, 실패해도 무시) --------
-  // ereter 에 없는 ☆12 차트를 검증용으로 보충. 추천 / ★ 추정엔 사용 X.
-  let zasaData = [];
-  if (window.__ohsorryLibCache.zasa) {
-    zasaData = window.__ohsorryLibCache.zasa;
-    console.log(`[step2] zasa 보충 차트 ${zasaData.length}개 (memory cache hit)`);
-  } else {
-    try {
-      const res = await fetch(ZASA_DATA_URL + '?t=' + Date.now(), { cache: 'no-store' });
-      if (res.ok) {
-        const raw = await res.json();
-        if (raw && Array.isArray(raw.charts)) {
-          zasaData = raw.charts;
-          window.__ohsorryLibCache.zasa = zasaData;
-          console.log(`[step2] zasa 보충 차트 ${zasaData.length}개 로드`);
-        }
-      }
-    } catch (e) {
-      console.warn('[step2] zasa fetch 실패 (무시 가능):', e.message);
-    }
-  }
-
   // -------- 0.55. textage 채보 메타 fetch (선택, 실패해도 무시) --------
   // 채보별 총 노트 수 → charts 의 noteCount 보강 + missCount 계산 (noteCount - pgreat - great).
   //   캐시 형식 호환 — ohSorryWeb 일부 경로가 raw 전체 (`{generatedAt, count, songs}`) 를 set
@@ -281,30 +219,8 @@ window.OhsorryCore = {
     console.warn('[step2] textage fetch 실패 (무시 가능):', e.message);
   }
 
-  // -------- 0.56. series-name fetch (선택, 실패해도 무시) --------
-  // series_no(int) → 시리즈명(string). 추천곡 해시태그에 `#1st&substream` 식으로 노출.
-  //   textage-meta.songs.<id>.series_no (parseTextage 가 채움) → series-name lookup.
-  let seriesNames = null;
-  if (window.__ohsorryLibCache.seriesNames) {
-    seriesNames = window.__ohsorryLibCache.seriesNames;
-    console.log(`[step2] series-name ${Object.keys(seriesNames).length}개 (memory cache hit)`);
-  } else try {
-    const res = await fetch(SERIES_NAME_URL + '?t=' + Date.now(), { cache: 'no-store' });
-    if (res.ok) {
-      const raw = await res.json();
-      if (raw && typeof raw === 'object') {
-        seriesNames = raw;
-        window.__ohsorryLibCache.seriesNames = seriesNames;
-        console.log(`[step2] series-name ${Object.keys(seriesNames).length}개 로드`);
-      }
-    }
-  } catch (e) {
-    console.warn('[step2] series-name fetch 실패 (무시 가능):', e.message);
-  }
-
-  // -------- 0.6. ohSorryRating 데이터 + 외부 ★ 추정 lib fetch (localStorage 캐시) --------
-  // v3.3.4: user ★ 추정 로직을 외부 lib 으로 분리. 본체는 fetch + ensemble (oldOSR + OSR) / 2 만.
-  //   fetch 실패 시 localStorage 캐시 사용. 캐시도 없으면 ohSorry 동작 불가 (에러 표시).
+  // -------- 0.6. ohSorryRating 데이터 + 별값 lib fetch (localStorage 캐시) --------
+  //   fetch 실패 시 localStorage 캐시 사용. 캐시도 없으면 별값 산출 불가.
   const GIST_RAW = 'https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw';
   const OHSORRY_RATING_URL = GIST_RAW + '/ohSorryRating.json';
   // v3.3.5: OSR13.5+ (bin50 + 50% 임계 + 상향 bin 부분 보너스) — onlyOSRtoEreter 의 13.5 tier 의존
@@ -312,29 +228,6 @@ window.OhsorryCore = {
   // v3.4.0: onlyOSR (전체곡 50% native) + onlyOSRtoEreter (ereter★ 변환, OSR13.5 tier). [Phase 2-0] oldOSR/osr/adopt 제거
   const CALC_ONLYOSR_URL = GIST_RAW + '/onlyOSR.js';
   const CALC_ONLYOSR2E_URL = GIST_RAW + '/onlyOSRtoEreter.js';
-  // ohsorryShelf.js — renderChartRow (추천곡 곡명 클릭 토스트용). 실패해도 무시.
-  const CALC_SHELF_URL = GIST_RAW + '/ohsorryShelf.js';
-  // 패턴 분석 — 유저 약점/강점 9 feature 벡터 + 차트별 강점 매치 점수 (추천 정렬 가중치).
-  //   patterns-all-slim.json: 2348 차트 × 9 feature pt (DP 1P/2P 분리).
-  //   calcWeakness.js: 유저 차트 점수 + patterns → 약점/강점 벡터 + chartStrengthMatch helper.
-  //   추천에 영향 — sample15 정렬을 강점 매치 desc 로 (기존 count desc 대신).
-  // 레벨 구간별 분할 — 평소 11·12 만 로드(대부분 충분), 추천/약점이 하위 레벨을 다룰 때만 lazy 병합.
-  const PATTERNS_URL = GIST_RAW + '/patterns-dp-1112.json';        // 기본 (gameLevel 11/12)
-  const PATTERNS_URL_0810 = GIST_RAW + '/patterns-dp-0810.json';   // lazy (8~10)
-  const PATTERNS_URL_REST = GIST_RAW + '/patterns-dp-rest.json';   // lazy (1~7)
-  // feature-scores-slim.json — 차트별 28 feature quantile score (0~100). 연습곡 패턴 점수 + top 3 feature 분류용.
-  const FEATURE_SCORES_URL = GIST_RAW + '/feature-scores-slim.json';
-  const CALC_WEAKNESS_URL = GIST_RAW + '/calcWeakness.js';
-  // rate-reference-slim.json — 3550명 ereter-fetched 평균 EX rate (estEc/Hc/Exh × 0.5 bucket, isotonic monotonic).
-  //   calcWeakness 에 rateRef 전달 시 absolute reference 기준 잔차 분석 → 사용자간 vec 직접 비교 가능.
-  const RATE_REF_URL = GIST_RAW + '/rate-reference-slim.json';
-  // weakness-popmean.json — 3396명 평균 약점 vec (손별 invariant 7×2 + mirror 18). 연습추천 약점 정규화 baseline.
-  //   recommend.buildWeaknessRecs 가 normalizeWeaknessVec 로 빼서 개인 약점 shape 만 매칭. 실패해도 raw fallback.
-  const WEAKNESS_POPMEAN_URL = GIST_RAW + '/weakness-popmean.json';
-  // recommend.js — 추천 관련 함수 모듈 (chartStrengthMatch / chartStrengthMatchByHand / computeChartTags /
-  //   computeRecHashtags / buildPools / buildRecs / buildWeaknessRecs).
-  //   calcOhsorryCore 가 이 모듈 호출하면 함수 본체는 단일 곳 (gist) 에서 관리 → ohSorryWeb / INFOhSorry 양쪽 reuse.
-  const RECOMMEND_URL = GIST_RAW + '/recommend.js';
 
   // 외부 lib 메모리 캐시 (페이지 lifetime 유지) — batch (라이벌 다수) 처리 시 두 번째부터 fetch skip
   if (!window.__ohsorryLibCache) window.__ohsorryLibCache = {};
@@ -384,157 +277,36 @@ window.OhsorryCore = {
 
   // [Phase 2-0] 별값 lib: OSR13.5+ + onlyOSR + onlyOSRtoEreter (구 oldOSR/osr/adopt 제거 — 결과가 사장됐었음).
   //   eval 은 UMD wrapper 라 window.OSR135 / window.onlyOSR / window.onlyOSRtoEreter 글로벌 등록.
-  // DB 모드 (ohSorryWeb 게스트 / INF) 면 fetch 자체 skip — dbData.star_estimate/native_star 그대로 사용.
-  let osr135Lib = null, shelfLib = null;
+  let osr135Lib = null;
   let onlyOSRLib = null, onlyOSR2eLib = null;  // v3.4.0 (+ Phase 2-0)
-  if (!dbData) {
-    // v3.3.5: OSR13.5+ lib (13.5 이상 ★ 정확도 ↑) — onlyOSRtoEreter 13.5 tier 의 window.OSR135 의존
-    try {
-      const { data: osr135Src, source: src135 } = await loadWithCache(CALC_OSR135_URL, 'ohSorry:libOSR135', false);
-      (new Function(osr135Src))();
-      osr135Lib = window.OSR135;
-      if (!osr135Lib) throw new Error('OSR135 global 등록 실패');
-      console.log(`[step2] OSR13.5+.js v${osr135Lib.version} 로드 (${src135})`);
-    } catch (e) {
-      console.error('[step2] OSR13.5+.js 로드 실패:', e.message);
-    }
-    // v3.4.0: onlyOSR + onlyOSRtoEreter (★ = native 50% → ereter 변환, OSR13.5 tier). window.OhsorryNorm/OSR135 선행 필요(이미 로드됨).
-    try {
-      const { data: ooSrc } = await loadWithCache(CALC_ONLYOSR_URL, 'ohSorry:libOnlyOSR', false);
-      (new Function(ooSrc))();
-      onlyOSRLib = window.onlyOSR;
-      if (!onlyOSRLib) throw new Error('onlyOSR global 등록 실패');
-      const { data: o2eSrc } = await loadWithCache(CALC_ONLYOSR2E_URL, 'ohSorry:libOnlyOSR2e', false);
-      (new Function(o2eSrc))();
-      onlyOSR2eLib = window.onlyOSRtoEreter;
-      if (!onlyOSR2eLib) throw new Error('onlyOSRtoEreter global 등록 실패');
-      console.log(`[step2] onlyOSR v${onlyOSRLib.version} + onlyOSRtoEreter v${onlyOSR2eLib.version} 로드`);
-    } catch (e) {
-      console.warn('[step2] onlyOSR/onlyOSRtoEreter 로드 실패 — ★/native_star 미산출(기존 supabase 값 보존):', e.message);
-    }
-  } else {
-    console.log('[step2] DB 모드 — ★ 추정 lib (OSR13.5+ / onlyOSR / onlyOSRtoEreter) fetch skip');
+  // v3.3.5: OSR13.5+ lib (13.5 이상 ★ 정확도 ↑) — onlyOSRtoEreter 13.5 tier 의 window.OSR135 의존
+  try {
+    const { data: osr135Src, source: src135 } = await loadWithCache(CALC_OSR135_URL, 'ohSorry:libOSR135', false);
+    (new Function(osr135Src))();
+    osr135Lib = window.OSR135;
+    if (!osr135Lib) throw new Error('OSR135 global 등록 실패');
+    console.log(`[step2] OSR13.5+.js v${osr135Lib.version} 로드 (${src135})`);
+  } catch (e) {
+    console.error('[step2] OSR13.5+.js 로드 실패:', e.message);
   }
-  // [구조개편 Phase 2B] 추천/렌더 전용 lib·데이터 — headless(헤드리스 업로더)면 전부 fetch skip.
-  //   업로드(별값/피처/점수)엔 불필요하고, 안 받으면 아래 userVec/recommendCtx 가 null-guard 로 자동 skip.
-  //   shelfLib 은 위(별값 lib 블록)에서 선언됨. computePatternScoreVec(업로드 피처)는 dbConn 이 자체 fetch 라 무관(§6).
-  let patternsMap = null, weaknessLib = null, rateRefData = null, featureScoresMap = null, weaknessPopMeanData = null;
-  // recommendLib — window.OhsorryRecommend (recommend.js gist 로드 결과). createContext(deps) 호출용.
-  let recommendLib = null;
-  if (headless) {
-    console.log('[step2] headless — 추천/렌더 lib·데이터 fetch skip (shelf/patterns/feature-scores/calcWeakness/recommend/rate-ref/popmean)');
-  } else {
-    // ohsorryShelf.js — 추천곡 곡명 클릭 토스트 (renderChartRow) 용. 실패해도 무시 (토스트만 비활성).
-    try {
-      const { data: shelfSrc, source: shelfSrcType } = await loadWithCache(CALC_SHELF_URL, 'ohSorry:libShelf', false);
-      (new Function(shelfSrc))();
-      shelfLib = window.OhSorryShelf;
-      if (shelfLib) {
-        shelfLib.injectStyle();
-        console.log(`[step2] ohsorryShelf.js v${shelfLib.version} 로드 (${shelfSrcType})`);
-      }
-    } catch (e) {
-      console.warn('[step2] ohsorryShelf.js 로드 실패 (무시 가능):', e.message);
-    }
-
-    // 패턴 데이터 + weakness 모듈 fetch (실패 시 추천 가중치 없이 진행, 기존 정렬 fallback)
-    try {
-      const { data: pData, source: pSrc } = await loadWithCache(PATTERNS_URL, 'ohSorry:patterns:1112', true);
-      patternsMap = pData;
-      console.log(`[step2] patterns 11·12 ${Object.keys(patternsMap).length}곡 로드 (${pSrc})`);
-    } catch (e) {
-      console.warn('[step2] patterns-all-slim.json 로드 실패 (가중치 비활성):', e.message);
-    }
-    // feature-scores-slim.json — 연습곡 패턴 점수 + top 3 feature 분류용. 실패해도 다른 기능 영향 없음.
-    try {
-      const { data: fsData, source: fsSrc } = await loadWithCache(FEATURE_SCORES_URL, 'ohSorry:featureScores', true);
-      featureScoresMap = fsData;
-      const cnt = (fsData && fsData.scores) ? Object.keys(fsData.scores).length : 0;
-      console.log(`[step2] feature-scores-slim.json ${cnt}곡 로드 (${fsSrc})`);
-    } catch (e) {
-      console.warn('[step2] feature-scores-slim.json 로드 실패 (연습곡 알고리즘 비활성):', e.message);
-    }
-    try {
-      const { data: wSrc, source: wSrcType } = await loadWithCache(CALC_WEAKNESS_URL, 'ohSorry:libWeakness', false);
-      (new Function(wSrc))();
-      weaknessLib = window.OhsorryWeakness;
-      if (!weaknessLib) throw new Error('OhsorryWeakness global 등록 실패');
-      console.log(`[step2] calcWeakness.js 로드 (${wSrcType})`);
-    } catch (e) {
-      console.warn('[step2] calcWeakness.js 로드 실패 (가중치 비활성):', e.message);
-    }
-    // recommend.js — 추천 함수 모듈. 실패 시 옛 내장 함수 fallback (인라인 정의 유지 — 점진적 마이그레이션).
-    try {
-      const { data: recSrc, source: recSrcType } = await loadWithCache(RECOMMEND_URL, 'ohSorry:libRecommend', false);
-      (new Function(recSrc))();
-      recommendLib = window.OhsorryRecommend;
-      if (!recommendLib) throw new Error('OhsorryRecommend global 등록 실패');
-      console.log(`[step2] recommend.js 로드 (${recSrcType}, v${recommendLib.VERSION})`);
-    } catch (e) {
-      console.warn('[step2] recommend.js 로드 실패 (인라인 추천 함수 fallback):', e.message);
-    }
-    // rate-reference — calcWeakness 의 absolute 잔차 분석용. 실패해도 self-relative 모드로 fallback.
-    try {
-      const { data: rrData, source: rrSrc } = await loadWithCache(RATE_REF_URL, 'ohSorry:rateRef', true);
-      rateRefData = rrData;
-      console.log(`[step2] rate-reference-slim.json 로드 (${rrSrc})`);
-    } catch (e) {
-      console.warn('[step2] rate-reference-slim.json 로드 실패 (self-relative fallback):', e.message);
-    }
-    // weakness-popmean — 연습추천 약점 vec 정규화용. 실패해도 raw vec fallback (정규화 skip).
-    try {
-      const { data: pmData, source: pmSrc } = await loadWithCache(WEAKNESS_POPMEAN_URL, 'ohSorry:weaknessPopMean', true);
-      weaknessPopMeanData = pmData;
-      console.log(`[step2] weakness-popmean.json 로드 (${pmSrc})`);
-    } catch (e) {
-      console.warn('[step2] weakness-popmean.json 로드 실패 (raw vec fallback):', e.message);
-    }
+  // v3.4.0: onlyOSR + onlyOSRtoEreter (★ = native 50% → ereter 변환, OSR13.5 tier). window.OhsorryNorm/OSR135 선행 필요(이미 로드됨).
+  try {
+    const { data: ooSrc } = await loadWithCache(CALC_ONLYOSR_URL, 'ohSorry:libOnlyOSR', false);
+    (new Function(ooSrc))();
+    onlyOSRLib = window.onlyOSR;
+    if (!onlyOSRLib) throw new Error('onlyOSR global 등록 실패');
+    const { data: o2eSrc } = await loadWithCache(CALC_ONLYOSR2E_URL, 'ohSorry:libOnlyOSR2e', false);
+    (new Function(o2eSrc))();
+    onlyOSR2eLib = window.onlyOSRtoEreter;
+    if (!onlyOSR2eLib) throw new Error('onlyOSRtoEreter global 등록 실패');
+    console.log(`[step2] onlyOSR v${onlyOSRLib.version} + onlyOSRtoEreter v${onlyOSR2eLib.version} 로드`);
+  } catch (e) {
+    console.warn('[step2] onlyOSR/onlyOSRtoEreter 로드 실패 — ★/native_star 미산출(기존 supabase 값 보존):', e.message);
   }
-
   // -------- 1. 곡명 정규화 + 인덱싱 --------
-  const norm = (s) => (s || '')
-    .toLowerCase()
-    .replace(/[\s\u3000]+/g, '')
-    .replace(/[~∼〜～]/g, '~')
-    .replace(/[!！]/g, '!')
-    .replace(/[?？]/g, '?')
-    .replace(/[（(]/g, '(')
-    .replace(/[）)]/g, ')')
-    // 더블 쿼터 종류 → ASCII " (좌우 / 일본식 / 독일)
-    .replace(/[“”„‟〝〞〟]/g, '"')
-    // 싱글 쿼터 종류 → ASCII ' (좌우 / backtick / acute / modifier)
-    .replace(/[‘’‚‛`´ʼˈˊˋ]/g, "'")
-    // 라틴 확장
-    .replace(/ƒ/g, 'f')
-    .replace(/[Øø]/g, 'o')
-    .replace(/[Ææ]/g, 'a')
-    .replace(/ə/g, 'e')
-    .replace(/[Œœ]/g, 'oe')
-    .replace(/ß/g, 'ss')
-    // 키릴 → ASCII (homoglyph 케이스)
-    .replace(/[Ии]/g, 'n')
-    .replace(/[Аа]/g, 'a')
-    .replace(/[Ее]/g, 'e')
-    .replace(/[Кк]/g, 'k')
-    .replace(/[Мм]/g, 'm')
-    .replace(/[Оо]/g, 'o')
-    .replace(/[Рр]/g, 'p')
-    .replace(/[Сс]/g, 'c')
-    .replace(/[Тт]/g, 't')
-    .replace(/[Хх]/g, 'x')
-    // 대시 변종 → ASCII '-' (가타카나 장음 ー U+30FC 는 제외)
-    .replace(/[—–‐‑−]/g, '-')
-    // 장식 기호 / 음악 / 수학 기호 제거
-    .replace(/[♠-♯]/g, '')
-    .replace(/[†‡]/g, '')
-    .replace(/[→←↑↓]/g, '')
-    .replace(/[※⁂]/g, '')
-    .replace(/[★☆]/g, '')
-    .replace(/[∫∮∂∇∈∞]/g, '')
-    // diacritic 분해 후 라틴 결합 마크만 제거 (Ü → u, ê → e). 일본어 탁점은 보존.
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .normalize('NFKC');
+  // [중복 제거] 곡명 norm = normTitle.js 단일 정본(window.OhsorryNorm, wrapper 가 먼저 fetch+eval).
+  //   인라인 "간이 norm" 폐기 — 웹/INF/레이팅과 같은 강한 norm 으로 통일(Ø→0 등). dbConn 도 동일 모듈.
+  const norm = window.OhsorryNorm.norm;
 
   const ereterMap = new Map();
   for (const c of ereterData) {
@@ -542,69 +314,12 @@ window.OhsorryCore = {
     ereterMap.set(norm(c.title) + '|' + c.diff, c);
   }
 
-  // textage-meta lookup — norm(title) → series_no. 추천곡 해시태그 시리즈명 표기용.
-  //   parseTextage 가 metaSongs[id].series_no 채움 (substream/INFINITAS 매핑 반영 후).
-  const textageSeriesByNorm = new Map();
-  if (textageSongs) {
-    for (const id in textageSongs) {
-      const e = textageSongs[id];
-      if (!e || !e.title || typeof e.series_no !== 'number') continue;
-      const k = norm(e.title);
-      if (k && !textageSeriesByNorm.has(k)) textageSeriesByNorm.set(k, e.series_no);
-    }
-  }
-
-  // zasa 차트 인덱스 (ereter 와 같은 키 형식)
-  const zasaMap = new Map();
-  for (const c of zasaData) {
-    if (!c.title || !c.diff) continue;
-    zasaMap.set(norm(c.title) + '|' + c.diff, c);
-  }
-  // ohSorry 추정 차트 인덱스 (ereter 와 같은 키 형식, ec/hc 만 — exh 추정 X)
-  // ★ 추정 모델 (fitData) 의 fallback 으로만 사용. 다른 로직 영향 X.
+  // ohSorry 추정 차트 인덱스 (ereter 와 같은 키 형식, ec/hc 만) — chartScoreRows 의 level fallback 용.
   const ratingMap = new Map();
   for (const r of ohSorryRatings) {
     if (!r.title || !r.diff) continue;
     if (typeof r.estEc !== 'number' && typeof r.estHc !== 'number') continue;
     ratingMap.set(norm(r.title) + '|' + r.diff, r);
-  }
-
-  // gameLevel 별 zasaLevel 평균 — 차트에 zasa 가 없을 때 fallback (★ 거리 감쇠용).
-  //   ohSorryRatings (lv11/12) + zasaData (lv1~10 등) 합쳐서 산출.
-  const zasaAvgByGameLv = (() => {
-    const sum = {}, cnt = {};
-    for (const r of ohSorryRatings || []) {
-      if (typeof r.zasaLevel === 'number' && typeof r.gameLevel === 'number') {
-        sum[r.gameLevel] = (sum[r.gameLevel] || 0) + r.zasaLevel;
-        cnt[r.gameLevel] = (cnt[r.gameLevel] || 0) + 1;
-      }
-    }
-    for (const z of zasaData || []) {
-      if (typeof z.level === 'number' && typeof z.gameLevel === 'number') {
-        sum[z.gameLevel] = (sum[z.gameLevel] || 0) + z.level;
-        cnt[z.gameLevel] = (cnt[z.gameLevel] || 0) + 1;
-      }
-    }
-    const out = {};
-    for (const lv in sum) out[lv] = sum[lv] / cnt[lv];
-    return out;
-  })();
-  // ★ 거리 감쇠 weight — EC/HC/EXH 추천 legacy helper. 연습곡은 자체 ☆ 범위 점수식을 사용.
-  //   W = STAR_DISTANCE_W (3). chart★ 가 baseStar±W 안이면 1→0 선형, 밖이면 0 (정렬에서 제외).
-  //   baseStar 또는 chart★ 정보 없으면 1 (감쇠 없음).
-  const STAR_DISTANCE_W = 3;
-  const starDistanceWeight = (star, baseStar) => {
-    if (star == null || baseStar == null) return 1;
-    return Math.max(0, 1 - Math.abs(star - baseStar) / STAR_DISTANCE_W);
-  };
-
-  // ereter 에 없는 zasa 전용 차트 (★ 단위별 표의 곡 수 보강용)
-  const zasaSupplemental = zasaData.filter((c) => {
-    const k = norm(c.title) + '|' + c.diff;
-    return !ereterMap.has(k);
-  });
-  if (zasaSupplemental.length > 0) {
-    console.log(`[step2] zasa 보충 (ereter 미등록): ${zasaSupplemental.length}곡`);
   }
 
   // -------- 2. 대상 페이지 설정 (수집 모드: level / series) --------
@@ -634,20 +349,12 @@ window.OhsorryCore = {
         ? [...new Set(opts.levels.map(Number).filter((n) => n >= 1 && n <= 12))].sort((a, b) => b - a)
         : [12, 11]);
 
-  // 도메인 체크 (잘못된 사이트에서 실행하면 의미 없으니 안내).
-  // DB 모드 (dbData 있음) 에서는 eagate fetch 를 안 하므로 도메인 체크 스킵 → 그대로 진행.
-  // dbData 없음 + 다른 도메인 → "p.eagate.573.jp 로 이동할까요?" 토스트 + return (render 가 있으면 사용).
-  if (!dbData && !location.hostname.endsWith('p.eagate.573.jp')) {
+  // 도메인 체크 — eagate(p.eagate.573.jp) 에서만 의미 있음. 다른 도메인이면 안내 후 이동.
+  if (!location.hostname.endsWith('p.eagate.573.jp')) {
     const msg = isRival
       ? '라이벌 오소리는 p.eagate.573.jp 의 라이벌 페이지에서 실행해야 합니다. 이동할까요?'
       : 'p.eagate.573.jp 에서 실행해야 결과를 볼 수 있어요. 이동할까요?';
-    const targetUrl = 'https://p.eagate.573.jp/';
-    if (window.OhsorryRender && window.OhsorryRender.confirmRedirect) {
-      window.OhsorryRender.confirmRedirect(msg, targetUrl);
-    } else {
-      // render 모듈이 안 떠있는 fallback — 기본 alert
-      if (window.confirm(msg)) location.href = targetUrl;
-    }
+    if (window.confirm(msg)) location.href = 'https://p.eagate.573.jp/';
     return;
   }
 
@@ -655,23 +362,11 @@ window.OhsorryCore = {
   //   parseDoc (difficulty.html level 모드) + parseSeriesDoc (series.html series 모드)
   //   둘 다 eagateFetch 모듈 안의 private 함수. core 는 결과 차트 배열만 받음.
 
-  // -------- 4. allCharts / pageCount — eagateFetch 결과 보관, DB 모드는 charts_json 으로 직접 --------
+  // -------- 4. allCharts / pageCount — eagateFetch 결과 보관 --------
   let allCharts = [];
   let pageCount = 0;
 
-  // DB 모드 — charts_json 으로 allCharts 를 바로 채우고 아래 eagate fetch 블록은 전부 스킵.
-  // deep copy — 외부 lib / 본체가 차트 객체를 in-place 가공하므로 호출자 원본 (서열표 등) 오염 방지.
-  if (dbData) {
-    allCharts = Array.isArray(dbData.charts_json) ? JSON.parse(JSON.stringify(dbData.charts_json)) : [];
-    console.log(`[오소리] DB 모드 — charts_json ${allCharts.length}곡 (eagate fetch 스킵)`);
-    if (allCharts.length === 0) {
-      alert('DB 데이터에 charts_json 이 없습니다.');
-      return;
-    }
-  }
-
-  // 진행 상황을 화면에 표시 (긴 대기 시간 동안 사용자가 진행도 볼 수 있게) — eagate 모드만
-  if (!dbData) {
+  // 진행 상황을 화면에 표시 (긴 대기 시간 동안 사용자가 진행도 볼 수 있게)
   document.getElementById('__dp_progress')?.remove();
   const progress = document.createElement('div');
   progress.id = '__dp_progress';
@@ -691,7 +386,6 @@ window.OhsorryCore = {
     </div>
   `;
   document.body.appendChild(progress);
-  }
   const updateProgress = (text, pct) => {
     const t = document.getElementById('__dp_progress_text');
     const b = document.getElementById('__dp_progress_bar');
@@ -699,35 +393,31 @@ window.OhsorryCore = {
     if (b) b.style.width = `${Math.min(100, Math.max(0, pct))}%`;
   };
 
-  // 수집 실행 — eagateFetch 모듈에 위임 (v3.3.8+, modules/eagateFetch.js v0.0.1+).
-  // 이전 in-place 구현 (fetchOneLevel + collectByLevel + collectBySeries + parseDoc + parseSeriesDoc 약 400줄) 을
-  // 모듈로 분리. closure mutate 대신 { ok, charts, pageCount } return 형태. wrapper 가 dbData 없을 때만 모듈 로드.
-  if (!dbData) {
-    if (!window.OhsorryEagateFetch || !window.OhsorryEagateFetch.collectCharts) {
-      alert('eagateFetch 모듈이 로드되지 않았어요. 페이지 새로고침 후 재시도해주세요.');
-      return;
-    }
-    const r = await window.OhsorryEagateFetch.collectCharts({
-      fetchMode,
-      levels: requestedLevels,
-      series: SERIES,
-      style, disp,
-      isRival, rivalToken,
-      updateProgress,
-    });
-    if (!r.ok) return;  // 수집 실패 → 중단 (alert 는 eagateFetch 내부에서 이미 표시)
-    allCharts = r.charts;
-    pageCount = r.pageCount;
-    const unit = fetchMode === 'series' ? '시리즈' : '페이지';
-    updateProgress(`완료! ${pageCount}${unit} ${allCharts.length}곡`, 100);
-    // 잠시 후 진행 패널 제거 (점수 패널이 같은 위치에 뜨므로)
-    await new Promise((rs) => setTimeout(rs, 500));
-    document.getElementById('__dp_progress')?.remove();
+  // 수집 실행 — eagateFetch 모듈에 위임 (modules/eagateFetch.js). { ok, charts, pageCount } return.
+  if (!window.OhsorryEagateFetch || !window.OhsorryEagateFetch.collectCharts) {
+    alert('eagateFetch 모듈이 로드되지 않았어요. 페이지 새로고침 후 재시도해주세요.');
+    return;
+  }
+  const r = await window.OhsorryEagateFetch.collectCharts({
+    fetchMode,
+    levels: requestedLevels,
+    series: SERIES,
+    style, disp,
+    isRival, rivalToken,
+    updateProgress,
+  });
+  if (!r.ok) return;  // 수집 실패 → 중단 (alert 는 eagateFetch 내부에서 이미 표시)
+  allCharts = r.charts;
+  pageCount = r.pageCount;
+  const unit = fetchMode === 'series' ? '시리즈' : '페이지';
+  updateProgress(`완료! ${pageCount}${unit} ${allCharts.length}곡`, 100);
+  // 잠시 후 진행 패널 제거 (점수 패널이 같은 위치에 뜨므로)
+  await new Promise((rs) => setTimeout(rs, 500));
+  document.getElementById('__dp_progress')?.remove();
 
-    if (allCharts.length === 0) {
-      alert('곡을 하나도 못 찾았어요. 페이지 구조가 변경됐을 수 있습니다.');
-      return;
-    }
+  if (allCharts.length === 0) {
+    alert('곡을 하나도 못 찾았어요. 페이지 구조가 변경됐을 수 있습니다.');
+    return;
   }
 
   // -------- 4.5. textage 채보 메타로 noteCount 보강 --------
@@ -798,221 +488,35 @@ window.OhsorryCore = {
     console.log(`[step2] series 모드 유령 차트 제거: ${before} → ${allCharts.length}차트`);
   }
 
-  // -------- 5. 매칭 + 점수 계산 --------
-  // ereter.net 의 'combined' 분석 페이지와 동일한 방식:
-  // 클리어한 모든 단계의 diff 를 합산.
-  //   - FULL COMBO (7): EC + HC + EXH (모든 단계 도달)
-  //   - EX HARD (6):    EC + HC + EXH (모든 단계 도달)
-  //   - HARD (5):       EC + HC       (HARD 까지 도달)
-  //   - CLEAR (4):      EC            (EASY 까지)
-  //   - EASY (3):       EC            (EASY 까지)
-  //   - FAILED/ASSIST/NO PLAY: 0      (어떤 단계도 클리어 못함)
-  const lampToScore = (n, ec, hc, exh) => {
-    const v = (x) => (typeof x === 'number' ? x : 0);
-    if (n >= 6) return v(ec) + v(hc) + v(exh);  // EX HARD / FULL COMBO
-    if (n === 5) return v(ec) + v(hc);          // HARD
-    if (n >= 3) return v(ec);                   // EASY / CLEAR
-    return 0;                                    // FAILED / ASSIST / NO PLAY
-  };
-
-  let total = 0, matched = 0, unmatched = 0;
-  const perLamp = {}, perLevel = {};
-  const details = [];
-  const unmatchedSamples = [];
-  // ★값 추정용 데이터: (diff, passed) 쌍의 배열
-  // 사용자가 시도한 곡(NO PLAY 제외)에 대해 EC/HC/EXH 각 단계마다 한 점씩
-  // ASSIST 는 ereter 에서 FAILED 로 처리됨 (모든 단계 fail)
-  //
-  // v3.3.4: fitData 생성 + runStarModel 호출은 외부 lib (oldOSR.js / osr.js) 안에서 수행.
-  // 본체에서는 matched / unmatched / perLamp / details / score 통계만 계산 — 점수 합계 + UI 표시 용도.
-
-  // 모드 결정 — LEVEL 12 플레이 곡 ≥ 30 이면 lv12 only 통계, else lv11+lv12 통합 통계
+  // -------- 5. lv12-only 판정 (업로드 lv12 카운트 분기용) --------
+  //   LEVEL 12 플레이 곡 ≥ 30 → lv12 only, 미만 → lv11+lv12 통합. dbPayload 의 n_cleared/n_played 카운트에 사용.
   const nLv12PlayedAll = allCharts.filter((c) => c.gameLevel === 12 && c.lampNum > 0).length;
   const useOnlyLv12 = nLv12PlayedAll >= 30;
-  console.log(
-    `[step2] LEVEL 12 플레이 ${nLv12PlayedAll}곡 → ${useOnlyLv12 ? 'lv12 only (이레터 대상곡만)' : 'lv11+lv12 통합'} 통계 모드`,
-  );
+  console.log(`[step2] LEVEL 12 플레이 ${nLv12PlayedAll}곡 → ${useOnlyLv12 ? 'lv12 only' : 'lv11+lv12 통합'} (업로드 카운트)`);
 
-  for (const c of allCharts) {
-    const skipForStats = useOnlyLv12 && c.gameLevel !== 12;
-    const e = ereterMap.get(norm(c.title) + '|' + c.diff);
-    if (!e) {
-      if (!skipForStats) {
-        unmatched++;
-        if (c.lampNum > 0 && unmatchedSamples.length < 10) {
-          unmatchedSamples.push(`${c.title} [${c.diff}] (lamp=${c.lamp})`);
-        }
-      }
-      continue;
-    }
-    if (!skipForStats) {
-      matched++;
-      perLamp[c.lamp] = (perLamp[c.lamp] || 0) + 1;
-      const score = lampToScore(c.lampNum, e.ec, e.hc, e.exh);
-      total += score;
-      if (e.level != null) perLevel[e.level] = (perLevel[e.level] || 0) + score;
-      if (score > 0) {
-        details.push({
-          title: c.title, diff: c.diff, level: e.level, lamp: c.lamp,
-          ec: e.ec, hc: e.hc, exh: e.exh, score,
-        });
-      }
-    }
-  }
-  details.sort((a, b) => b.score - a.score);
-
-  console.log(`[step2] 매칭 ${matched} / 미매칭 ${unmatched} / 총점 ${total.toFixed(2)}`);
-  if (unmatchedSamples.length > 0) {
-    console.log('미매칭된 곡 (플레이 흔적 있는 것 중):');
-    unmatchedSamples.forEach(s => console.log('  -', s));
-  }
-
-  // -------- 5.5. ★값 추정 (v3.3.5) --------
-  // v3.3.5 변경 (분기 D2):
-  //   - OSR13.5+.js 추가, OSR135 ≥ 13.0 → OSR135 / else → OSR / fallback → oldOSR
-  //   - max(oldOSR, OSR) ensemble 폐기, oldOSR 는 fallback 으로만 유지
-  //   - 1021명 검증: 전체 MAE 0.398 → 0.363, max|err| 6.989 → 4.264, bias +0.192 → +0.016
-  //   - (표기 변경) group C (12.0+ 클리어 ≥ 30) + OSR135 < 13.0 영역만 oldOSR 로 표기. group A/B (저클리어) 는 OSR 유지. 내부 starEstimateNew 는 추천 풀 baseStar 용으로 유지.
-  // v3.3.4 변경:
-  //   - 상세통계 패널 UX 정리: 난이도 선택 토글 (Lv12 / Lv11+) 추가
-  //     · DOM in-place 갱신 → details 펼침/닫힘 상태 보존
-  //     · 난이도별 stacked bar 의 zasa★ levels 동적 (실제 데이터 있는 11.6/11.8/12.0~12.7)
-  //     · "★ 추정 비교 · 곡 정보" 와 토글이 같은 row 좌/우 배치
-  //   - 모델 자체 변경 X (v3.3.3 그대로)
-  // v3.3.3 변경:
-  //   - 4종 fitData 동시 수집 + 모델 함수 분리 (runStarModel)
-  //     · 이레터넷만 / lv12-only / 11.6+ 전체 / primary (useOnlyLv12 분기 결과)
-  //     · 4개 결과 중 max 채택 → 저렙 fallback (★0.01) 자동 보완
-  //   - 상세 통계 패널에 ★ 추정 비교 표시 (곡 정보 토글 안)
-  //   - lv12 ratingMap fallback 차트 곡명 하늘색 / lv11 진한 연두색 (#9ccc65)
-  //   - 추천 풀 lv11+lv12 전곡으로 확장 (zasa < 11.6 lv11 lower-tier 포함)
-  //   - EC 정리곡: HC < baseStar - 3 미만 곡 제외 (시간 낭비 방지)
-  //   - bug fix: runStarModel 내부 closure 변수 fitData → fit (4 호출 모두 동일 데이터로 돌던 문제)
-  // v3.3.2 변경:
-  //   - EC-only 사용자 (HC/EXH 클리어 < 10) 에 raw + max_clear 기반 선형 보정 추가
-  //     · 16명 EC-only 샘플 fit: true ≈ -0.158 + 0.761*raw_s + 0.250*fEc.max_clear
-  //     · MAE 0.637 → 0.374 (41% 감소), 11명 개선 / 3명 작은 악화
-  //     · 이레터★ 유무 무관 적용
-  // v3.3.1 변경:
-  //   - ohSorryRating.json (lv11/12 미등록 차트 추정) 통합 — fitData fallback + EC/HC 추천 풀 포함
-  //   - 추정 하한 0.5 → 0.01 (LOW_FALLBACK + RAW_BOUNDS)
-  //   - lv11 추정 차트 추천 시 곡명 연한 연두색 표시
-  //
-  // v3.2.10 변경 (★값 추정 모델 자체는 v3.2.9 그대로):
-  //   - 추천곡 challenge offset 동적화: ★0.5 → +1.2, ★14.0 → +0.3 선형 보간
-  //   - 6:4 비율 고정 (저레벨 3:7 분기 제거)
-  //   - 풀 샘플 10+10=20 → picked 10 (한 쪽 부족 시 다른 쪽에서 보충)
-  //
-  // v3.2.9 모델: v3.2.7 + 4단계 진입 시 bin 보너스 활성 + ridge 음수 → ridge 0 처리
-  //   - 86명 (n_cleared >= 50) 학습 (LOOCV 기준)
-  //   - mean abs err: 0.1696 ★ (v3.2.7 의 0.1722 → 1.5% 개선, v3.2.1 대비 14.7%)
-  //   - median:       0.1240 ★
-  //   - max:          1.2657 ★
-  //   - RMSE:         0.2517 ★
-  //   - ≤0.10 ★: 35/86 (40.7%)
-  //   - ≤0.30 ★: 76/86 (88.4%)
-  //
-  // 1단계: v3.1.1 의 logistic raw_s (HC × 2 + golden-section)
-  //
-  // 2단계: 36-feature Ridge 회귀 (α=5.0) — v3.2.1 그대로
-  //   - v3.1.1 의 29 feature (raw_s, raw_s², 21 base, 8 AC/FC)
-  //   - v3.2 추가 7 feature:
-  //     · M: 사용자 도달 stage 의 max ★
-  //     · M_top10_avg: top 1~10 cleared 평균 (robust estimator)
-  //     · gap_top10: M - top10 (M 이 outlier 인지 신호)
-  //     · gap × is_ec/hc/exh: M 의 stage 별 차등 페널티
-  //     · prob_sum: S_hat=M_top10_avg 기준 sigmoid prob > 0.99 제외 failed 페널티
-  //
-  // 4단계 (v3.2.4 + v3.2.7 + v3.2.9): bin clear-rate 누적 post-correction
-  //   stage 별 0.1 단위 bin 으로 곡 분류 (NO PLAY 제외, 분모는 시도한 곡만)
-  //   rate ≥ 80% 인정, rateW = (rate - 0.8) / 0.2 [linear, 80~100% → 0~1]
-  //   MIN_SAMPLES 차등 (EC=4/HC=3/EXH=2)
-  //   eligible bin top 3 의 bonus 누적: top1 ×1.0 / top2 ×0.5 / top3 ×0.25, 각 bin × rateW
-  //   bonus 차등: EC=0.05 / HC=0.10 / EXH=0.15 (어려운 stage 일수록 강한 신호)
-  //   stage 별 implied = top1.bin_start + 누적_bonus → max(EC,HC,EXH) 채택
-  //   단방향: implied > pred 일 때만 보너스 적용 (final = pred + diff × 0.7)
-  //
-  //   v3.2.9: bin 보너스 활성 (implied > raw_s + ridge) AND ridge < 0 일 때
-  //     → ridge 의 음수 (페널티) 부분 무시 (RAY 같이 ridge 가 잘못 페널티 준 경우)
-  //     → final pred = raw_s + 0 + post + djBoost
-  //
-  // 5단계 (v3.2.6): djLevel boost
-  //   조건: M lamp = EC (3 또는 4) + djLevel(M 곡) ≥ A + raw_s ≥ 3
-  //   gap (M - rawS) 곡률 with cutoff: gap < 2.5 → 0, gap ≥ 4.0 → 1, 사이 linear
-  //   단방향: M > pred 일 때만 → final = pred + (M - pred) × 0.7 × curveW
-  //   POCHI 처럼 lamp 약하지만 max clear 곡 점수 좋은 사용자 보정 (1명 영향, collateral 0)
-  //
-  // cutoff: n_cleared >= 50 (실전 평가에서 미달 시 v3.1.1 fallback)
-  //
-  // v3.3.4: ★ 추정 모델 (runStarModel) 은 외부 lib (oldOSR.js, osr.js) 으로 분리됨.
-  //   본체에는 stub 만 — 아래 dead code 는 일괄 제거. 외부 lib fetch + ensemble 흐름은 step2 끝에서 처리.
-
-  // ----- 별값 (★) — v3.4.0 / Phase 2-0: onlyOSR(native) + onlyOSRtoEreter(ereter★, OSR13.5 tier) -----
-  //   비-DB: 아래 v3.4.0 블록이 산출. DB: supabase 저장 star_estimate/native_star 그대로.
+  // ----- 별값 (★) — v3.4.0: onlyOSR(전체곡 native 50%) + onlyOSRtoEreter(ereter★, OSR13.5 tier) -----
+  //   onlyOSRtoEreter 가 산출. 실패/미로드 시 star/native_star = null → 업로드에서 기존 supabase 값 보존 + console.warn.
   let starEstimate = null;
-  let starRaw = null;
-  let starEstimateNew = null;  // 추천 풀 baseStar (= native, onlyOSR) — v3.4.0 블록에서 셋업
-  // INF DB 데이터 판별 — INFOhSorry 가 series:'INF' / version:'INFv...' 로 업로드함 (로그 라벨 분기 용)
-  const isInfData = !!dbData && (dbData.series === 'INF' ||
-    (typeof dbData.version === 'string' && dbData.version.indexOf('INF') === 0));
-  // v3.3.8: DB 모드 (dbData 있음) 면 OSR/oldOSR/OSR135/adopt 호출 다 skip — supabase 저장값 그대로 사용.
-  //   기존엔 INF 일 때만 skip 했으나, AC + 게스트 페이지 일반 케이스도 동일하게 처리해 모델 재실행 비용 제거.
-  //   추천곡은 ohsorryRecBase = starEstimateNew != null ? starEstimateNew : starEstimate 이므로
-  //   starEstimateNew 에 같은 값을 셋업해 두면 기존 추천 흐름 그대로 동작.
-  if (dbData) {
-    starEstimate = typeof dbData.star_estimate === 'number' ? dbData.star_estimate : null;
-    starRaw = typeof dbData.raw_s === 'number' ? dbData.raw_s : null;
-    starEstimateNew = starEstimate;  // 추천 풀 baseStar (ohsorryRecBase) 용 — supabase 저장 ★ 와 동일
-    const label = isInfData ? 'INF DB' : 'AC DB';
-    console.log(`[오소리] ${label} 데이터 — ★ 모델 스킵, supabase 저장 ★${starEstimate != null ? starEstimate.toFixed(2) : 'N/A'} 그대로 사용`);
-  }
-  // [Phase 2-0, 2026-06-16] 구 별값 채택(oldOSR/osr/OSR13.5+/adopt) 제거.
-  //   v3.4.0 부터 결과가 아래 onlyOSRtoEreter 에 override 돼 사장됐던 ~160줄. 비-DB 별값은
-  //   아래 v3.4.0 블록(onlyOSR native + onlyOSRtoEreter, OSR13.5 tier)이 산출한다.
-  //   실패 시 starEstimate/nativeStar = null → 기존 supabase 값 보존(아래 dbPayload) + console.warn.
-
-  // v3.4.0 / Phase 2-0: 별값 = onlyOSR(전체곡 native 50%) + onlyOSRtoEreter(ereter★, OSR13.5≥13.5 tier).
-  //   DB 모드: dbData.native_star 읽어 추천 baseStar 로. 비-DB: toEreter 계산.
-  //   실패/미로드 시: star/native_star = null → 업로드에서 기존 supabase 값 보존 (dbPayload), console.warn.
+  let starRaw = null;     // raw_s 는 현재 산출 안 함(업로드 시 null) — 컬럼 호환 유지
   let nativeStar = null;
-  if (dbData) {
-    nativeStar = typeof dbData.native_star === 'number' ? dbData.native_star : null;
-    if (nativeStar != null) starEstimateNew = nativeStar;  // 추천 baseStar = native(onlyOSR)
-  } else if (onlyOSR2eLib && ratingData) {
+  if (onlyOSR2eLib && ratingData) {
     try {
       const r2e = onlyOSR2eLib.inferEreter(allCharts, ratingData, { charts: ereterData, players: ereterPlayers || {} });
       if (typeof r2e.ereterStar === 'number') {
         starEstimate = r2e.ereterStar;
         nativeStar = typeof r2e.ohsorryStar === 'number' ? r2e.ohsorryStar : null;
-        starEstimateNew = nativeStar != null ? nativeStar : starEstimate;  // 추천 baseStar = native(onlyOSR)
         console.log(`[step2] ★ = onlyOSRtoEreter ${starEstimate.toFixed(2)} (native ${nativeStar != null ? nativeStar.toFixed(2) : 'N/A'}, tier ${r2e.tier})`);
       } else {
         console.warn('[step2] onlyOSRtoEreter ereterStar 없음 — ★/native_star 미산출(기존 supabase 값 보존)');
       }
     } catch (e) { console.warn('[step2] onlyOSRtoEreter 실패 — ★/native_star 미산출(기존 supabase 값 보존):', e.message); }
-  } else if (!dbData) {
+  } else {
     console.warn('[step2] onlyOSRtoEreter 미로드 — ★/native_star 미산출(기존 supabase 값 보존)');
   }
 
   // -------- 5.6. status 페이지에서 프로필 정보 fetch --------
   // 쿠프로(クプロ) 이미지, DJ 이름, IIDX ID, SP/DP 단위(段位), 노트레이더 등
   let profile = null;
-  if (dbData) {
-    // DB 모드 — supabase row 에서 프로필 구성 (status.html fetch 스킵).
-    // 쿠프로 이미지는 DB 에 없음. 노트레이더는 notes_radar 있으면 복원, 없으면 미표시.
-    profile = {
-      djName: dbData.dj_name || null,
-      iidxId: dbData.iidx_id || null,
-      spRank: dbData.sp_rank || null,
-      dpRank: dbData.dp_rank || null,
-    };
-    const nr = dbData.notes_radar;
-    if (nr && typeof nr === 'object') {
-      if (nr.sp && typeof nr.sp === 'object') profile.spRadar = nr.sp;
-      if (nr.dp && typeof nr.dp === 'object') profile.dpRadar = nr.dp;
-    }
-    console.log('[오소리] DB 모드 프로필:', profile);
-  } else {
   updateProgress('프로필 정보 fetch 중...', 96);
   try {
     const statusUrl = isRival
@@ -1097,7 +601,6 @@ window.OhsorryCore = {
   } catch (e) {
     console.warn('[step2] 프로필 fetch 실패:', e);
   }
-  }
 
   // 레이더 데이터 유효성 — 객체이고 6개 카테고리 중 하나라도 숫자값이 있어야 함.
   // (null / undefined / 빈 객체 {} 면 레이더 영역 자체를 만들지 않음)
@@ -1113,7 +616,7 @@ window.OhsorryCore = {
     const spIidx = profile && profile.iidxId ? profile.iidxId.replace(/-/g, '') : null;
     const spPlayed = (allCharts || []).filter((c) => c.exScore > 0 || c.lampNum > 0);
     let spUploaded = null;
-    if (!dbData && !isRival && spIidx && window.OhsorryDb && window.OhsorryDb.upsertUserChartScores) {
+    if (!isRival && spIidx && window.OhsorryDb && window.OhsorryDb.upsertUserChartScores) {
       // 5.6b. 프로필(users + user_radars) 저장 — SP 모드는 ★분석을 안 하므로 star/ereter_star 를 새로
       //   계산하지 않는다. upsert_user 가 그 둘을 EXCLUDED 로 무조건 덮어쓰는 정책(02_users.sql)이라,
       //   기존 값을 조회해 그대로 재전송(없으면 null). dj_name/sp_rank/dp_rank/radar 는 status fetch 값으로 갱신.
@@ -1136,7 +639,6 @@ window.OhsorryCore = {
         });
       } catch (e) { console.warn('[SP profile upsert]', e && e.message); }
 
-      const nowIsoSp = new Date().toISOString();
       const spRows = spPlayed
         .filter((c) => c.gameLevel >= 10 && c.gameLevel <= 12)
         .map((c) => ({
@@ -1150,296 +652,25 @@ window.OhsorryCore = {
       }
     }
     const spResult = {
-      spMode: true, mode, isRival, dbData, wrapperVersion, dbVersionString,
-      profile, profileHasRadar,
-      spRank: profile ? (profile.spRank || null) : null,
+      spMode: true, mode, isRival, wrapperVersion, dbVersionString,
+      profile, spRank: profile ? (profile.spRank || null) : null,
       iidxId: spIidx, spChartCount: spPlayed.length, spUploaded,
     };
-    // [Phase 2B] SP 헤드리스 — 렌더 패널 대신 완료 박스(업로드는 위에서 직접 완료). own 만 표시(rival 은 DP 경로에서 SP 보강).
-    if (headless) {
-      if (!isRival) __ohsorryShowDone(profile, 'SP');
-      __ohsorryHideSpinner();
-    } else if (!opts.noRender && window.OhsorryRender && window.OhsorryRender.show) {
-      await window.OhsorryRender.show(spResult, {});
-    }
+    // own 만 완료 박스(rival SP 는 DP 경로 끝에서 보강 업로드).
+    if (!isRival) __ohsorryShowDone(profile, 'SP');
+    __ohsorryHideSpinner();
     return spResult;
   }
 
-  // -------- 5.7. 추천곡 계산 (EC/HC/EXH 3종류) --------
-  // 추천곡 기준 ★값: ereter (이레터 원본) / ohsorry (우리 모델 추정) 토글로 선택 가능
+  // -------- 5.7. ereter★ (업로드 ereter_star 용) --------
+  //   ereter.net 이 산정한 그 유저의 ★ (있으면). dbPayload.ereter_star 로 저장.
   const idNormForRec = profile && profile.iidxId ? profile.iidxId.replace(/-/g, '') : null;
   const eraterTrueStar = (idNormForRec && ereterPlayers) ? ereterPlayers[idNormForRec] : null;
 
-  // EC-only 보정은 runStarModel 함수 내부에서 이미 적용됨 (모든 4종 결과 모두 보정 완료)
-
-  // v3.3.5: D2 의 표기 ★ (starEstimate) 대신 OSR (v0.0.2) 단독값을 추천 baseStar 로 사용
-  //   이유: OSR135 의 over-estimation (12점대 +0.46 bias) 을 추천 풀 결정에서 배제
-  //   OSR 결과 없으면 starEstimate (D2) 로 fallback
-  let ohsorryRecBase = starEstimateNew != null ? starEstimateNew : starEstimate;
-  // ★0.5~2(12레벨 정착 전) 구간은 native(onlyOSR)가 과대추정되는 경향 → 표시 star 를 추천 base 로 우선.
-  //   ★0.5 미만은 native 유지 — star 로 낮추면 'low' 모드(8~10레벨)로 추락해 11레벨 플레이어에 부적합.
-  if (starEstimate != null && starEstimate >= 0.5 && starEstimate < 2) ohsorryRecBase = starEstimate;
-  let recBaseMode = eraterTrueStar != null ? 'ereter' : 'ohsorry';
-  let recBaseStar = recBaseMode === 'ereter' ? eraterTrueStar : ohsorryRecBase;
-  console.log(`[step2] 추천곡 기준: ${recBaseMode} (★${recBaseStar != null ? recBaseStar.toFixed(2) : 'N/A'}, ohsorry=OSR단독 ${ohsorryRecBase != null ? ohsorryRecBase.toFixed(2) : 'N/A'})`);
-
-  // 유저 약점/강점 9 feature 벡터 + 차트별 강점 매치 점수 (추천 정렬 가중치).
-  // patterns 또는 calcWeakness lib 로드 실패 시 가중치 없이 (chartStrengthMatch 항상 0 → fallback to count desc).
-  let userVec = null;
-  const patternsTitleMap = {};
-  if (!statsOnly && patternsMap && weaknessLib) {
-    for (const id in patternsMap) {
-      const k = norm(patternsMap[id].t || '');
-      if (k && !patternsTitleMap[k]) patternsTitleMap[k] = id;
-    }
-    userVec = weaknessLib.calcUserWeakness({ allCharts, patternsMap, normFn: norm, ratingMap: ohSorryRatings, zasaMap: zasaData, rateRef: rateRefData });
-    const vecLog = {};
-    for (const f of weaknessLib.FEATS) vecLog[f] = +userVec[f].toFixed(2);
-    console.log(`[step2] userVec (${userVec.__meta.matched}곡 매칭):`, vecLog);
-  }
-  // 추천 함수 (chartStrengthMatch / chartStrengthMatchByHand / computeChartTags / computeRecHashtags +
-  //   layoutModeForClear 토글 + FEAT_TAG_MAP / CATEGORY_TAG_MAP / PRACTICE_TAG_MAP / HAND_BIAS_THRESHOLD 상수)
-  //   는 recommend.js 모듈로 분리됨 (gist). recommendCtx 통해 호출.
-
-  const recsEC = [], recsHC = [], recsEXH = [], recsWeakness = [];
-  // maxClearGameLevel / shuffle — recommend.js 로 분리 후 dead code 가 되어 제거.
-
-  // 추천 풀 — 카테고리 (미도달 / 도달DJ미도달) × 분류 (hard / easy / cleanup).
-  // 새 룰 (2026-05-27~) — stage 별 effectiveBase + d 기반:
-  //   topClearStar  = 그 stage 클리어 한 차트의 ★ 최댓값 (e[ec/hc/exh])
-  //   effectiveBase = EC: baseStar - 0.5  /  HC: baseStar  /  EXH: baseStar + 2
-  //   d             = max(0, topClearStar - effectiveBase)
-  //
-  //   EC / HC:
-  //     정리곡 (cleanup) = [0, effectiveBase)
-  //     약도전 (easy)    = [effectiveBase, effectiveBase + 0.7d)
-  //     강도전 (hard)    = [effectiveBase + 0.7d, topClearStar + 0.3d]
-  //     dv > topClearStar + 0.3d → 풀 제외
-  //
-  //   EXH:
-  //     정리곡만 (cleanup) = [0, effectiveBase). dv ≥ effectiveBase → 풀 제외 (약/강도전 분류 없음)
-  //
-  //   d=0 (사용자가 effectiveBase 이상 클리어 없음) → 약/강도전 한 점으로 수렴 → 대부분 정리곡
-  // buildPools — recommend.js 로 분리.
-
-  // buildRecs — recommend.js 로 분리.
-
-  // (2026-05-27~) buildExhRecs 제거 — EXH 도 buildRecs(6, 'exh') 새 룰로 통일.
-  //   buildPools 의 effectiveBase = baseStar + 2, 정리곡만 (약/강도전 없음).
-
-  // 연습곡 추천 (WEAKNESS_FEATS / WEAKNESS_CLEAR_LAMP / practiceZasaDefault / WEAKNESS_MODE_FEATS /
-  //   CHART2DIFF_REC) 는 recommend.js 모듈로 분리. recommendCtx 의 buildWeaknessRecs 통해 호출.
-  // INF 유저 — supabase songs.ac/legen 비트맵으로 차트 단위 INF 수록 여부 정확 필터.
-  //   chartName === 'DP_LEG'/'SP_LEG' 면 legen 컬럼, 그 외는 ac 컬럼. INF 비트 = 2.
-  //   songsByNorm 못 가져오면 (= OhsorryDb 미로드 / fetch 실패) fallback 으로 allCharts title set 매칭 (곡 단위).
-  //   AC 유저는 isInfUser=false → fetch / 필터 모두 skip (기존 동작 유지).
-  const isInfUser = isInfData || (profile && profile.iidxId && /^[A-Za-z]/.test(String(profile.iidxId).replace(/-/g, '')));
-  // songs 캐시 — INF 유저 차트 단위 INF 수록 필터 + (INF/AC 공통) ALL 통계 분모(textage×songs ac/legen) 계산.
-  //   ALL 분모는 AC 유저도 ac & 1 수록 비트가 필요하므로 모든 유저 fetch.
-  let songsByNorm = null;
-  if (window.OhsorryDb && typeof window.OhsorryDb.getSongsByNorm === 'function') {
-    try {
-      songsByNorm = await window.OhsorryDb.getSongsByNorm();
-    } catch (err) {
-      console.warn('[step2] songs cache fetch 실패 (INF 필터 / ALL 통계 분모):', err && err.message);
-    }
-  }
-  const infTitleSet = isInfUser
-    ? new Set(allCharts.filter((c) => c && c.title).map((c) => norm(c.title)))
-    : null;
-  // service-status.json 의 notInINF — INF 미수록 차트 수동 제외 목록 (songs.legen 미반영 / 캐시 실패 보강).
-  //   chartName(DP_NOR/HYP/ANO/LEG) → slot(DPN/DPH/DPA/DPL) 매핑 후 norm(title)|slot 로 매칭. 라이브·DB 모드 공통 적용.
-  const NOTINF_CN_TO_SLOT = { DP_NOR: 'DPN', DP_HYP: 'DPH', DP_ANO: 'DPA', DP_LEG: 'DPL', SP_NOR: 'SPN', SP_HYP: 'SPH', SP_ANO: 'SPA', SP_LEG: 'SPL' };
-  const notInInfSet = new Set();
-  try {
-    const ssRes = await fetch(SERVICE_STATUS_URL + '?t=' + Date.now(), { cache: 'no-store' });
-    if (ssRes.ok) {
-      const ss = await ssRes.json();
-      if (ss && Array.isArray(ss.notInINF)) {
-        for (const e of ss.notInINF) {
-          if (e && e.title && e.diff) notInInfSet.add(norm(e.title) + '|' + e.diff);
-        }
-      }
-    }
-  } catch (e) {
-    console.warn('[step2] service-status notInINF fetch 실패:', e && e.message);
-  }
-  const isInfChartInSeries = (title, chartName) => {
-    if (!isInfUser) return true;
-    // 수동 제외 목록 우선 — songs 데이터/캐시와 무관하게 무조건 제외 (legen 오류 / fallback 누수 보강).
-    const slot = NOTINF_CN_TO_SLOT[chartName];
-    if (slot && notInInfSet.has(norm(title) + '|' + slot)) return false;
-    if (songsByNorm) {
-      const cands = songsByNorm.get(norm(title));
-      if (!cands || cands.length === 0) return false;
-      const isLeg = chartName === 'DP_LEG' || chartName === 'SP_LEG';
-      return cands.some((c) => {
-        const v = isLeg ? c.legen : c.ac;
-        return typeof v === 'number' && (v & 2) !== 0;
-      });
-    }
-    return infTitleSet.has(norm(title));
-  };
-
-  // ALL 통계 막대 분모 — zasa 무관, textage-meta 의 DP 채보 levels × songs.ac/legen 수록 비트.
-  //   유저 타입 비트: INF=2 / AC=1. DX(LEGGENDARIA)=legen 컬럼, 그 외(DN/DH/DA/DB)=ac 컬럼.
-  //   songs 레코드(동명이곡 = 같은 norm 의 여러 레코드 포함) 각각에 대해 수록 비트가 set 이면 그 채보를 gameLevel 별 카운트.
-  //   (DP12/DP11 막대 분모는 서열표 곡 집합 기준 — ohsorryRender computeStats 의 isInfUser 분기에서 별도 처리.)
-  let gameLevelTotals = null;
-  if (textageSongs && songsByNorm) {
-    const stripHtmlT = (s) => (s || '').replace(/<[^>]*>/g, '');
-    const userBit = isInfUser ? 2 : 1;
-    const DP_KEYS = ['DN', 'DH', 'DA', 'DX', 'DB'];
-    // norm → textage levels 엔트리 목록 (동명이곡이면 여러 개).
-    const tLevelsByNorm = new Map();
-    for (const id in textageSongs) {
-      const s = textageSongs[id];
-      if (!s || !s.levels || !s.title) continue;
-      const k = norm(stripHtmlT(s.title));
-      if (!tLevelsByNorm.has(k)) tLevelsByNorm.set(k, []);
-      tLevelsByNorm.get(k).push(s.levels);
-    }
-    const totals = {};
-    for (const [k, cands] of songsByNorm) {
-      const levelsList = tLevelsByNorm.get(k);
-      if (!levelsList || !levelsList.length) continue;
-      for (const rec of cands) {                 // songs 레코드 각각 카운트
-        for (const tk of DP_KEYS) {
-          let lvl = null;
-          for (const lv of levelsList) {
-            // 0 = 해당 채보 없음 → skip (실제 레벨 있는 엔트리를 찾음).
-            if (typeof lv[tk] === 'number' && lv[tk] >= 1) { lvl = lv[tk]; break; }
-          }
-          if (lvl == null || lvl < 1 || lvl > 12) continue;
-          const col = (tk === 'DX') ? 'legen' : 'ac';
-          if (typeof rec[col] === 'number' && (rec[col] & userBit) !== 0) {
-            totals[lvl] = (totals[lvl] || 0) + 1;
-          }
-        }
-      }
-    }
-    gameLevelTotals = totals;
-    console.log('[step2] ALL 통계 난이도별 총 채보수 분모(textage×songs):', JSON.stringify(totals));
-  }
-
-  // recommend.js 모듈 ctx — recommendLib 로드 성공 시 createContext 호출, 실패 시 null (옛 인라인 함수 fallback).
-  //   ctx 생성 시점: 모든 deps (patternsTitleMap / userVec / isInfChartInSeries / 등) 준비된 후.
-  //   다음 turn 부터 호출부를 ctx 통과로 점진적 교체 (chartStrengthMatch(r) → ctx.chartStrengthMatch(r)).
-  //   __pdLayoutMap 은 buildWeaknessRecs 가 layoutLabel 기록할 외부 객체로 전달 (옛 closure 동작 호환).
-  // eslint-disable-next-line no-unused-vars
-  const recommendCtx = (recommendLib && !statsOnly) ? recommendLib.createContext({
-    userVec, weaknessLib,
-    patternsMap, patternsTitleMap, normFn: norm,
-    seriesNames, textageSeriesByNorm,
-    allCharts, ereterMap, ratingMap, zasaMap, zasaAvgByGameLv,
-    featureScoresMap,
-    weaknessPopMean: weaknessPopMeanData,
-    isInfChartInSeries,
-    pdLayoutMap: __pdLayoutMap,
-  }) : null;
-  // 레벨 구간 lazy 로드 — 추천/약점이 하위 레벨(8~10, 1~7)을 다룰 때 호출. patternsMap/patternsTitleMap 에 in-place
-  //   병합(recommendCtx 가 같은 객체를 참조하므로 자동 반영). 평소엔 11·12 만 로드해 fetch 량 절감.
-  const __loadedPatBands = new Set(['1112']);
-  async function ensurePatternsLevel(band) {
-    if (!patternsMap || __loadedPatBands.has(band)) return;
-    const url = band === '0810' ? PATTERNS_URL_0810 : band === 'rest' ? PATTERNS_URL_REST : null;
-    if (!url) return;
-    __loadedPatBands.add(band);
-    try {
-      const { data } = await loadWithCache(url, 'ohSorry:patterns:' + band, true);
-      let added = 0;
-      for (const id in data) {
-        if (patternsMap[id]) Object.assign(patternsMap[id].c, data[id].c);
-        else { patternsMap[id] = data[id]; added++; }
-        const k = norm(data[id].t || '');
-        if (k && !patternsTitleMap[k]) patternsTitleMap[k] = id;
-      }
-      console.log(`[patterns] ${band} lazy 병합 (+${added}곡, 총 ${Object.keys(patternsMap).length}곡)`);
-    } catch (e) {
-      __loadedPatBands.delete(band);
-      console.warn(`[patterns] ${band} lazy 로드 실패:`, e && e.message);
-    }
-  }
-  window.__dp_ensurePatternsLevel = ensurePatternsLevel;
-  // 연습곡 기본 범위는 zasa 11.6~12.7. DP12/DP11+ 클리어 범위 토글과 독립적으로 ☆ 입력값만 따른다.
-  // 연습곡 알고리즘 (2026-05-27~) — 복습곡 + 신규 패턴곡 + 실전 연습곡 혼합.
-  //   - '건반'은 순수 건반 7 feature 만 사용하며 CHARGE / SCRATCH / SOF-LAN 은 제외.
-  //   - CHARGE / SCRATCH / SOF-LAN 은 전용 모드에서만 노출하고 서로 섞지 않음.
-  //   - 안 친 곡도 후보에 넣어 "연습할 만한 신규 패턴곡"이 마르지 않게 함.
-  //   - 이미 잘 친 곡(rate 95%+)은 제외하고, 평균보다 낮은 곡은 복습 점수를 더 줌.
-  // MIN_BIN_N + buildWeaknessRecs — recommend.js 로 분리.
-
-  // EC 는 실력값 없을 때 0.3 으로 fallback (저렙 진입자도 추천 받을 수 있게)
-  // HC / EXH 는 실력값 없으면 빈 배열
-  const EC_FALLBACK_BASE = 0.3;
-  const REC_LEVEL_MODE_DEFAULT = recBaseStar != null && recBaseStar < 0.5 ? 'low' : (recBaseStar != null && recBaseStar >= 6 ? 'lv12' : 'all');
-  // 추천곡 DJ레벨 미달 풀 기본값 — 'off' (클리어램프 미달 곡만), 토글로 'on' 가능
-  const REC_DJ_MODE_DEFAULT = 'off';
-  // 클리어 추천 배치 평가 기본값 — 'off' (정배치 위주 추천이 기본). UI 토글로 'on'(8배치) 가능.
-  const REC_LAYOUT_MODE_DEFAULT = 'off';
-  // 추천 점수식 — 'v2'=28dim 매칭 주력 (클리어: 배치적합·깰수있는방향 / 약점: 약점콕, 손별 STAIR·K 포함). 'v1'=기존. 롤백은 'v1' 로 한 줄.
-  const REC_SCORE_MODE = 'v2';
-  const ecBase = recBaseStar != null ? recBaseStar : EC_FALLBACK_BASE;
-  // EC fallback (recBaseStar==null, baseStar=0.3) 케이스는 ★ 거리 cutoff 끄기 — 안 그러면 lv11/12 풀이 통째로 컷됨.
-  // recommend.js 모듈 (recommendCtx) 의 buildRecs / buildWeaknessRecs 호출.
-  //   ctx 없으면 (recommend.js 로드 실패 시) 빈 배열 — 추천 비활성.
-  if (recommendCtx) {
-    // 저렙 유저(baseStar<6 → lvMode≠'lv12')는 추천 풀이 하위 레벨까지 내려가므로 patterns 하위 구간을 미리 lazy 로드.
-    //   11·12 유저('lv12')는 1112 만으로 충분 → 추가 fetch 없음.
-    if (REC_LEVEL_MODE_DEFAULT !== 'lv12') { await ensurePatternsLevel('0810'); await ensurePatternsLevel('rest'); }
-    // 초기 추천도 배치 기본값(OFF=정배치)으로 계산 — 토글 OFF 인데 #FLIP/미러 배지가 찍히던 문제 방지.
-    recommendCtx.setLayoutMode(REC_LAYOUT_MODE_DEFAULT);
-    // randomize:true — 후보 풀(EC/HC/EXH 30곡)에서 계층 랜덤 추출. 초기 렌더부터 매번 변동 (리롤과 동일 동작).
-    recsEC.push(...recommendCtx.buildRecs(3, 'ec', ecBase, REC_LEVEL_MODE_DEFAULT, REC_DJ_MODE_DEFAULT, { randomize: true, scoreMode: REC_SCORE_MODE }));
-    if (recBaseStar != null && recBaseStar >= 0.5) {
-      recsHC.push(...recommendCtx.buildRecs(5, 'hc', recBaseStar, REC_LEVEL_MODE_DEFAULT, REC_DJ_MODE_DEFAULT, { randomize: true, scoreMode: REC_SCORE_MODE }));
-      recsEXH.push(...recommendCtx.buildRecs(6, 'exh', recBaseStar, REC_LEVEL_MODE_DEFAULT, REC_DJ_MODE_DEFAULT, { randomize: true, scoreMode: REC_SCORE_MODE }));
-    }
-    // 연습곡 — userVec.__vecL/__vecR 있어야 동작. 기본 ☆ 범위는 ctx 자체의 practiceZasaDefault 사용 (zasaMin/Max 생략 가능).
-    recsWeakness.push(...recommendCtx.buildWeaknessRecs(recBaseStar, {
-      flipOn: true, handMode: 'both', mode: 'all', topN: 5, strength: 1, randomize: true, scoreMode: REC_SCORE_MODE,
-    }));
-  }
-  // window.__dp_rerollWeakness(opts) — ohsorryRender UI 토글에서 호출. opts: { flipOn, handMode, mode, topN, strength, zasaMin, zasaMax }
-  //   randomize:true 강제 (리롤마다 60풀에서 계층 랜덤). opts 가 randomize 명시하면 그 값 우선.
-  window.__dp_rerollWeakness = async (opts) => {
-    if (!recommendCtx) return [];
-    const o = Object.assign({ randomize: true, scoreMode: REC_SCORE_MODE }, opts || {});
-    // 약점 추천 zasa 하한이 11 미만(하위 레벨 곡 포함)이면 patterns 하위 구간 lazy 로드.
-    if (typeof o.zasaMin === 'number' && o.zasaMin < 11) { await ensurePatternsLevel('0810'); if (o.zasaMin < 8) await ensurePatternsLevel('rest'); }
-    return recommendCtx.buildWeaknessRecs(recBaseStar, o);
-  };
-  console.log(`[step2] 추천곡: EC ${recsEC.length}, HC ${recsHC.length}, EXH ${recsEXH.length}, 연습곡 ${recsWeakness.length}`);
-
-  const topEC  = recsEC;
-  const topHC  = recsHC;
-  const topEXH = recsEXH;
-  const topWeakness = recsWeakness;
-
-  // 다시 뽑기 버튼에서 사용할 수 있도록 노출
-  // (panel 생성 후 클릭으로 재호출 → DOM 부분 업데이트)
-  //   layoutMode — 'on'(default) 8 배치 best / 'off' 정규 N/N 강제. closure 의 layoutModeForClear 에 set 해서 chartStrengthMatchByHand 가 참조.
-  window.__dp_rerollRecs = async (stage, baseStarOverride, recLevelMode, djMode, layoutMode) => {
-    if (!recommendCtx) return [];
-    const base = typeof baseStarOverride === 'number' ? baseStarOverride : recBaseStar;
-    const lvMode = recLevelMode === 'lv12' ? 'lv12' : recLevelMode === 'low' ? 'low' : REC_LEVEL_MODE_DEFAULT;
-    if (lvMode !== 'lv12') { await ensurePatternsLevel('0810'); await ensurePatternsLevel('rest'); }   // 하위 레벨 추천 — patterns 하위 구간 lazy 로드
-    const dMode = djMode === 'on' ? 'on' : 'off';
-    recommendCtx.setLayoutMode(layoutMode === 'off' ? 'off' : 'on');
-    if ((stage === 'hc' || stage === 'exh') && base != null && base < 0.5) return [];
-    if (stage === 'exh') return base != null ? recommendCtx.buildRecs(6, 'exh', base, lvMode, dMode, { randomize: true, scoreMode: REC_SCORE_MODE }) : [];
-    if (stage === 'hc')  return base != null ? recommendCtx.buildRecs(5, 'hc', base, lvMode, dMode, { randomize: true, scoreMode: REC_SCORE_MODE }) : [];
-    // EC reroll 도 base==null 이면 EC_FALLBACK_BASE + ★ 거리 cutoff 끄기 (초기 계산과 동일).
-    if (stage === 'ec')  return recommendCtx.buildRecs(3, 'ec', base != null ? base : EC_FALLBACK_BASE, lvMode, dMode, { randomize: true, scoreMode: REC_SCORE_MODE });
-    return [];
-  };
-
-  // -------- 6. 결과 → ohsorryRender 모듈로 전달 (panel build + supabase upload 는 render 가 담당) --------
-
-  // user_profiles upsert payload build — DB 모드는 skip (render 가 dbData 체크)
+  // -------- 6. 업로드 payload build (users 프로필 + scores rows) --------
   let dbPayload = null;
   let chartScoreRows = null;
-  if (!dbData && profile && profile.iidxId) {
+  if (profile && profile.iidxId) {
     const iidxIdNorm = profile.iidxId.replace(/-/g, '');
     const nowIso = new Date().toISOString();
     let nPlayedLv12 = 0, fcCount = 0, exhCount = 0, hcCount = 0, nClearedLv12 = 0;
@@ -1509,63 +740,30 @@ window.OhsorryCore = {
     });
   }
 
-  // result 객체 — render 가 받아서 panel + supabase upload 진행
-  const result = {
-    mode, isRival, dbData, wrapperVersion, dbVersionString,
-    profile, profileHasRadar, hasRadarData,
-    starEstimate, starRaw, starEstimateNew, eraterTrueStar,
-    allCharts,
-    ereterData, zasaSupplemental, ereterMap, zasaMap, ratingMap, ereterExtractedAt,
-    gameLevelTotals, isInfUser,
-    ohsorryRecBase,
-    topEC, topHC, topEXH, topWeakness,
-    pageCount, useOnlyLv12, matched, unmatched, details, perLevel, perLamp,
-    recsEC, recsHC, recsEXH, recsWeakness,
-    total,
-    recBaseMode, recBaseStar,
-    recLevelModeDefault: REC_LEVEL_MODE_DEFAULT,
-    recDjModeDefault: REC_DJ_MODE_DEFAULT,
-    recLayoutModeDefault: REC_LAYOUT_MODE_DEFAULT,   // 콘솔/INF 배치추천 토글 기본값 (ohsorryRender) — OFF
+  // result — 업로드 전용. uploadResult 는 dbPayload + chartScoreRows 만 사용(피처는 dbConn 이 iidx_id 로 자체 계산).
+  //   rivalOhsorry 배치가 result.dbPayload(iidx_id/dj_name/dp_rank)로 최종 목록을 만들므로 dbPayload 는 노출.
+  const result = { dbPayload, chartScoreRows };
 
-    // recommend.js 의 context 에서 계산된 값 — ohsorryRender UI (연습곡 zasa 토글 기본값) 가 사용.
-    //   recommendLib 로드 실패 시 (recommendCtx=null) fallback 값.
-    practiceZasaDefault: recommendCtx ? recommendCtx.practiceZasaDefault : { min: 11.6, max: 12.7 },
-    userVec,
-    weaknessLib,
-    norm, SERIES, shelfLib,
-    dbPayload, chartScoreRows,
-    layoutMap: __pdLayoutMap,   // ohSorryWeb PlayData 탭 — (norm(title) + '|' + diff) → bestLabel
-  };
-
-  // [Phase 2A/2B] 헤드리스 — 결과 패널 없이 업로드만. render(웹 정본 gist) 의 내부 upsert 트리거에 의존하지 않고
-  //   OhsorryDb.uploadResult 를 직접 호출 (업로드↔렌더 분리). DB 모드(다른 유저 열람)는 uploadResult 가 자동 skip.
-  //   풀 모드와 상호배타 → 이중 업로드 없음. 2B: own 은 완료 박스(§5 A+식별정보), rival 은 console.log 만
-  //   (배치 시 per-rival 박스 깜빡임 방지 → wrapper 의 renderRivalList 가 최종 목록 표시).
-  if (headless) {
-    let uploadedOk = false;
-    if (window.OhsorryDb && window.OhsorryDb.uploadResult) {
-      try {
-        const up = await window.OhsorryDb.uploadResult(result, { dbData });
-        if (up && up.skipped) console.log(`[오소리] 헤드리스 — 업로드 skip (${up.reason})`);
-        else { uploadedOk = true; console.log('[오소리] 업로드 완료 — 결과는 https://ohsorry.iidx.in 에서 확인하세요.'); }
-      } catch (e) {
-        console.warn('[OhsorryCore] headless uploadResult 예외:', e && e.message);
+  // -------- 7. 업로드 (users 프로필 + scores + 피처) --------
+  //   own = 완료 박스(djName/iidxId/단위 + 오소리웹 버튼), rival = 조용히 업로드(최종 목록은 wrapper renderRivalList).
+  if (window.OhsorryDb && window.OhsorryDb.uploadResult) {
+    try {
+      const up = await window.OhsorryDb.uploadResult(result);
+      if (up && up.skipped) console.log(`[오소리] 업로드 skip (${up.reason})`);
+      else {
+        console.log('[오소리] 업로드 완료 — 결과는 https://ohsorry.iidx.in 에서 확인하세요.');
+        if (!isRival) __ohsorryShowDone(profile, 'DP');
       }
-    } else {
-      console.warn('[OhsorryCore] headless: OhsorryDb.uploadResult 없음 — 업로드 못 함');
+    } catch (e) {
+      console.warn('[OhsorryCore] uploadResult 예외:', e && e.message);
     }
-    if (uploadedOk && !isRival) __ohsorryShowDone(profile, 'DP');
-  } else if (!noRender && window.OhsorryRender && window.OhsorryRender.show) {
-    // ohsorryRender 모듈은 wrapper 가 미리 fetch 해서 window.OhsorryRender 로 노출했다고 가정.
-    await window.OhsorryRender.show(result, { statsOnly });
   } else {
-    // wrapper 가 안 띄웠거나 noRender — 결과 객체는 return 으로 반환되니 호출자가 처리 가능. (원래 동작 유지)
-    console.error('[OhsorryCore] window.OhsorryRender 가 없습니다. wrapper 가 ohsorryRender.js 를 fetch 하지 않았을 수 있어요.');
+    console.warn('[OhsorryCore] OhsorryDb.uploadResult 없음 — 업로드 못 함');
   }
 
   // 라이벌도 SP 같이 — DP 분석/업로드 후, 라이벌 SP10~12 도 크롤해 play_style:0 으로 업로드(웹 SP 표시용).
   //   라이벌은 토글 없이 항상 둘 다. (본인 SP 는 위 isSpMode 경량 분기에서 처리.) 표시는 DP 패널 그대로.
-  if (isRival && !dbData && profile && profile.iidxId
+  if (isRival && profile && profile.iidxId
       && window.OhsorryEagateFetch && window.OhsorryEagateFetch.collectCharts
       && window.OhsorryDb && window.OhsorryDb.upsertUserChartScores) {
     try {
@@ -1592,72 +790,6 @@ window.OhsorryCore = {
   __ohsorryHideSpinner();
   return result;
   // compute: async (opts) => { ... } 의 본문 끝
-  },
-
-  // ===== runFromDb — supabase row 만으로 가벼운 렌더 (게스트 리드미용) =====
-  // 외부 lib (oldOSR / OSR / OSR135 / ereter / zasa / textage) 안 받음.
-  // dbData 의 값 그대로 사용 — star_estimate, ereter_star 등은 row 에 저장된 값.
-  // 추천곡 / 상세통계 / ★ 추정 비교 섹션은 빈 상태 (render 가 graceful 하게 일부만 그림).
-  // dbPayload 는 null — 게스트 리드미는 supabase 재업로드 X.
-  runFromDb: async (row, opts) => {
-    __ohsorryShowSpinner();
-    opts = opts || {};
-    const wrapperVersion = opts.wrapperVersion || 'light';
-    const CORE_VERSION_SHORT = '0.0.344'.replace(/^0\.0\./, '');
-    const dbVersionString = `${wrapperVersion}-core${CORE_VERSION_SHORT}`;
-
-    if (!row || !row.iidx_id) {
-      console.error('[OhsorryCore.runFromDb] row 가 비어있거나 iidx_id 없음');
-      return null;
-    }
-
-    const profile = {
-      djName: row.dj_name,
-      iidxId: row.iidx_id,
-      spRank: row.sp_rank,
-      dpRank: row.dp_rank,
-      spRadar: (row.notes_radar && row.notes_radar.sp) || null,
-      dpRadar: (row.notes_radar && row.notes_radar.dp) || null,
-      qproImg: null,  // supabase row 에 없음
-    };
-    const hasRadarData = (r) => r && typeof r === 'object' && Object.keys(r).length > 0;
-    const profileHasRadar = hasRadarData(profile.spRadar) || hasRadarData(profile.dpRadar);
-
-    // 곡명 정규화 — 간이 norm (full norm 은 외부 lib 의존)
-    const norm = (s) => String(s == null ? '' : s).toLowerCase()
-      .replace(/[\s　]+/g, '').normalize('NFKC');
-
-    const result = {
-      mode: 'own', isRival: false, dbData: row, wrapperVersion, dbVersionString,
-      profile, profileHasRadar, hasRadarData,
-      starEstimate: row.star_estimate != null ? Number(row.star_estimate) : null,
-      starRaw: row.raw_s != null ? Number(row.raw_s) : null,
-      eraterTrueStar: row.ereter_star != null ? Number(row.ereter_star) : null,
-      starEstimateNew: null, starEstimateOld: null,
-      starEstimateEreterOnly: null, starEstimateLv12Only: null, starEstimateAll: null,
-      allCharts: Array.isArray(row.charts_json) ? row.charts_json : [],
-      ereterData: [], zasaSupplemental: [],
-      ereterMap: new Map(), zasaMap: new Map(), ratingMap: new Map(),
-      ereterExtractedAt: null,
-      ohsorryRecBase: null,
-      topEC: [], topHC: [], topEXH: [], topWeakness: [],
-      pageCount: 0, useOnlyLv12: false, matched: 0, unmatched: 0, details: [], perLevel: {}, perLamp: {},
-      recsEC: [], recsHC: [], recsEXH: [], recsWeakness: [],
-      total: Array.isArray(row.charts_json) ? row.charts_json.length : 0,
-      recBaseMode: 'ohsorry', recBaseStar: null,
-        norm, SERIES: row.series || '33',
-        shelfLib: window.OhSorryShelf || null,
-        dbPayload: null,  // 재업로드 X
-        chartScoreRows: null,
-      };
-
-    if (window.OhsorryRender && window.OhsorryRender.show) {
-      await window.OhsorryRender.show(result);
-    } else {
-      console.error('[OhsorryCore.runFromDb] window.OhsorryRender 없음 — render 모듈 먼저 load 필요');
-    }
-    __ohsorryHideSpinner();
-    return result;
   },
 };
 // 자동 실행 / 노출 함수 (__dp_render, __dp_render_rival 등) 는 wrapper 가 담당.
