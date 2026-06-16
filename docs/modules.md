@@ -7,27 +7,22 @@
 
 ---
 
-## calcOhsorryCore.js — 계산 마스터
+## calcOhsorryCore.js — 수집/업로더 마스터
 
-- 등록: `window.OhsorryCore`, `VERSION: '0.0.368'` (`calcOhsorryCore.js:59-60`)
-- export 메서드: `compute(opts)` (`:61`), `runFromDb(row, opts)` (`:1637`)
-- 책임: ereter/zasa/textage/rating/lib 데이터 fetch+캐시, eagate 페이지 순회 위임, 매칭·점수, ★값 추정, 추천 오케스트레이션, 프로필 fetch, result build. **DOM 직접 조작은 render 에 위임**(작은 floating spinner 제외).
+- 등록: `window.OhsorryCore`, `VERSION: '0.0.407'` (`calcOhsorryCore.js:290-291`)
+- export: `prefetch`(=`__loadCoreData`), `fetchProfile`, `fetchRivalToken`, `showDoneList`, `compute(opts)` (`:290-295`)
+- 책임: ereter/textage/rating JSON + 별값 lib 3종 fetch+캐시, eagate series 크롤 위임, 곡 매칭, **별값(★) 추정**, 프로필 fetch, dbPayload/chartScoreRows build, `dbConn.uploadResult` 호출, 완료 박스/리스트. **결과 렌더·추천·약점분석은 안 함**(이관·제거, 작은 floating spinner + 완료 박스만 DOM 조작).
 
-### compute() 의 result 객체 (render/외부로 반환)
-`calcOhsorryCore.js:1593-1617`. 주요 키:
-- 프로필: `profile`(djName/iidxId/spRank/dpRank/spRadar/dpRadar/qproImg/area...), `profileHasRadar`
-- ★: `starEstimate`(표시용), `starEstimateNew`(=OSR/native, 추천 baseStar), `starEstimateOld`, `eraterTrueStar`(ereter 실측), `starRaw`, `ohsorryRecBase`
-- 차트: `allCharts`, `ereterMap`/`zasaMap`/`ratingMap`(`norm(title)+'|'+diff` 키 Map), `ereterExtractedAt`, `gameLevelTotals`, `isInfUser`
-- 추천: `topEC`/`topHC`/`topEXH`/`topWeakness`(= `recsEC` 등), `recBaseMode`(`'ereter'`|`'ohsorry'`), `recBaseStar`, `recLevelModeDefault`, `recDjModeDefault`, `practiceZasaDefault`
-- 통계: `matched`/`unmatched`/`total`/`details`/`perLevel`/`perLamp`/`useOnlyLv12`/`pageCount`
-- 분석: `userVec`(calcWeakness 결과), `weaknessLib`
-- 업로드: `dbPayload`(users upsert payload), `chartScoreRows`(scores rows)
-- 기타: `norm`(정규화 함수), `SERIES`(`'33'`), `shelfLib`, `layoutMap`(ohSorryWeb PlayData 탭용 `norm(title)|diff → bestLabel`)
+### 모듈 함수 (wrapper 가 모달 단계에서 호출)
+- `__loadCoreData()` (`:237-254`) = `Core.prefetch` — 데이터 6종 묶음 로드(캐시 공유). compute 도 같은 함수 호출.
+- `__fetchProfile({isRival, rivalToken})` (`:255~`) = `Core.fetchProfile` — status.html/rival_status.html 파싱 → `{djName, iidxId, spRank, dpRank, spRadar, dpRadar}`.
+- `__fetchRivalToken(iidxId)` = `Core.fetchRivalToken` — rival_search.html POST → 라이벌 토큰 or null.
+- `__ohsorryShowDoneList(entries)` (`:84-123`) = `Core.showDoneList` — 여러 명 완료 시 한 줄(DJ명·ID·단위·이동) 리스트 박스(1명이면 단일 박스 `__ohsorryShowDone` 위임).
 
-### window 콜백 (render UI 가 호출)
-- `__dp_rerollRecs(stage, baseStarOverride, recLevelMode, djMode, layoutMode)` (`:1502`)
-- `__dp_rerollWeakness(opts)` (`:1485`)
-- `__dp_ensurePatternsLevel(band)` (`:1447`) — patterns 하위 레벨 구간(0810/rest) lazy 병합
+### compute() 반환 객체
+업로드 전용 — `{ dbPayload, chartScoreRows, profile, style }`(SP 경로는 `spResult`). `dbPayload`=users upsert payload, `chartScoreRows`=scores rows. `profile`/`style` 은 wrapper 의 여러-명 완료 리스트용. `opts.suppressDone` 면 단일 완료 박스 생략(wrapper 가 리스트로).
+
+> 구버전 result 의 추천(`topEC/topHC/…`)·통계(`details/perLamp/…`)·분석(`userVec`)·`layoutMap`·`runFromDb`·`__dp_reroll*` 콜백은 2C 에서 전부 제거(추천/렌더가 이관돼 소비처 없음).
 
 ---
 
@@ -45,7 +40,7 @@
 
 ## dbConn.js — Supabase 통신
 
-- 등록: `window.OhsorryDb`, `VERSION: '0.0.410'` (`dbConn.js:670`)
+- 등록: `window.OhsorryDb`, `VERSION: '0.0.411'` (`dbConn.js:698`; 헤더 주석 `0.0.401` 과 불일치 — 객체값 정본)
 - export(`:669-677`): `upsertUserProfile`, `upsertUserChartScores`, `uploadResult`, `fetchUserProfile`, `fetchServiceStatus`, `getSongsByNorm`(=`getSongsCache`)
 - 연결: `SUPABASE_URL='https://cvxpeecxiawddmrzbdvn.supabase.co'` (`:52`), legacy JWT anon key `SUPABASE_KEY` (`:54`). RPC wrapper `callRpc(name, body)` → `POST /rest/v1/rpc/{name}` (`:213-226`).
 
@@ -62,7 +57,7 @@
 | `make_grid_data` | `:574-580` | `p_iidx_id` + `?limit&offset` 페이지네이션 (직접 fetch) |
 | `GET /rest/v1/songs` | `:143-144` | `select=song_id,title,ac,legen` 1000개씩 페이징 |
 
-- `uploadResult` (`:458-514`): `result.dbPayload` 기반. dbData 모드/payload 없음 시 skip → `upsertUserProfile` → `upsertUserChartScores` → 패턴 점수 `computePatternScoreVec(iidxId)` → `upsert_user_feature_score`.
+- `uploadResult(result)`: `result.dbPayload` 기반. payload 없음 시 skip → `upsertUserProfile` → `upsertUserChartScores` → 패턴 점수 `computePatternScoreVec(iidxId)` → `upsert_user_feature_score`. (구 `opts.dbData`(타유저 DB뷰) skip 분기는 core 가 DB 모드를 안 보내므로 사실상 미사용.)
 - **28차 손별 feature score 는 dbConn 이 직접 계산**(`computePatternScoreVec`, `:558-636`) — calcWeakness 호출 아님. feature-scores-slim.json + textage notes 로 `scoreRate=ex_score/(noteCount×2)`, feature별 top 30 가중합.
 - `getSongsByNorm()` (`:136-174`): songs 를 `Map<normKey, [{song_id,title,ac,legen}]>` 로. ac/legen 비트맵(INF=2, AC=1) + Ø/ø alias 추가 등록.
 - kill-switch: `fetchServiceStatus()` (`:70-90`) gist service-status.json 5분 캐시 **fail-closed**. `checkUploadEnabled()` 가 업로드 2종 진입부에서 차단.
@@ -73,7 +68,7 @@
 
 ## ohsorryRender.js — (이관됨 → ohSorryWeb)
 
-> 구조개편(ROADMAP §0) Phase 1, 2026-06-15: 결과 렌더는 **표시 책임**이라 ohSorryWeb 가 정본으로 흡수(`ohSorryWeb/gist-modules/ohsorryRender.js`). **이후 2C(2026-06-16)에서 본체는 render 를 아예 안 받고 크롤→별값→업로드 전용으로 축소** — 완료 박스만 코어 내장. (라이벌은 IIDX input 으로 `ohsorry.js` 에 통합, `rivalOhsorry.js` 제거.)
+> 구조개편(ROADMAP §0) Phase 1, 2026-06-15: 결과 렌더는 **표시 책임**이라 ohSorryWeb 가 정본으로 흡수(`ohSorryWeb/gist-modules/ohsorryRender.js`). **이후 2C(2026-06-16)에서 본체는 render 를 아예 안 받고 크롤→별값→업로드 전용으로 축소** — 완료 박스만 코어 내장. (라이벌은 IIDX input 으로 `ohsorry.js` 에 통합, 구 `rivalOhsorry.js` gist 는 `ohsorry.js` fetch+eval **redirect** 로 전환 — 삭제 아님, 옛 북마크릿 호환.)
 
 ---
 
@@ -83,16 +78,15 @@
 
 ---
 
-## eagateFetch.js — p.eagate.573.jp 차트 fetch
+## eagateFetch.js — p.eagate.573.jp series 크롤
 
-- 등록: `window.OhsorryEagateFetch`, `VERSION: 'v0.0.1'` (`eagateFetch.js:28`)
-- export: `VERSION`, `collectCharts(ctx)` (`:357`)
-- `ctx` 키: `fetchMode`(`'level'`|`'series'`), `levels`(없으면 `[12,11]`), `series`(`'33'`), `style`(`'1'`=DP), `disp`(`'1'`), `isRival`, `rivalToken`, `updateProgress`, `alertFn`
-- 반환: `{ok, charts, pageCount, fetchMode, LEVELS_TO_FETCH}`
-- **level 모드** `parseDoc`(`:44`): `difficulty.html` `div.series-difficulty table`, td 5개 행. `difficult` 파라미터 = **게임레벨 − 1**(`:371`).
-- **series 모드** `parseSeriesDoc`(`:113`): `series.html` `div.series-all`, 곡당 5 score-cel(BEGINNER~LEGGENDARIA). `gameLevel=null`(textage 로 역추정), `seriesNo` 채움.
-- 차트 객체 필드: `title, diff, djLevel, exScore, pgreat, great, missCount(보통 null), lampNum(0~7), lamp, gameLevel`(+series 면 `seriesNo`). **`noteCount` 는 없음** — eagate 페이지가 노트수를 안 주므로 core 4.5 단계에서 textage 로 보강.
-- 상수: `STEP=50`, `MAX_PAGES=30`, 딜레이 `DELAY_MIN_MS=800`~`DELAY_MAX_MS=1200` 랜덤(`:31-36`). 모든 fetch `credentials:'include'`.
+- 등록: `window.OhsorryEagateFetch`, `VERSION: 'v0.0.3'` (`eagateFetch.js:23`, export `:183`)
+- export: `VERSION`, `collectCharts(ctx)`
+- `ctx` 키: `seriesList`(eamuse list 값 0~32 배열), `series`(`'33'`), `style`(`'1'`=DP/`'0'`=SP), `isRival`, `rivalToken`, `updateProgress`
+- 반환: `{ok, charts, pageCount}`
+- **[2026-06-16] series 단일 모드** — level(difficulty.html) 크롤은 폐기. `parseSeriesDoc`: `series.html` 시리즈 폴더(곡당 5 score-cel: BEGINNER~LEGGENDARIA). `gameLevel=null`(textage 로 역추정), `seriesNo` 채움. 시리즈가 `seriesNo` 를 주므로 dbConn 의 song_id/textage_song_id/series_no 매칭 정확.
+- 차트 객체 필드: `title, diff, djLevel, exScore, lampNum(0~7), lamp, gameLevel(=null), seriesNo`. **`noteCount`·`pgreat/great/missCount` 없음** — series 페이지가 안 주므로 core 4.5 단계에서 textage 로 gameLevel 보강(noteCount 는 업로드에 안 써 미보강).
+- 라이벌: `isRival` 시 `rival_status.html`·series rival fetch(`rivalToken`). 모든 fetch `credentials:'include'` + 랜덤 딜레이.
 
 ---
 

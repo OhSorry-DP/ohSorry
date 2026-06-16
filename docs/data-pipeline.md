@@ -51,22 +51,25 @@ zasa.sakura.ne.jp 콘솔. 가드 `zasa.sakura.ne.jp`(`:17`). 대상 `/dp/run.php
 
 | 파일 | top-level | 엔트리 | core 용도 |
 |------|-----------|--------|-----------|
-| `ereter-data.json` (gist) | `extractedAt, source, count, playerCount, charts[], players{}` | charts: `{title, diff, level, ec, hc, exh, ec_n, hc_n, exh_n}` / players: `{iidxId: ★}` | ★추정·추천 baseStar·매칭 점수의 정본 |
-| `zasa-data.json` (gist) | `extractedAt, source, count, countByGameLevel{}, countByDiff{}, charts[]` | `{title, diff, gameLevel, level}` | ereter 미등록 차트 곡수 보강(추천/★추정 미사용) |
-| `ohSorryRating.json` (gist) | `{ratings:[...]}` | `{title, diff, zasaLevel, gameLevel, estEc, estHc, estExh, nEcCleared...}` | lv11/12 미등록 차트 추정 fallback + EC/HC 추천 풀 |
-| `textage-meta.json` (gist) | `{generatedAt, count, songs:{id:{...}}}` | `{title, notes:{DN,DH,DA,DX,DB}, levels:{...}, series_no}` | noteCount/gameLevel 보강 + ALL 통계 분모 |
-| `patterns-dp-1112.json` (+0810/rest, gist) | `{songId:{t, c:{DP_NOR,DP_HYP,DP_ANO,DP_LEG}}}` | 차트별 28차 패턴 pt(DP 1P/2P 분리) | userVec 계산 + 추천 매칭 |
-| `feature-scores-slim.json` (gist) | `{scores:{songId:{chartName:{feat:0~100}}}}` | 차트별 28 feature quantile | 연습곡 패턴 점수 + 28차 feature score upsert |
-| `rate-reference-slim.json` (gist) | `{ec/hc/exh:{"bucket":{mean,n}}}` | stage×0.5 bucket 평균 EX rate(3550명) | calcWeakness absolute 잔차 reference |
-| `series-name.json` (gist 30c3ba6) | `{series_no: name}` | — | 추천 해시태그 시리즈명 |
-| `service-status.json` (gist 30c3ba6) | `{uploadEnabled, shelfEnabled, message, notInINF[]}` | — | 업로드 kill-switch + INF 미수록 수동 제외 |
+> **[2026-06-16]** "core 용도" 열은 구조개편 2C 이후 기준. core 가 실제 fetch 하는 건 **ereter-data / textage-meta / ohSorryRating + 별값 lib 3종**뿐. `patterns-*`·`rate-reference`·`series-name` 은 추천/약점이 이관돼 **core 미사용**(오소리웹·오소리레이팅이 fetch). `feature-scores-slim`·`service-status` 는 **dbConn** 이 사용. zasa-data 도 core 미fetch.
 
-매칭 키는 모두 `norm(title) + '|' + diff` (core `norm`, `calcOhsorryCore.js:481-523`).
+| 파일 | top-level | 엔트리 | 용도 |
+|------|-----------|--------|-----------|
+| `ereter-data.json` (gist) | `extractedAt, source, count, playerCount, charts[], players{}` | charts: `{title, diff, level, ec, hc, exh, ec_n, hc_n, exh_n}` / players: `{iidxId: ★}` | **(core)** 별값 추정·매칭·ereter_star 룩업의 정본 |
+| `ohSorryRating.json` (gist) | `{ratings:[...]}` | `{title, diff, zasaLevel, gameLevel, estEc, estHc, estExh, nEcCleared...}` | **(core)** 별값 inferEreter 입력 + chartScoreRows.level/lv12 카운트 fallback |
+| `textage-meta.json` (gist) | `{generatedAt, count, songs:{id:{...}}}` | `{title, notes:{DN,DH,DA,DX,DB}, levels:{...}, series_no}` | **(core)** series gameLevel 역추정. **(dbConn)** noteCount(피처 scoreRate) |
+| `feature-scores-slim.json` (gist) | `{scores:{songId:{chartName:{feat:0~100}}}}` | 차트별 28 feature quantile | **(dbConn)** 28차 feature score upsert |
+| `service-status.json` (gist 30c3ba6) | `{uploadEnabled, shelfEnabled, message, notInINF[]}` | — | **(dbConn)** 업로드 kill-switch |
+| `zasa-data.json` (gist) | `extractedAt, source, count, …, charts[]` | `{title, diff, gameLevel, level}` | ereter 미등록 차트 곡수 보강 — **core 미사용**(웹/관리자용) |
+| `patterns-dp-1112.json` (+0810/rest, gist) | `{songId:{t, c:{DP_NOR,…}}}` | 차트별 28차 패턴 pt | userVec/추천 매칭 — **오소리웹·레이팅 전용**(core 미사용) |
+| `rate-reference-slim.json` (gist) | `{ec/hc/exh:{"bucket":{mean,n}}}` | stage×0.5 bucket 평균 EX rate | calcWeakness 잔차 reference — **레이팅 전용**(core 미사용) |
+| `series-name.json` (gist 30c3ba6) | `{series_no: name}` | — | 추천 해시태그 시리즈명 — **core 미사용** |
+
+매칭 키는 모두 `norm(title) + '|' + diff` (`window.OhsorryNorm.norm` = normTitle 단일 정본, `calcOhsorryCore.js:318,365-383`).
 
 ### 3.2 키 매핑 메모
-- diff(eagate) ↔ textage notes: `{NORMAL:'DN', HYPER:'DH', ANOTHER:'DA', LEGGENDARIA:'DX', BEGINNER:'DB'}` (`calcOhsorryCore.js:738`).
-- chartName ↔ slot(notInINF): `{DP_NOR:'DPN', DP_HYP:'DPH', DP_ANO:'DPA', DP_LEG:'DPL', SP_*}` (`:1337`).
-- INF 수록 비트: `ac`/`legen` 컬럼의 bit 2(INF), bit 1(AC). LEGGENDARIA 는 legen, 그 외 ac.
+- diff(eagate) ↔ textage levels(gameLevel 역추정): SP `{NORMAL:'SN',HYPER:'SH',ANOTHER:'SA',LEGGENDARIA:'SX',BEGINNER:'SB'}` / DP `{…:'DN/DH/DA/DX/DB'}` (`calcOhsorryCore.js:416-417`).
+- INF 수록 비트(dbConn `getSongsByNorm`): `ac`/`legen` 컬럼의 bit 2(INF), bit 1(AC). LEGGENDARIA 는 legen, 그 외 ac.
 
 ### 3.3 학습/내부 데이터 (배포 안 함 — 레포에서 아카이브, `dpdata/oldOhSorry/`)
 > 원래 `.gitignore` 대상(미추적)이었고 2026-06-16 에 `D:\work\dpdata\oldOhSorry` 로 물리 이동. 모델 학습 정본은 ohSorryRating.

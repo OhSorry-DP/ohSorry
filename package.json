@@ -1,7 +1,7 @@
 {
   "name": "ohsorry",
   "version": "1.0.0",
-  "description": "ereter.net 의 ☆12 난이도 분석 데이터를 e-amusement 의 DP 플레이 데이터에 매칭해서 **★값 추정 + 추천곡 + 통계** 를 보여줍니다.",
+  "description": "e-amusement 플레이 기록을 series.html 로 크롤 → 별값(★) 추정 → Supabase 업로드하는 수집/업로더(구조개편 2C). 표시·추천은 오소리웹·오소리레이팅.",
   "main": "ohsorry.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"

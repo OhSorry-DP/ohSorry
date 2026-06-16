@@ -1,7 +1,9 @@
 # architecture — 로딩 구조와 compute 실행 흐름
 
-> wrapper → core → render 의 모듈 로딩 순서, 모듈 간 의존 관계, `OhsorryCore.compute()` 의 단계별 실행 흐름, own/rival/DB 모드 분기를 정리합니다.
+> wrapper → core 모듈 로딩(모달·프로필·prefetch), 모듈 간 의존 관계, `OhsorryCore.compute()` 의 단계별 실행 흐름, own/rival/여러명 분기를 정리합니다.
 > 상위 조망: [`../../docs/ohSorry.md`](../../docs/ohSorry.md) · 인덱스: [README.md](README.md)
+
+> **[구조개편 2C, 2026-06-16]** core 는 "series 크롤 → 별값 → supabase 업로드" 전용. 결과 렌더·추천·약점·DB(게스트뷰) 모드는 제거됨. 웹·INF 는 코어를 안 쓰고 별값 lib·렌더 모듈을 직접 fetch(코어-free).
 
 ---
 
@@ -9,112 +11,101 @@
 
 ```
 사용자가 p.eagate.573.jp 콘솔/북마크렛에서 실행
-  → gist:2-calc-score.js  (호환 redirect, 9줄)
-      ohsorry.js:6  gist:ohsorry.js fetch + eval
-  → ohsorry.js  (wrapper, v3.4.0)
-      모듈을 gist 에서 순서대로 fetch+eval (window 전역 등록):
-        ohsorry.js:159  OhsorryNorm   (normTitle.js)
-        ohsorry.js:161  OhsorryDb     (dbConn.js)
-        ohsorry.js:163  OhsorryRender (ohsorryRender.js)
-        ohsorry.js:165  OhsorryCore   (calcOhsorryCore.js)
-        ohsorry.js:170  OhsorryEagateFetch (eagateFetch.js) ← dbData 없을 때만
-      → OhsorryCore.compute({ mode, rivalToken, dbData, wrapperVersion, fetchMode, levels, statsOnly, noRender })
+  → gist:ohsorry.js  (wrapper, v3.5.2)
+      ① 시리즈 선택 모달 즉시 표시 (시리즈 체크박스 + DP/SP 탭 + IIDX input)
+      ② 모듈을 gist 에서 순서대로 fetch+eval (window 전역 등록):
+           ohsorry.js:211  OhsorryNorm        (normTitle.js)
+           ohsorry.js:212  OhsorryDb          (dbConn.js)
+           ohsorry.js:213  OhsorryCore        (calcOhsorryCore.js)
+           ohsorry.js:214  OhsorryEagateFetch (eagateFetch.js)
+      ③ Core.fetchProfile({isRival:false}) → 모달 상단에 DJ명/SP·DP단위/IIDX ID 채움
+      ④ Core.prefetch() 백그라운드 호출 (모달 보는 동안 별값 lib/ereter/textage 미리 fetch)
+      ⑤ 시작 → IIDX input 파싱(여러 ID) → 각 대상 own/rival 판정 →
+           Core.compute({ mode, rivalToken, seriesList, playStyle, profile, suppressDone })
+      ⑥ 완료 박스(1명) 또는 완료 리스트(여러 명, Core.showDoneList)
 ```
 
-- 루트 `2-calc-score.js`(legacy gist URL 호환 redirect)는 레포에서 아카이브됨(`dpdata/oldOhSorry/`). **gist 의 같은 파일은 유지** — 옛 북마크릿 URL 진입점이라 gist:2-calc-score.js → gist:ohsorry.js 로 redirect 계속 동작.
-- [`ohsorry.js`](../ohsorry.js) 가 실제 wrapper. `loadModule(url, globalName)` 가 `window[globalName]` 캐시 후 fetch+eval (`ohsorry.js:31-40`).
-- **DB 모드**(dbData 있음 = ohSorryWeb 게스트 / INFOhSorry)면 `eagateFetch` 를 받지 않습니다(`ohsorry.js:168`) — supabase `charts_json` 으로 채우므로 eagate 페이지 fetch 가 불필요. 다운로드 절감.
-- wrapper 가 `window.__dp_render(dbData, renderOpts)` 를 노출(`ohsorry.js:140`). eagate 도메인이면 `__dp_render(null)` 자동 실행(`ohsorry.js:194`), 그 외 도메인은 외부에서 `__dp_render(dbData)` 로 호출.
+- [`ohsorry.js`](../ohsorry.js) 가 실제 wrapper. `loadModule(url, globalName)` 가 **매 실행 재 fetch+eval**(`ohsorry.js:22-32`) — 버전 갱신 시 stale 전역 방지(core 는 최상위 `var` 라 재eval 안전).
+- legacy gist URL `2-calc-score.js` / `rivalOhsorry.js` 는 둘 다 내부에서 `ohsorry.js` 를 fetch+eval 하는 **호환 redirect**(옛 북마크릿 진입점 유지). 라이벌은 별도 진입점이 아니라 모달 IIDX input 으로 통합됨.
+- code 모듈은 **항상 4개 전부** 받음 — 옛 DB(게스트 뷰) 모드가 제거돼 `eagateFetch` 조건부 로딩·`dbData` 분기가 사라짐.
 
-### eagate fetch 범위 모달
-eagate 도메인 + dbData 없을 때만 `askFetchOptions(isRival)` 모달로 수집 범위를 먼저 묻습니다(`ohsorry.js:74-138`).
-- **레벨별**: 선택 레벨 폴더만 `difficulty.html` (기본 11·12 체크).
-- **전곡**: 시리즈 폴더 전체 `series.html` (약 1분).
-- 결과는 `compute()` 의 `opts.fetchMode`(`'level'`|`'series'`) / `opts.levels` 로 전달.
+### 시리즈 선택 모달 (`ohsorry.js:84-200`)
+실행 즉시 표시되고 프로필은 나중에 `fillProfile(profile)` 로 채움.
+- **시리즈 체크박스 33개**: 기본 전체 선택. 10시리즈 단위 그룹 토글(역순 30~최신/29~20/19~10/9~1) + 전체 토글. 좌→우 가로 스크롤, PC 는 화면폭 비례, 모바일은 풀스크린.
+- **DP/SP 탭**: own·rival 공통 — DP 누르면 DP만, SP 누르면 SP만 크롤·업로드.
+- **IIDX input**: 기본=본인 ID(프로필 fetch 후 채움). 다른 ID 입력 시 라이벌, 여러 ID(공백·쉼표)면 순차 처리.
+- 결과는 `compute()` 의 `opts.seriesList`(eamuse list 값 0~32 배열) / `opts.playStyle`('DP'|'SP') 로 전달.
 
 ---
 
 ## 2. 모듈 의존 관계
 
-`window.Ohsorry*` 전역으로 느슨하게 결합. core 가 다른 모듈을 직접 import 하지 않고, **런타임에 gist 에서 추가 lib 을 더 fetch** 합니다.
+`window.Ohsorry*` 전역으로 느슨하게 결합. core 가 다른 code 모듈을 직접 import 하지 않고, **런타임에 gist 에서 별값 lib 을 더 fetch** 합니다.
 
 | 전역 | 파일 | 누가 로드 | core 가 호출 |
 |------|------|-----------|--------------|
-| `OhsorryNorm` | normTitle.js | wrapper | dbConn 의 normTitle (간접). core 는 자체 inline `norm` 사용 |
-| `OhsorryDb` | dbConn.js | wrapper | `getSongsByNorm()` (INF 필터/ALL 분모), render 가 `uploadResult()` |
-| `OhsorryRender` | ohsorryRender.js | wrapper | `compute()` 끝에서 `show(result, {statsOnly})` |
+| `OhsorryNorm` | normTitle.js | wrapper | `norm(title)` (매칭 키. dbConn 도 동일 모듈) |
+| `OhsorryDb` | dbConn.js | wrapper | `uploadResult()`, `fetchUserStars()`, `upsertUserChartScores()`(SP), `getSongsByNorm()` |
 | `OhsorryCore` | calcOhsorryCore.js | wrapper | 본체 |
-| `OhsorryEagateFetch` | eagateFetch.js | wrapper(비-DB) | `collectCharts(ctx)` |
-| `OhsorryWeakness` | calcWeakness.js | **core 가 gist fetch** (`calcOhsorryCore.js:452-460`) | `calcUserWeakness()`, 8배치 매치 |
-| `OhsorryRecommend` | recommend.js | **core 가 gist fetch** (`calcOhsorryCore.js:462-470`) | `createContext(deps)` → `buildRecs`/`buildWeaknessRecs` |
-| `OhSorryShelf` | ohsorryShelf.js | core 가 gist fetch (`:419-430`) | 추천곡 곡명 클릭 토스트 `renderChartRow` |
-| `oldOSR`/`ohSorryRating`/`OSR135`/`adopt`/`onlyOSR`/`onlyOSRtoEreter` | gist `.js` lib | core 가 gist fetch (`:362-415`, **비-DB 모드만**) | ★ 추정 (→ [algorithms.md](algorithms.md)) |
+| `OhsorryEagateFetch` | eagateFetch.js | wrapper | `collectCharts(ctx)` (series 크롤) |
+| `OSR135`/`onlyOSR`/`onlyOSRtoEreter` | gist `.js` lib | **core 가 gist fetch** (`__loadStarLibs`, `calcOhsorryCore.js:223-235`) | ★ 추정 (→ [algorithms.md](algorithms.md)) |
 
-라이벌 분석은 별도 wrapper 가 아니라 `ohsorry.js` 모달의 **IIDX ID input** 에서 분기 — 본인 외 ID 입력 시 `Core.fetchRivalToken(id)` → `compute({mode:'rival', rivalToken})`. (구 `rivalOhsorry.js` 별도 진입점은 2026-06-16 제거.)
+> 구버전 `OhsorryRender`/`OhsorryRecommend`/`OhsorryWeakness`/`OhSorryShelf` + oldOSR/osr/adopt lib 는 core 가 더 이상 로드하지 않음(이관·제거). 추천/렌더는 **오소리웹**이 별값 lib·렌더 모듈을 직접 fetch 해 처리.
 
-### 외부 데이터/lib fetch + 캐시 (`loadWithCache`)
-core 의 `loadWithCache(url, cacheKey, isJson)`(`calcOhsorryCore.js:312-339`) 가 **memory cache → network fetch → localStorage** 순으로 fallback.
-- `window.__ohsorryLibCache` : 페이지 lifetime memory cache. batch(라이벌 다수) 처리 시 2번째 호출부터 fetch skip.
-- localStorage : fetch 실패 시 최후 fallback (캐시도 없으면 에러).
-- ereter-data.json 은 별도 캐시(`CACHE_KEY='ereter_dp_diff_v4'`, TTL 24h, `calcOhsorryCore.js:99-100`) + `window.__ohsorryEreterCache` memory cache.
+### 외부 데이터/lib fetch + 캐시 (`__loadWithCache`)
+core 의 `__loadWithCache(url, cacheKey, isJson)`(`calcOhsorryCore.js:102-126`) 가 **memory cache → network fetch → localStorage** 순 fallback.
+- `window.__ohsorryLibCache` : 페이지 lifetime memory cache. 두 번째(여러 명 처리 시 2번째 대상부터) 호출은 fetch skip.
+- ereter-data.json 은 별도 캐시(`__ERETER_CACHE_KEY='ereter_dp_diff_v4'`, TTL 24h) + `window.__ohsorryEreterCache` memory cache.
+- `Core.prefetch`(=`__loadCoreData`) 와 `compute` 가 같은 캐시를 공유 — 모달에서 미리 prefetch 했으면 compute 가 캐시 hit 으로 즉시 진행.
 
 ---
 
 ## 3. compute() 실행 흐름
 
-`OhsorryCore.compute(opts)` (`calcOhsorryCore.js:61-1630`) 의 단계(주석상 step 번호):
+`OhsorryCore.compute(opts)` (`calcOhsorryCore.js:295-718`) 의 단계(주석상 step 번호):
 
 | 단계 | 코드 | 내용 |
 |------|------|------|
-| 0 | `:82-201` | ereter-data.json fetch + 정규화(`normalizePayload`) + 24h 캐시. `{charts, extractedAt, players}` |
-| 0.5 | `:207-227` | zasa-data.json 보충 fetch (선택, 실패 무시) |
-| 0.55 | `:229-250` | textage-meta.json fetch (채보별 노트수 → noteCount 보강) |
-| 0.56 | `:252-271` | series-name.json fetch (series_no → 시리즈명, 해시태그용) |
-| 0.6 | `:273-478` | ohSorryRating.json + ★추정 lib + shelf + patterns + calcWeakness + recommend + rate-reference fetch. **비-DB 모드만** ★추정 lib 4종 로드 |
-| 1 | `:480-594` | 곡명 정규화(`norm`) + ereterMap/zasaMap/ratingMap 인덱싱(`norm(title)+'|'+diff` 키) |
-| 2 | `:596-635` | 수집 모드 결정(`fetchMode`/`requestedLevels`) + 도메인 체크 |
-| 3·4 | `:637-714` | eagate 수집은 `OhsorryEagateFetch.collectCharts()` 위임. DB 모드는 `dbData.charts_json` 을 deep copy 로 `allCharts` 에 직접 |
-| 4.5 | `:716-763` | textage notes 로 noteCount + gameLevel 보강(norm 충돌 시 levels 일치 엔트리 우선) |
-| 4.6 | `:765-782` | series 모드 — 유령 차트 제거(gameLevel/lamp/exScore/ereter/rating 중 하나라도 있어야 유지) |
-| 5 | `:784-851` | 매칭 + 점수(`lampToScore`). lv12 플레이 ≥30 이면 lv12-only 통계 모드(`useOnlyLv12`) |
-| 5.5 | `:853-1141` | **★값 추정** (→ [algorithms.md](algorithms.md#1-별값-추정)). DB 모드는 `dbData.star_estimate`/`native_star` 그대로 |
-| 5.6 | `:1143-1254` | status.html fetch 로 프로필(DJ명/IIDX ID/단위/노트레이더/쿠프로). DB 모드는 row 에서 구성 |
-| 5.7 | `:1256-1515` | **추천곡 계산** (→ [algorithms.md](algorithms.md#2-추천곡-파이프라인)). userVec 계산 → `recommendCtx` → buildRecs/buildWeaknessRecs |
-| 6 | `:1517-1628` | result 객체 build + dbPayload/chartScoreRows + `OhsorryRender.show(result)` 호출 후 result 반환 |
+| 0 | `:355-363` | `__loadCoreData()` — ereter/textage/ohSorryRating JSON + 별값 lib 3종 fetch(캐시 공유). `{ereterData, ereterPlayers, textageSongs, ratingData, ohSorryRatings, onlyOSR2eLib}` |
+| 1 | `:365-383` | 곡명 정규화(`window.OhsorryNorm.norm`) + ereterMap/ratingMap 인덱싱(`norm(title)+'|'+diff` 키) |
+| 2 | `:384-401` | 수집 범위 결정 — `opts.seriesList`(생략 시 전체 33), `isSpMode = opts.playStyle==='SP'`, `style`(0=SP/1=DP), `fullCrawl = seriesList.length>=33` |
+| 3·4 | `:403-459` | eagate 수집을 `OhsorryEagateFetch.collectCharts({seriesList, series, style, isRival, rivalToken})` 위임 → `allCharts` |
+| 4.5 | `:461-494` | textage levels 로 **gameLevel 역추정**(series 페이지엔 레벨 없음). style 별 키: SP=SN/SH/SA/SX/SB, DP=DN/DH/DA/DX/DB |
+| 4.6 | `:496-513` | series 유령 차트 제거(gameLevel/lamp/exScore/ereter/rating 중 하나라도 있어야 유지) |
+| 5 | `:515-519` | lv12-only 판정(lv12 플레이 ≥30 → 업로드 카운트 lv12 only) |
+| 5.5 | `:521-540` | **★값 추정** — `fullCrawl` 일 때만 `onlyOSRtoEreter.inferEreter()` 호출(→ [algorithms.md](algorithms.md#1-별값-추정)). 일부 시리즈만 크롤하면 skip(기존 supabase 값 보존) |
+| 5.6 | `:542-554` | 프로필 — own 은 wrapper 가 모달용으로 미리 fetch 한 `opts.profile` 재사용, rival 은 `__fetchProfile({isRival, rivalToken})` |
+| SP | `:556-606` | **SP 경량 분기** — ★/추천 skip, SP10~12 점수 `play_style:0` 업로드 + 완료 박스(→ [sp.md](sp.md)) |
+| 5.7 | `:608-611` | ereter★ 룩업(`ereterPlayers[iidxId]` → `ereter_star`) |
+| 6 | `:613-694` | dbPayload(users 프로필 + 별값 + lv12 카운트) + chartScoreRows build |
+| 7 | `:696-716` | `dbConn.uploadResult()` 호출 → 완료 박스/리스트(`suppressDone` 면 wrapper 가 리스트로) |
 
-### lampToScore (5단계 점수식, `calcOhsorryCore.js:793-799`)
-ereter "combined" 방식과 동일하게 클리어한 모든 하위 단계 diff 합산:
-- 램프 ≥6 (EX HARD/FULL COMBO) → `ec + hc + exh`
-- 램프 =5 (HARD) → `ec + hc`
-- 램프 ≥3 (EASY/CLEAR) → `ec`
-- FAILED/ASSIST/NO PLAY → 0
+### lampToScore 와 점수 매칭
+eagate 차트의 `lampNum`(0~7) → lamp 문자열. dbPayload 의 lv12 카운트(`n_cleared`/`hc_count`/`exh_count`/`fc_count`)는 ereter/rating 의 `zasaLevel` 11.6~12.7 범위 차트에서 램프별 집계. chartScoreRows 는 점수·램프가 있는 차트만(NO PLAY 제외).
 
 ---
 
-## 4. mode 분기
+## 4. mode·playStyle 분기
 
-`opts.mode` (`'own'`|`'rival'`) + `opts.dbData` + `opts.statsOnly` + `opts.noRender` 조합:
+`opts.mode`('own'|'rival') + `opts.playStyle`('DP'|'SP') 조합. (구 dbData/statsOnly/noRender/headless 모드는 제거됨.)
 
 | 모드 | 트리거 | 동작 |
 |------|--------|------|
-| **own** | eagate 도메인 자동 / `?rival=` 없음 | eagate fetch → ★추정 lib 전부 로드 → 추천 → render → supabase 업로드 |
-| **rival** | URL `?rival=<토큰>` 있음 (`ohsorry.js:143`) | `rival_status.html`/`difficulty_rival.html`/`series.html(rival)` fetch. own 과 동일 계산, 라벨만 다름 |
-| **DB** | `dbData` 전달 (게스트 페이지/INF) | eagate fetch + ★추정 lib 4종 skip. `charts_json` 사용, ★ 은 row 값 그대로. 비싼 모델 재실행 없음 |
-| **statsOnly** | `__dp_render(dbData,{statsOnly:true})` | userVec/recommend/layoutMap 무거운 계산 + supabase 업로드 skip. 통계+노트레이더만 즉시 렌더(`calcOhsorryCore.js:71`, render `:116`) |
-| **noRender** | `{noRender:true}` | `show()` 건너뛰고 result 만 반환. 2차 백그라운드 full compute(패턴분석 userVec 만 필요) 시 패널 깜빡임 방지(`:73-74`) |
+| **own DP** | IIDX input = 본인 ID + DP 탭 | series 크롤 → 별값 → dbPayload 업로드 → 완료 박스 |
+| **own SP** | 본인 ID + SP 탭 | SP(style=0) 크롤 → ★ skip → SP10~12 `play_style:0` 업로드 → 완료 박스 |
+| **rival DP/SP** | 다른 ID 입력 | `Core.fetchRivalToken(id)` → rival_status/rival series fetch. own 과 동일 계산, 대상 IIDX ID 데이터 갱신 + 완료 박스(대상 카드) |
+| **여러 명** | input 에 ID 여러 개(공백·쉼표) | 각 ID 순차 처리(`suppressDone:true`), 끝에 `Core.showDoneList` 로 한 줄 리스트 |
 
-- INF DB 판별(`calcOhsorryCore.js:947`): `dbData.series==='INF'` 또는 `version` 이 `'INF'` 로 시작. 로그 라벨 + INF 수록 필터 분기에 사용.
-- DB 모드는 `dbPayload=null` → render 의 `uploadResult` 가 `opts.dbData` 보면 재업로드 skip(타 유저 열람이므로).
-
-### runFromDb (경량 진입점)
-`OhsorryCore.runFromDb(row, opts)` (`calcOhsorryCore.js:1637-1696`) — supabase row 만으로 외부 lib 없이 가벼운 렌더. 게스트 리드미용. 추천곡/상세통계/★비교 섹션은 빈 상태로 graceful 렌더, supabase 재업로드 X.
+- own 은 wrapper 가 모달에서 받은 `opts.profile` 재사용(status.html 이중 fetch 안 함). rival 은 core 가 rival_status.html 로 프로필 fetch.
+- 일부 시리즈만 크롤하면(`!fullCrawl`) 별값 계산 skip — `fetchUserStars` 로 기존 star 조회해 그대로 재전송(upsert_user 의 star EXCLUDED 덮어쓰기로 인한 null wipe 방지). native_star 는 COALESCE 라 null 전송 시 보존.
 
 ---
 
 ## 5. supabase 업로드 트리거 위치
 
-업로드 판정은 `dbConn.uploadResult(result, opts)` 로 일원화되어 있고, render 는 한 줄 위임만 합니다:
-- `ohsorryRender.js:1255-1260` : `show()` 맨 끝에서 `!statsOnly` 이고 `OhsorryDb.uploadResult` 있으면 `await uploadResult(result, {dbData})`.
-- 내부에서 ① `opts.dbData` 있으면(타 유저 DB 모드) skip ② `dbPayload` 없으면 skip ③ `upsertUserProfile` ④ `upsertUserChartScores` ⑤ 패턴 점수 계산/upsert. kill-switch(`service-status.json` 의 `uploadEnabled`)는 업로드 2종 진입부에서 fail-closed 체크.
+업로드 판정은 `dbConn.uploadResult(result)` 로 일원화. core 의 step 7 에서 호출:
+- `calcOhsorryCore.js:696-716` : DP 경로 끝에서 `OhsorryDb.uploadResult({dbPayload, chartScoreRows})`.
+- 내부에서 ① `dbPayload` 없으면 skip ② `upsertUserProfile` ③ `upsertUserChartScores` ④ 패턴 점수 `computePatternScoreVec(iidxId)` → `upsert_user_feature_score`. kill-switch(`service-status.json` 의 `uploadEnabled`)는 업로드 진입부에서 fail-closed 체크.
+- SP 경로(`:556-606`)는 `upsertUserProfile`/`upsertUserChartScores` 를 직접 호출(별값 미계산이라 기존값 보존).
 
-자세한 RPC/페이로드는 [modules.md](modules.md#dbconnjs) 참고.
+자세한 RPC/페이로드는 [modules.md](modules.md#dbconnjs--supabase-통신) 참고.

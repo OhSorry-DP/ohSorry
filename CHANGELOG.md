@@ -2,6 +2,11 @@
 
 ohSorry 의 변경 이력입니다. 사용방법은 [README.md](README.md) 를 참고하세요.
 
+### 2026-06-16 — 문서 전수조사: 2C 이후 docs 동기화
+- `docs/*`(README/architecture/modules/algorithms/sp/data-pipeline) + 상위 `../docs/ohSorry.md` + `package.json` description 을 구조개편 2C~여러명리스트 기준으로 갱신.
+- 정정: 버전(wrapper v3.5.2/core 0.0.407/eagate v0.0.3/dbConn 0.0.411), 로딩체인(render 제거·모달/프로필/prefetch), 모드(dbData/statsOnly/noRender/level 제거 → series 단일+playStyle), 별값(onlyOSRtoEreter 단독), 추천/약점/렌더는 "이관됨" 포인터, rivalOhsorry=redirect, SP own·rival 토글 통일.
+
+
 ### 2026-06-16 — 라이벌도 SP/DP 토글 그대로 + 완료 박스 표시 + IIDX 여러 명 → 완료 리스트
 - **라이벌 SP/DP 통일**: 라이벌도 own 과 똑같이 모달 토글대로 — **DP 누르면 DP만, SP 누르면 SP만** 크롤·업로드. wrapper 가 `playStyle` 을 own·rival 공통 전달(기존엔 rival 은 `undefined` 라 항상 DP + SP 자동 보강). [calcOhsorryCore.js](modules/calcOhsorryCore.js) 의 **DP 뒤 rival SP 자동 보강 블록 제거**(이제 토글이 정함).
 - **라이벌 완료 박스**: rival 도 eagate 크롤 후 완료 박스(DJ명/IIDX ID/단위 + 오소리웹 카드 버튼) 표시 — 기존엔 rival 은 `if (!isRival)` 로 박스가 안 떴음. 대상(라이벌) 카드로 이동.
