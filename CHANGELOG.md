@@ -2,6 +2,15 @@
 
 ohSorry 의 변경 이력입니다. 사용방법은 [README.md](README.md) 를 참고하세요.
 
+### 2026-06-16 — 프로필-먼저 모달 + IIDX input 라이벌 통합 + prefetch (라이벌 북마크릿 제거)
+- **흐름 변경**: 실행 즉시 모달 표시 → 모듈 로드 → 본인 프로필(DJ명/SP·DP단위/IIDX ID) 을 모달 상단에 채움 → 모달 보는 동안 데이터 백그라운드 prefetch → 시작.
+- **라이벌 통합**: 모달의 IIDX ID input(기본=본인) 을 다른 사람 ID 로 바꾸면 `Core.fetchRivalToken` → rival 모드. **별도 `rivalOhsorry.js` 북마크릿 제거** (IIDX input 으로 일원화). batch/renderRivalList 도 제거.
+- [calcOhsorryCore.js](modules/calcOhsorryCore.js) core 0.0.402: 데이터 로딩·프로필 파싱·라이벌토큰을 **모듈 함수로 분리** — `Core.prefetch`(=__loadCoreData) / `Core.fetchProfile` / `Core.fetchRivalToken`. compute 도 같은 `__loadCoreData`/`__fetchProfile` 를 호출(중복 없음). own 은 wrapper 가 받은 `opts.profile` 재사용해 status.html 이중 fetch 안 함.
+- [ohsorry.js](ohsorry.js) wrapper v3.5.0: 모달(프로필 헤더 + IIDX input) + own/rival 분기 + `Core.prefetch()` 백그라운드. render/dbData/__dp_render 경로 제거.
+- **prefetch 효과**: 모달에서 시리즈 고르는 동안 별값 lib/ereter/textage 를 미리 받아 시작 후 compute 가 캐시 hit → 로딩 단축.
+- 검증: `node --check` 3파일 OK + 모듈 헬퍼 전부 호출 + 스테일/데드 식별자 0. **크롤·라이벌 동작은 eagate 테스트 필요.** ⚠️ 프로덕션 gist 의 `rivalOhsorry.js` 제거 시 기존 라이벌 북마크릿 깨짐(의도된 통합).
+
+
 ### 2026-06-16 — 크롤 모드 level→series 단일화 + 시리즈 선택 모달
 - 목표: level(difficulty.html) 크롤 폐기, series.html 시리즈 폴더 단위만. 시리즈가 `seriesNo` 를 주므로 dbConn 의 song_id / **textage_song_id** / series_no 매칭이 정확해짐(동명이곡 구분).
 - [eagateFetch.js](modules/eagateFetch.js) v0.0.2: level 코드(parseDoc/fetchOneLevel/collectByLevel ~250줄) 제거. `collectCharts({ seriesList })` — eamuse list 값(0~32) 부분집합 수집(생략 시 전체 33개). SP(style=0)도 series 지원.

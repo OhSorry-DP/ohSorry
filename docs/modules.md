@@ -73,7 +73,7 @@
 
 ## ohsorryRender.js — (이관됨 → ohSorryWeb)
 
-> 구조개편(ROADMAP §0) Phase 1, 2026-06-15: 결과 렌더는 **표시 책임**이라 ohSorryWeb 가 정본으로 흡수(`ohSorryWeb/gist-modules/ohsorryRender.js`). 본체(`ohsorry.js`/`rivalOhsorry.js`)는 여전히 gist 에서 fetch 해 콘솔 UI 를 그리지만(동작 불변), 정본 편집·push 는 웹이 담당. 본체의 콘솔 UI 자체 제거는 Phase 2(본체 슬림화)에서. gist(`c3da608…/ohsorryRender.js`) URL·내용 불변.
+> 구조개편(ROADMAP §0) Phase 1, 2026-06-15: 결과 렌더는 **표시 책임**이라 ohSorryWeb 가 정본으로 흡수(`ohSorryWeb/gist-modules/ohsorryRender.js`). **이후 2C(2026-06-16)에서 본체는 render 를 아예 안 받고 크롤→별값→업로드 전용으로 축소** — 완료 박스만 코어 내장. (라이벌은 IIDX input 으로 `ohsorry.js` 에 통합, `rivalOhsorry.js` 제거.)
 
 ---
 

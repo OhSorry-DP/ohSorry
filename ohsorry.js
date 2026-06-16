@@ -1,26 +1,18 @@
-// ohsorry.js — 오소리 본체 wrapper (v3.4.0). (legacy gist URL 2-calc-score.js 가 이 파일로 redirect)
+// ohsorry.js — 오소리 본체 wrapper (v3.5.0). (legacy gist URL 2-calc-score.js 가 이 파일로 redirect)
 //
-// 모듈 분리:
-//   - calcOhsorryCore.js (v0.0.346) : 계산 (★ 추정 + 추천곡 + result build) — DB 모드면 ★ lib fetch 도 skip
-//   - ohsorryRender.js   (v0.0.346) : UI (진행률 + 결과 패널 + 추천곡 sortable + 캡처)
-//   - dbConn.js          (v0.0.403) : supabase RPC + uploadResult trigger (DB 모드 자동 skip)
-//   - eagateFetch.js     (v0.0.1)   : p.eagate.573.jp difficulty/series.html fetch (DB 모드면 wrapper 가 안 받음)
+// 모듈(gist): normTitle / dbConn / calcOhsorryCore / eagateFetch. (render 안 받음 — 코어가 완료 박스 내장.)
 //
-// 이 wrapper 는 위 모듈들을 gist 에서 fetch + eval 한 뒤 Core.compute({mode:'own'|'rival'}) 호출.
-// DB 모드 (dbData 있음 = ohSorryWeb 게스트 페이지 / INFOhSorry 등) 일 때는 eagateFetch 를 fetch 하지 않음 —
-// 그쪽은 supabase 의 charts_json 으로 채우므로 eagate 페이지 fetch 자체가 불필요.
+// 흐름:
+//   1. p.eagate.573.jp 에서 실행 → 시리즈 선택 모달 즉시 표시.
+//   2. 모듈 로드 → Core.fetchProfile() 로 본인 DJ명/단위/IIDX ID 를 모달 상단에 채움.
+//   3. 데이터(별값 lib/ereter/textage) 백그라운드 prefetch(Core.prefetch) → compute 로딩 단축.
+//   4. 시작 → IIDX input 이 본인이면 own, 다른 사람이면 그 사람을 라이벌로(Core.fetchRivalToken → rival 모드).
 //
-// 사용법:
-//   1. p.eagate.573.jp 어느 페이지에서나 자동 실행 (eagate fetch 모드)
-//      - URL 에 ?rival=<토큰> 있으면 rival 모드 자동 진입 (라이벌 페이지 띄워둔 채 실행)
-//      - 그 외는 own 모드 (본인 데이터)
-//   2. 다른 사이트에서 window.__dp_render(dbData) 로 supabase row 를 직접 넘겨 호출 (DB 모드)
-//
-// supabase version 컬럼: `${WRAPPER_VERSION}-core${CORE_VERSION_SHORT}` (예: 'v3.3.9-core346')
+// supabase version 컬럼: `${WRAPPER_VERSION}-core${CORE_VERSION_SHORT}` (예: 'v3.5.0-core402')
 // ============================================================
 
 (async function () {
-  const WRAPPER_VERSION = 'v3.4.0';   // [구조개편 2C] eagate 크롤→별값→업로드 전용 (render 모듈 안 받음)
+  const WRAPPER_VERSION = 'v3.5.0';   // [구조개편 2C] 프로필-먼저 모달 + IIDX input 라이벌 통합 + prefetch
   const GIST_BASE = 'https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw';
   const CORE_URL     = GIST_BASE + '/calcOhsorryCore.js';
   const DB_URL       = GIST_BASE + '/dbConn.js';
@@ -85,147 +77,182 @@
     { label: '19~10',  from: 10, to: 19 },
     { label: '9~1',    from: 1,  to: 9 },
   ];
-  function askFetchOptions(isRival) {
-    return new Promise((resolve) => {
-      document.getElementById('__dp_fetch_modal')?.remove();
-      const ov = document.createElement('div');
-      ov.id = '__dp_fetch_modal';
-      ov.style.cssText =
-        'position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif';
-      // 그룹별 HTML — 각 그룹이 세로 컬럼(헤더 토글 + 시리즈 newest-first). 컬럼들을 가로로 나열(좌→우 스크롤).
-      const groupsHtml = SERIES_GROUPS.map((g) => {
-        const items = [];
-        for (let sn = g.to; sn >= g.from; sn--) {
-          items.push(
-            `<label style="display:flex;align-items:center;gap:6px;padding:3px 5px;cursor:pointer;font-size:12px;white-space:nowrap">` +
-            `<input type="checkbox" class="__dpsr __dpgrp${g.from}" value="${sn}" checked>` +
-            `<span style="color:#868e96;font-variant-numeric:tabular-nums;min-width:16px;text-align:right">${sn}</span>` +
-            `<span>${SERIES_NAMES[sn]}</span></label>`,
-          );
-        }
-        return (
-          `<div style="flex:0 0 auto;min-width:138px">` +
-          `<label style="display:flex;align-items:center;gap:6px;padding:4px 5px;margin-bottom:2px;cursor:pointer;background:#f1f3f5;border-radius:6px;font-size:12px;font-weight:700;color:#495057;white-space:nowrap">` +
-          `<input type="checkbox" class="__dpgrptog" data-grp="${g.from}" checked><span>${g.label}</span></label>` +
-          items.join('') +
-          `</div>`
+
+  // 시리즈 + 프로필 헤더 + IIDX input 모달. 즉시 표시되고, 프로필은 fillProfile(profile) 로 나중에 채움.
+  //   반환 { choice: Promise<{seriesList, playStyle, targetId}>, fillProfile }
+  function askFetchOptions() {
+    document.getElementById('__dp_fetch_modal')?.remove();
+    const ov = document.createElement('div');
+    ov.id = '__dp_fetch_modal';
+    ov.style.cssText =
+      'position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif';
+    const groupsHtml = SERIES_GROUPS.map((g) => {
+      const items = [];
+      for (let sn = g.to; sn >= g.from; sn--) {
+        items.push(
+          `<label style="display:flex;align-items:center;gap:6px;padding:3px 5px;cursor:pointer;font-size:12px;white-space:nowrap">` +
+          `<input type="checkbox" class="__dpsr __dpgrp${g.from}" value="${sn}" checked>` +
+          `<span style="color:#868e96;font-variant-numeric:tabular-nums;min-width:16px;text-align:right">${sn}</span>` +
+          `<span>${SERIES_NAMES[sn]}</span></label>`,
         );
-      }).join('');
-      const titleText = isRival ? '라이벌 오소리 — 시리즈 선택' : '오소리 — 시리즈 선택';
-      ov.innerHTML = `
-        <style>
-          /* PC: 화면 넓이만큼 커져 4컬럼 다 보임(최대 680px). 모바일(≤560px): 풀스크린 모달. */
-          #__dp_fetch_modal .__dp_card{width:min(680px, calc(100vw - 24px))}
-          @media (max-width:560px){
-            #__dp_fetch_modal{align-items:stretch;justify-content:stretch}
-            #__dp_fetch_modal .__dp_card{width:100vw;max-width:100vw;height:100vh;max-height:100vh;border-radius:0;padding:16px 16px env(safe-area-inset-bottom,16px)}
-          }
-        </style>
-        <div class="__dp_card" style="background:#fff;border-radius:12px;padding:20px 22px;box-sizing:border-box;box-shadow:0 8px 32px rgba(0,0,0,.25);color:#212529;display:flex;flex-direction:column;max-height:calc(100vh - 32px)">
-          <div style="font-size:15px;font-weight:700;margin-bottom:3px">${titleText}</div>
-          <div style="font-size:12px;color:#888;margin-bottom:12px">가져올 시리즈를 고르세요 (기본 전체 — 전곡은 약 1분). 좁으면 ←→ 가로 스크롤</div>
-          ${isRival ? '' : `<div id="__dp_ps_tabs" style="display:flex;margin-bottom:12px;border:1px solid #dee2e6;border-radius:8px;overflow:hidden;flex:none">
-            <button type="button" class="__dp_ps_tab" data-ps="DP" style="flex:1;padding:8px 0;border:0;background:#1d9e75;color:#fff;font-size:13px;font-weight:700;cursor:pointer">DP</button>
-            <button type="button" class="__dp_ps_tab" data-ps="SP" style="flex:1;padding:8px 0;border:0;background:#f1f3f5;color:#868e96;font-size:13px;font-weight:700;cursor:pointer">SP</button>
-          </div>`}
-          <label style="display:flex;align-items:center;gap:7px;padding:4px 6px;margin-bottom:6px;cursor:pointer;font-size:12px;font-weight:700;color:#1d9e75;flex:none">
-            <input type="checkbox" id="__dp_all" checked><span>전체</span></label>
-          <div id="__dp_series_box" style="display:flex;flex-direction:row;gap:10px;overflow-x:auto;overflow-y:hidden;border:1px solid #e9ecef;border-radius:8px;padding:8px;margin-bottom:14px;flex:1 1 auto;min-height:0">${groupsHtml}</div>
-          <button id="__dp_fetch_ok" style="width:100%;padding:11px 0;border:0;border-radius:7px;background:#1d9e75;color:#fff;font-size:13.5px;font-weight:600;cursor:pointer;flex:none">시작</button>
+      }
+      return (
+        `<div style="flex:0 0 auto;min-width:138px">` +
+        `<label style="display:flex;align-items:center;gap:6px;padding:4px 5px;margin-bottom:2px;cursor:pointer;background:#f1f3f5;border-radius:6px;font-size:12px;font-weight:700;color:#495057;white-space:nowrap">` +
+        `<input type="checkbox" class="__dpgrptog" data-grp="${g.from}" checked><span>${g.label}</span></label>` +
+        items.join('') +
+        `</div>`
+      );
+    }).join('');
+    ov.innerHTML = `
+      <style>
+        #__dp_fetch_modal .__dp_card{width:min(680px, calc(100vw - 24px))}
+        @media (max-width:560px){
+          #__dp_fetch_modal{align-items:stretch;justify-content:stretch}
+          #__dp_fetch_modal .__dp_card{width:100vw;max-width:100vw;height:100vh;max-height:100vh;border-radius:0;padding:16px 16px env(safe-area-inset-bottom,16px)}
+        }
+      </style>
+      <div class="__dp_card" style="background:#fff;border-radius:12px;padding:20px 22px;box-sizing:border-box;box-shadow:0 8px 32px rgba(0,0,0,.25);color:#212529;display:flex;flex-direction:column;max-height:calc(100vh - 32px)">
+        <div style="font-size:15px;font-weight:700;margin-bottom:10px;flex:none">오소리 — 업로드</div>
+        <div style="background:#f8f9fa;border-radius:8px;padding:10px 12px;margin-bottom:10px;flex:none">
+          <div id="__dp_prof_name" style="font-size:14px;font-weight:700;word-break:break-all">프로필 불러오는 중...</div>
+          <div id="__dp_prof_rank" style="font-size:12px;color:#868e96;margin-top:2px"></div>
         </div>
-      `;
-      document.body.appendChild(ov);
-      let playStyle = 'DP';
-      ov.querySelectorAll('.__dp_ps_tab').forEach((b) => {
-        b.onclick = () => {
-          playStyle = b.dataset.ps;
-          ov.querySelectorAll('.__dp_ps_tab').forEach((x) => {
-            const on = x.dataset.ps === playStyle;
-            x.style.background = on ? '#1d9e75' : '#f1f3f5';
-            x.style.color = on ? '#fff' : '#868e96';
-          });
-        };
-      });
-      const allCbs = () => [...ov.querySelectorAll('.__dpsr')];
-      // 그룹 토글 → 그룹 내 전부 on/off
-      ov.querySelectorAll('.__dpgrptog').forEach((g) => {
-        g.addEventListener('change', () => {
-          ov.querySelectorAll('.__dpgrp' + g.dataset.grp).forEach((c) => { c.checked = g.checked; });
-          syncTop();
+        <div style="font-size:11px;color:#888;margin-bottom:4px;flex:none">IIDX ID <span style="color:#1d9e75">— 다른 사람 ID 를 넣으면 그 사람을 라이벌로 분석</span></div>
+        <input id="__dp_iidx" type="text" inputmode="numeric" placeholder="0000-0000" disabled
+          style="width:100%;box-sizing:border-box;padding:9px 11px;border:1px solid #ced4da;border-radius:7px;font-size:14px;font-family:monospace;margin-bottom:12px;flex:none">
+        <div id="__dp_ps_tabs" style="display:flex;margin-bottom:12px;border:1px solid #dee2e6;border-radius:8px;overflow:hidden;flex:none">
+          <button type="button" class="__dp_ps_tab" data-ps="DP" style="flex:1;padding:8px 0;border:0;background:#1d9e75;color:#fff;font-size:13px;font-weight:700;cursor:pointer">DP</button>
+          <button type="button" class="__dp_ps_tab" data-ps="SP" style="flex:1;padding:8px 0;border:0;background:#f1f3f5;color:#868e96;font-size:13px;font-weight:700;cursor:pointer">SP</button>
+        </div>
+        <div style="font-size:12px;color:#888;margin-bottom:6px;flex:none">시리즈 (기본 전체 — 전곡 약 1분, 좁으면 ←→ 스크롤). 일부만 고르면 별값 갱신은 생략.</div>
+        <label style="display:flex;align-items:center;gap:7px;padding:4px 6px;margin-bottom:6px;cursor:pointer;font-size:12px;font-weight:700;color:#1d9e75;flex:none">
+          <input type="checkbox" id="__dp_all" checked><span>전체</span></label>
+        <div id="__dp_series_box" style="display:flex;flex-direction:row;gap:10px;overflow-x:auto;overflow-y:hidden;border:1px solid #e9ecef;border-radius:8px;padding:8px;margin-bottom:14px;flex:1 1 auto;min-height:0">${groupsHtml}</div>
+        <button id="__dp_fetch_ok" disabled style="width:100%;padding:11px 0;border:0;border-radius:7px;background:#1d9e75;color:#fff;font-size:13.5px;font-weight:600;cursor:pointer;flex:none;opacity:.5">불러오는 중...</button>
+      </div>
+    `;
+    document.body.appendChild(ov);
+    let playStyle = 'DP';
+    ov.querySelectorAll('.__dp_ps_tab').forEach((b) => {
+      b.onclick = () => {
+        playStyle = b.dataset.ps;
+        ov.querySelectorAll('.__dp_ps_tab').forEach((x) => {
+          const on = x.dataset.ps === playStyle;
+          x.style.background = on ? '#1d9e75' : '#f1f3f5';
+          x.style.color = on ? '#fff' : '#868e96';
         });
-      });
-      // 개별 체크 → 그룹/전체 토글 상태 갱신
-      const syncTop = () => {
-        SERIES_GROUPS.forEach((g) => {
-          const tog = ov.querySelector(`.__dpgrptog[data-grp="${g.from}"]`);
-          const box = [...ov.querySelectorAll('.__dpgrp' + g.from)];
-          if (tog) tog.checked = box.length > 0 && box.every((c) => c.checked);
-        });
-        const all = ov.querySelector('#__dp_all');
-        if (all) all.checked = allCbs().every((c) => c.checked);
-      };
-      allCbs().forEach((c) => c.addEventListener('change', syncTop));
-      ov.querySelector('#__dp_all').addEventListener('change', (e) => {
-        allCbs().forEach((c) => { c.checked = e.target.checked; });
-        ov.querySelectorAll('.__dpgrptog').forEach((g) => { g.checked = e.target.checked; });
-      });
-      ov.querySelector('#__dp_fetch_ok').onclick = () => {
-        const seriesList = allCbs().filter((c) => c.checked).map((c) => Number(c.value) - 1);  // series_no → list 값
-        if (seriesList.length === 0) { alert('시리즈를 하나 이상 선택해주세요.'); return; }
-        ov.remove();
-        resolve({ seriesList, playStyle });
       };
     });
+    const allCbs = () => [...ov.querySelectorAll('.__dpsr')];
+    ov.querySelectorAll('.__dpgrptog').forEach((g) => {
+      g.addEventListener('change', () => {
+        ov.querySelectorAll('.__dpgrp' + g.dataset.grp).forEach((c) => { c.checked = g.checked; });
+        syncTop();
+      });
+    });
+    const syncTop = () => {
+      SERIES_GROUPS.forEach((g) => {
+        const tog = ov.querySelector(`.__dpgrptog[data-grp="${g.from}"]`);
+        const box = [...ov.querySelectorAll('.__dpgrp' + g.from)];
+        if (tog) tog.checked = box.length > 0 && box.every((c) => c.checked);
+      });
+      const all = ov.querySelector('#__dp_all');
+      if (all) all.checked = allCbs().every((c) => c.checked);
+    };
+    allCbs().forEach((c) => c.addEventListener('change', syncTop));
+    ov.querySelector('#__dp_all').addEventListener('change', (e) => {
+      allCbs().forEach((c) => { c.checked = e.target.checked; });
+      ov.querySelectorAll('.__dpgrptog').forEach((g) => { g.checked = e.target.checked; });
+    });
+    let resolveChoice;
+    const choice = new Promise((res) => { resolveChoice = res; });
+    ov.querySelector('#__dp_fetch_ok').onclick = () => {
+      const seriesList = allCbs().filter((c) => c.checked).map((c) => Number(c.value) - 1);  // series_no → list 값
+      if (seriesList.length === 0) { alert('시리즈를 하나 이상 선택해주세요.'); return; }
+      const targetId = (ov.querySelector('#__dp_iidx').value || '').trim();
+      ov.remove();
+      resolveChoice({ seriesList, playStyle, targetId });
+    };
+    // 프로필 fetch 끝나면 호출 — 헤더 채우고 IIDX input(본인 id) 채우고 시작 활성화.
+    function fillProfile(profile) {
+      const nameEl = ov.querySelector('#__dp_prof_name');
+      const rankEl = ov.querySelector('#__dp_prof_rank');
+      const input = ov.querySelector('#__dp_iidx');
+      const ok = ov.querySelector('#__dp_fetch_ok');
+      if (profile && profile.iidxId) {
+        nameEl.textContent = profile.djName || '(이름 없음)';
+        const fmt = (s) => (s && s !== '---' && s !== '-') ? s : null;
+        const parts = [];
+        if (fmt(profile.spRank)) parts.push('SP ' + profile.spRank);
+        if (fmt(profile.dpRank)) parts.push('DP ' + profile.dpRank);
+        rankEl.textContent = parts.join('   ·   ') || '단위 없음';
+        input.value = profile.iidxId;
+      } else {
+        nameEl.textContent = '프로필을 못 불러왔어요';
+        rankEl.textContent = 'IIDX ID 를 직접 입력해주세요';
+      }
+      input.disabled = false;
+      ok.disabled = false; ok.style.opacity = '1'; ok.textContent = '시작';
+    }
+    return { choice, fillProfile };
   }
 
-  window.__dp_render = async (dbData, renderOpts) => {
-    // 라이벌 페이지에서 실행했는지 감지 — URL 의 ?rival=<토큰> 유무로 판단 (rivalOhsorry 와 동일 기준).
-    // dbData 모드 (게스트 페이지 등 외부 호출) 는 무조건 own.
-    const rivalToken = (!dbData && location.hostname.endsWith('p.eagate.573.jp'))
-      ? new URLSearchParams(location.search).get('rival')
-      : null;
-    const isRival = !!rivalToken;
-
-    // eagate fetch 모드 (dbData 없음 + eagate 도메인) 면 곡 수집 범위를 먼저 묻는다.
-    // 라이벌 모드도 동일하게 모달 표시 — 라이벌 페이지도 difficulty_rival.html (level) / series.html (series, rival 토큰 포함) 양쪽 다 가능.
-    // DB 모드 (dbData 있음) 는 charts_json 을 그대로 쓰므로 모달 생략.
-    let fetchOpts = null;
-    if (!dbData && location.hostname.endsWith('p.eagate.573.jp')) {
-      fetchOpts = await askFetchOptions(isRival);
+  // 메인 흐름 — 모달 즉시 표시 → 모듈 로드 → 본인 프로필 채움 → 데이터 prefetch → 시작 시 own/rival 분기.
+  async function run() {
+    if (!location.hostname.endsWith('p.eagate.573.jp')) {
+      if (window.confirm('p.eagate.573.jp 에서 실행해야 합니다. 이동할까요?')) location.href = 'https://p.eagate.573.jp/';
+      return;
     }
-    // 모듈 모두 load (이미 로드돼 있으면 즉시 반환)
-    // normTitle 먼저 — dbConn / Core / RenderingShelf 등이 의존
-    showLoadingProgress(isRival ? '라이벌 오소리 시작' : 'normTitle 로드 중', 5);
+    const ui = askFetchOptions();   // 모달 즉시 표시 (시리즈는 정적, 프로필/시작은 로드 후 활성화)
+    let Core;
     try {
-      await loadModule(NORM_URL,   'OhsorryNorm');
-      showLoadingProgress('dbConn 로드 중', 30);
-      await loadModule(DB_URL,     'OhsorryDb');
-      showLoadingProgress('core 로드 중', 60);
-      const Core = await loadModule(CORE_URL, 'OhsorryCore');
-      // [구조개편 2C] core 는 크롤→별값→업로드 전용 — render 모듈 불필요(완료 박스는 core 내장).
-      showLoadingProgress('eagateFetch 로드 중', 90);
+      await loadModule(NORM_URL,  'OhsorryNorm');
+      await loadModule(DB_URL,    'OhsorryDb');
+      Core = await loadModule(CORE_URL, 'OhsorryCore');
       await loadModule(EAGATE_URL, 'OhsorryEagateFetch');
-      showLoadingProgress('계산 시작', 100);
-      return Core.compute({
+    } catch (e) {
+      alert('모듈 로드 실패: ' + (e && e.message) + '\n새로고침 후 다시 시도해주세요.');
+      return;
+    }
+    // 본인 프로필 fetch → 모달 헤더 + IIDX input 채움
+    let ownProfile = null;
+    try { ownProfile = await Core.fetchProfile({ isRival: false }); }
+    catch (e) { console.warn('[오소리] 프로필 fetch 실패:', e && e.message); }
+    ui.fillProfile(ownProfile);
+    // 데이터(별값 lib/ereter/textage/rating) 백그라운드 prefetch — 모달 보는 동안 미리 받아 compute 단축
+    Core.prefetch().catch(() => {});
+    // 시작 대기
+    const { seriesList, playStyle, targetId } = await ui.choice;
+    const ownNorm = ((ownProfile && ownProfile.iidxId) || '').replace(/-/g, '');
+    const targetNorm = (targetId || '').replace(/-/g, '');
+    const isRival = !!targetNorm && targetNorm !== ownNorm;
+    let rivalToken;
+    if (isRival) {
+      showLoadingProgress(`라이벌 ${targetNorm} 검색 중...`, 5);
+      try { rivalToken = await Core.fetchRivalToken(targetNorm); }
+      catch (e) { hideLoadingProgress(); alert('라이벌 검색 실패: ' + (e && e.message)); return; }
+      if (!rivalToken) { hideLoadingProgress(); alert(`IIDX ID ${targetNorm} 의 라이벌을 못 찾았어요.\n(ID 오타 / 라이벌 등록·공개 설정 확인)`); return; }
+    }
+    try {
+      return await Core.compute({
         mode: isRival ? 'rival' : 'own',
         rivalToken: rivalToken || undefined,
         wrapperVersion: WRAPPER_VERSION,
-        seriesList: fetchOpts ? fetchOpts.seriesList : undefined,   // eamuse list 값(0~32) 배열, 생략 시 전체
-        playStyle: fetchOpts ? fetchOpts.playStyle : undefined,     // 'SP' | 'DP'(기본)
+        seriesList,
+        playStyle: isRival ? undefined : playStyle,   // 라이벌은 DP 분석 + SP 보강(고정)
+        profile: isRival ? undefined : ownProfile,     // own 은 모달에서 받은 프로필 재사용(status 재fetch 안 함)
       });
     } finally {
-      // Core.compute 호출 직후 로딩 박스 제거 — 이어서 Core 가 OhsorryRender.showProgress 로
-      // 같은 ID(#__dp_progress) 박스를 새로 만들어 진행률을 표시함.
       hideLoadingProgress();
     }
-  };
+  }
+  window.__dp_run = run;   // 외부 재실행용
 
-  // eagate 도메인이면 자동 실행 (콘솔에 붙여넣는 기존 사용법 그대로).
-  // 그 외 사이트는 window.__dp_render(dbData) 로 DB 데이터를 넘겨 호출.
   if (location.hostname.endsWith('p.eagate.573.jp')) {
-    window.__dp_render(null);
+    run();
   } else {
-    console.log(`[오소리 ${WRAPPER_VERSION}] eagate 외 도메인 — window.__dp_render(dbData) 로 DB 데이터를 넘겨 호출하세요.`);
+    console.log(`[오소리 ${WRAPPER_VERSION}] p.eagate.573.jp 에서 실행하세요.`);
   }
 })();
 

@@ -1,5 +1,5 @@
 // ============================================================
-// calcOhsorryCore — 오소리 본체 / 라이벌오소리 크롤러의 핵심 모듈.
+// calcOhsorryCore — 오소리 크롤러 핵심 모듈 (본인 + 라이벌 통합 — 라이벌은 IIDX ID 입력으로 분기).
 // ============================================================
 // [구조개편 2C] 크롤 → 별값(★) → supabase 업로드 전용. 추천/렌더/표시는 ohSorryWeb·ohSorryRating(gist 모듈)이 담당.
 //   웹·INF 는 코어를 안 쓰고(코어-free, ohsorryRender 직접 호출), 코어는 eagate 업로더에서만 실행된다.
@@ -72,8 +72,225 @@ function __ohsorryShowDone(profile, style) {
   el.querySelector('#__ohsorry_done_x')?.addEventListener('click', () => el.remove());
 }
 
+// ============================================================
+// 공유 헬퍼 — compute / prefetch / fetchProfile / fetchRivalToken 가 함께 쓰는 데이터 로딩·파싱.
+//   window 캐시(__ohsorryEreterCache / __ohsorryLibCache)로 idempotent — 두 번째 호출은 즉시 반환.
+// ============================================================
+const __GIST_RAW = 'https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw';
+const __URLS = {
+  ereter:    __GIST_RAW + '/ereter-data.json',
+  textage:   __GIST_RAW + '/textage-meta.json',
+  rating:    __GIST_RAW + '/ohSorryRating.json',
+  osr135:    __GIST_RAW + '/OSR13.5%2B.js',     // onlyOSRtoEreter 13.5 tier 의존
+  onlyOSR:   __GIST_RAW + '/onlyOSR.js',
+  onlyOSR2e: __GIST_RAW + '/onlyOSRtoEreter.js',
+};
+const __ERETER_CACHE_KEY = 'ereter_dp_diff_v4';
+const __EAGATE = 'https://p.eagate.573.jp';
+
+// ereter-data.json 형식 정규화 (배열 / {charts} / {charts,players}).
+function __normalizeEreterPayload(raw) {
+  if (Array.isArray(raw)) return { charts: raw, extractedAt: null, players: null };
+  if (raw && typeof raw === 'object' && Array.isArray(raw.charts)) {
+    return { charts: raw.charts, extractedAt: raw.extractedAt || null, players: (raw.players && typeof raw.players === 'object') ? raw.players : null };
+  }
+  return { charts: null, extractedAt: null, players: null };
+}
+
+// localStorage 캐시 헬퍼 — memory > network fetch > localStorage 순 fallback.
+async function __loadWithCache(url, cacheKey, isJson) {
+  window.__ohsorryLibCache = window.__ohsorryLibCache || {};
+  if (window.__ohsorryLibCache[cacheKey]) return window.__ohsorryLibCache[cacheKey];
+  try {
+    const res = await fetch(url + '?t=' + Date.now(), { cache: 'no-store' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = isJson ? await res.json() : await res.text();
+    try {
+      localStorage.setItem(cacheKey, isJson ? JSON.stringify(data) : data);
+      localStorage.setItem(cacheKey + ':ts', new Date().toISOString());
+    } catch {}
+    const result = { data, source: 'fetch' };
+    window.__ohsorryLibCache[cacheKey] = result;
+    return result;
+  } catch (e) {
+    const cached = localStorage.getItem(cacheKey);
+    if (cached != null) {
+      const result = { data: isJson ? JSON.parse(cached) : cached, source: 'cache' };
+      window.__ohsorryLibCache[cacheKey] = result;
+      return result;
+    }
+    throw new Error(`${cacheKey}: fetch 실패 + 캐시 없음 — ${e.message}`);
+  }
+}
+
+// ereter 로드 — 메모리 캐시 우선, network, localStorage fallback. 실패 시 null.
+async function __loadEreter() {
+  if (window.__ohsorryEreterCache) return window.__ohsorryEreterCache;
+  try {
+    const res = await fetch(__URLS.ereter + '?t=' + Date.now(), { cache: 'no-store' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const p = __normalizeEreterPayload(await res.json());
+    if (!p.charts || !p.charts.length) throw new Error('빈 데이터');
+    window.__ohsorryEreterCache = { charts: p.charts, extractedAt: p.extractedAt, players: p.players };
+    try { localStorage.setItem(__ERETER_CACHE_KEY, JSON.stringify({ ts: Date.now(), data: p.charts, extractedAt: p.extractedAt, players: p.players })); } catch {}
+    console.log(`[데이터] ereter ${p.charts.length}곡 로드`);
+    return window.__ohsorryEreterCache;
+  } catch (e) {
+    try {
+      const s = JSON.parse(localStorage.getItem(__ERETER_CACHE_KEY) || 'null');
+      if (s && Array.isArray(s.data)) {
+        window.__ohsorryEreterCache = { charts: s.data, extractedAt: s.extractedAt, players: s.players };
+        console.warn('[데이터] ereter fetch 실패 → localStorage 캐시 사용:', e.message);
+        return window.__ohsorryEreterCache;
+      }
+    } catch {}
+    console.error('[데이터] ereter 로드 실패 (캐시 없음):', e.message);
+    return null;
+  }
+}
+
+// textage 채보 메타 — 캐시 우선. 실패해도 무시(null). gameLevel 역추정용 levels(SP/DP).
+async function __loadTextage() {
+  window.__ohsorryLibCache = window.__ohsorryLibCache || {};
+  if (window.__ohsorryLibCache.textage) {
+    const c = window.__ohsorryLibCache.textage;
+    return (c && c.songs && typeof c.songs === 'object') ? c.songs : c;
+  }
+  try {
+    const res = await fetch(__URLS.textage + '?t=' + Date.now(), { cache: 'no-store' });
+    if (res.ok) {
+      const raw = await res.json();
+      if (raw && raw.songs && typeof raw.songs === 'object') {
+        window.__ohsorryLibCache.textage = raw.songs;
+        console.log(`[데이터] textage ${Object.keys(raw.songs).length}곡 로드`);
+        return raw.songs;
+      }
+    }
+  } catch (e) { console.warn('[데이터] textage fetch 실패 (무시 가능):', e.message); }
+  return null;
+}
+
+// 별값 lib eval — OSR13.5+ → onlyOSR → onlyOSRtoEreter. window.OSR135/onlyOSR/onlyOSRtoEreter 글로벌 등록.
+async function __loadStarLibs() {
+  try {
+    const { data } = await __loadWithCache(__URLS.osr135, 'ohSorry:libOSR135', false);
+    (new Function(data))();
+  } catch (e) { console.error('[데이터] OSR13.5+ 로드 실패:', e.message); }
+  try {
+    const { data: oo } = await __loadWithCache(__URLS.onlyOSR, 'ohSorry:libOnlyOSR', false);
+    (new Function(oo))();
+    const { data: o2e } = await __loadWithCache(__URLS.onlyOSR2e, 'ohSorry:libOnlyOSR2e', false);
+    (new Function(o2e))();
+  } catch (e) { console.warn('[데이터] onlyOSR/onlyOSRtoEreter 로드 실패 — ★ 미산출:', e.message); }
+  return window.onlyOSRtoEreter || null;   // 별값 산출에 직접 쓰는 건 onlyOSRtoEreter (OSR13.5+/onlyOSR 은 글로벌 의존)
+}
+
+// 전체 데이터 로드 (compute + prefetch 공유). 모달 떠 있는 동안 미리 호출하면 compute 가 캐시 hit.
+async function __loadCoreData() {
+  const ereter = await __loadEreter();
+  const textageSongs = await __loadTextage();
+  let ratingData = null, ohSorryRatings = [];
+  try {
+    const { data } = await __loadWithCache(__URLS.rating, 'ohSorry:ratingData', true);
+    ratingData = data;
+    if (data && Array.isArray(data.ratings)) ohSorryRatings = data.ratings;
+  } catch (e) { console.error('[데이터] ohSorryRating 로드 실패:', e.message); }
+  const onlyOSR2eLib = await __loadStarLibs();   // OSR13.5+/onlyOSR 는 글로벌 등록(side-effect), 반환은 onlyOSRtoEreter
+  return {
+    ereterData: ereter ? ereter.charts : null,
+    ereterPlayers: ereter ? ereter.players : null,
+    textageSongs, ratingData, ohSorryRatings,
+    onlyOSR2eLib,
+  };
+}
+
+// status.html(own) / rival_status.html(rival) → 프로필 파싱 { djName, iidxId, spRank, dpRank, spRadar, dpRadar }.
+async function __fetchProfile(opts) {
+  opts = opts || {};
+  const statusUrl = opts.isRival
+    ? __EAGATE + '/game/2dx/33/djdata/rival/rival_status.html?rival=' + encodeURIComponent(opts.rivalToken)
+    : __EAGATE + '/game/2dx/33/djdata/status.html';
+  const res = await fetch(statusUrl, { credentials: 'include' });
+  if (!res.ok) { console.warn('[프로필] fetch 실패 HTTP ' + res.status); return null; }
+  const doc = new DOMParser().parseFromString(await res.text(), 'text/html');
+  const profile = {};
+  // DJ 프로필 테이블 — 업로드에 쓰는 DJ NAME / IIDX ID 만.
+  const profileTable = doc.querySelector('div.dj-profile table');
+  if (profileTable) {
+    profileTable.querySelectorAll('tr').forEach(tr => {
+      const tds = tr.querySelectorAll('td');
+      if (tds.length === 2) {
+        const key = tds[0].textContent.trim();
+        const val = tds[1].textContent.trim();
+        if (key === 'DJ NAME')      profile.djName = val;
+        else if (key === 'IIDX ID') profile.iidxId = val;
+      }
+    });
+  }
+  // 段位(단위) / ノーツレーダー
+  doc.querySelectorAll('div.dj-rank').forEach(dr => {
+    const cn = dr.querySelector('div.cat-name');
+    if (!cn) return;
+    const catName = cn.textContent.trim();
+    if (catName === '段位認定') {
+      dr.querySelectorAll('div.rank-cat').forEach(rc => {
+        const divs = rc.querySelectorAll('div');
+        if (divs.length >= 2) {
+          const style = divs[0].textContent.trim();
+          const rank = divs[1].textContent.trim();
+          if (style === 'SP') profile.spRank = rank;
+          if (style === 'DP') profile.dpRank = rank;
+        }
+      });
+    } else if (catName === 'ノーツレーダー') {
+      dr.querySelectorAll('div.rank-cat').forEach(rc => {
+        const style = rc.querySelector('span')?.textContent.trim();
+        if (style !== 'SP' && style !== 'DP') return;
+        const radar = {};
+        // 6각 레이더 이미지 (KONAMI 동적 img_radar.html — relative URL 절대화)
+        const img = rc.querySelector('img');
+        if (img) {
+          let src = img.getAttribute('src') || '';
+          if (src.startsWith('/')) src = __EAGATE + src;
+          else if (!src.startsWith('http')) src = new URL(src, statusUrl).href;
+          radar.img = src;
+        }
+        rc.querySelectorAll('ul li').forEach(li => {
+          const ps = li.querySelectorAll('p');
+          if (ps.length < 2) return;
+          const key = ps[0].textContent.trim();
+          const num = parseFloat(ps[1].textContent.trim());
+          if (isNaN(num)) return;
+          if (key === '合計レーダースコア') radar.total = num;
+          else radar[key] = num;  // NOTES / CHORD / PEAK / CHARGE / SCRATCH / SOF-LAN
+        });
+        if (style === 'SP') profile.spRadar = radar;
+        else profile.dpRadar = radar;
+      });
+    }
+  });
+  return profile;
+}
+
+// IIDX ID → 라이벌 토큰 (rival_search.html POST). 못 찾으면 null.
+async function __fetchRivalToken(iidxId) {
+  const fd = new FormData();
+  fd.append('iidxid', String(iidxId).replace(/-/g, ''));
+  fd.append('mode', '1');
+  const res = await fetch(__EAGATE + '/game/2dx/33/rival/rival_search.html', { method: 'POST', credentials: 'include', body: fd });
+  if (!res.ok) throw new Error('rival_search HTTP ' + res.status);
+  const doc = new DOMParser().parseFromString(await res.text(), 'text/html');
+  const link = doc.querySelector('table#result a[href*="rival_status.html?rival="]');
+  if (!link) return null;
+  const m = (link.getAttribute('href') || '').match(/rival=([^&]+)/);
+  return m ? decodeURIComponent(m[1]) : null;
+}
+
 window.OhsorryCore = {
-  VERSION: '0.0.401',
+  VERSION: '0.0.402',
+  prefetch: __loadCoreData,        // 모달 떠 있는 동안 미리 호출 → compute 캐시 hit (로딩 단축)
+  fetchProfile: __fetchProfile,    // wrapper 가 모달 상단 프로필 채울 때
+  fetchRivalToken: __fetchRivalToken,  // IIDX ID → 라이벌 토큰 (라이벌 모드 판정)
   compute: async (opts) => {
   __ohsorryShowSpinner();
   opts = opts || {};
@@ -81,230 +298,19 @@ window.OhsorryCore = {
   const isRival = mode === 'rival';
   const rivalToken = opts.rivalToken || null;
   const wrapperVersion = opts.wrapperVersion || 'unknown';
-  const CORE_VERSION_SHORT = '0.0.401'.replace(/^0\.0\./, '');  // '401' — series 단일화 + seriesList 선택 + SP/DP gameLevel 역추정 + 완료박스 내 카드 딥링크(iidx.in)
+  const CORE_VERSION_SHORT = '0.0.402'.replace(/^0\.0\./, '');  // '402' — 데이터 로딩/프로필/라이벌토큰 함수 분리(prefetch·fetchProfile·fetchRivalToken) + 라이벌 통합
   const dbVersionString = `${wrapperVersion}-core${CORE_VERSION_SHORT}`;
-  // -------- 0. ereter 데이터 로드 (Gist 에서 자동 fetch) --------
-  // ereter.net 데이터는 Gist 에 ereter-data.json 으로 올려둔 걸 가져옵니다.
-  // 형식: { extractedAt: "ISO 일시", source, count, charts: [...] }
-  //       또는 옛 형식 [{...}, ...] (호환성 유지)
-  // 한 번 받으면 24시간 동안 localStorage 에 캐시됨
-  // 강제로 새로 받고 싶으면: localStorage.removeItem('ereter_dp_diff_v4'); 후 재실행
-  const ERETER_DATA_URL = 'https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw/ereter-data.json';
-  // textage 채보 메타 — 채보별 levels(SP/DP). series 페이지엔 게임레벨이 없어 gameLevel 역추정에 사용(4.5).
-  const TEXTAGE_DATA_URL = 'https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw/textage-meta.json';
-  const CACHE_KEY = 'ereter_dp_diff_v4';
-  const CACHE_TTL_MS = 24 * 60 * 60 * 1000;  // 24시간
 
-  // 형식 정규화:
-  //   옛 형식: [{...}, ...]  (배열)
-  //   v1 형식: { extractedAt, charts: [...] }
-  //   v2 형식 (현재): { extractedAt, charts: [...], players: { iidxId: ★ } }
-  const normalizePayload = (raw) => {
-    if (Array.isArray(raw)) {
-      return { charts: raw, extractedAt: null, players: null };
-    }
-    if (raw && typeof raw === 'object' && Array.isArray(raw.charts)) {
-      return {
-        charts: raw.charts,
-        extractedAt: raw.extractedAt || null,
-        players: raw.players && typeof raw.players === 'object' ? raw.players : null,
-      };
-    }
-    return { charts: null, extractedAt: null, players: null };
-  };
-
-  let ereterData = null;
-  let ereterExtractedAt = null;
-  let ereterPlayers = null;  // { iidxId: ★ } 매핑 (있으면)
-
-  // 캐시 확인 + 원격 extractedAt 비교 (extractedAt 만 비교에 사용)
-  let cachedExtractedAt = null;
-  try {
-    const stored = localStorage.getItem(CACHE_KEY);
-    if (stored) {
-      const cached = JSON.parse(stored);
-      if (cached && cached.ts && (Date.now() - cached.ts < CACHE_TTL_MS) && Array.isArray(cached.data)) {
-        cachedExtractedAt = cached.extractedAt || null;
-      }
-    }
-  } catch {}
-
-  // 항상 Gist 의 최신 extractedAt 빠르게 확인 (HEAD 같은 거 안 됨, GET 짧게)
-  // 다행히 ereter-data.json 가 그렇게 크지 않으니 fetch 하면서 compare
-  // batch (라이벌 다수) 처리 시 두 번째부터 ereter fetch 도 skip — 메모리 캐시
-  if (window.__ohsorryEreterCache) {
-    ereterData = window.__ohsorryEreterCache.charts;
-    ereterExtractedAt = window.__ohsorryEreterCache.extractedAt;
-    ereterPlayers = window.__ohsorryEreterCache.players;
-    console.log(`[step2] ereter 메모리 캐시 hit (${ereterData.length}개)`);
-  } else {
-  console.log('[step2] ereter 데이터 fetch 중...');
-  try {
-    const url = ERETER_DATA_URL + '?t=' + Date.now();  // CDN 캐시 우회
-    const res = await fetch(url, { cache: 'no-store' });  // 브라우저 캐시도 우회
-    if (!res.ok) {
-      alert(
-        `ereter 데이터를 못 가져왔어요 (HTTP ${res.status}).\n` +
-        `Gist URL 확인이 필요합니다:\n${ERETER_DATA_URL}`
-      );
-      return;
-    }
-    const raw = await res.json();
-    const payloadNorm = normalizePayload(raw);
-    if (!payloadNorm.charts || payloadNorm.charts.length === 0) {
-      alert('ereter 데이터가 비어있거나 형식이 잘못됐어요.');
-      return;
-    }
-    ereterData = payloadNorm.charts;
-    ereterExtractedAt = payloadNorm.extractedAt;
-    ereterPlayers = payloadNorm.players;
-    if (ereterPlayers) {
-      console.log(`[step2] ereter players ★ 매핑: ${Object.keys(ereterPlayers).length}명`);
-    }
-
-    // 캐시랑 비교 - 같으면 캐시 그대로 사용한 셈, 다르면 새 데이터
-    if (cachedExtractedAt && cachedExtractedAt === ereterExtractedAt) {
-      const ageHr = ((Date.now() - JSON.parse(localStorage.getItem(CACHE_KEY) || '{}').ts) / 3600000).toFixed(1);
-      console.log(`[step2] ereter 데이터 동일 (캐시와 같음, 캐시 ${ageHr}시간 전)`);
-      if (ereterExtractedAt) console.log(`         원본 추출일시: ${ereterExtractedAt}`);
-    } else {
-      // 새 데이터 → 캐시 갱신 (players 도 포함)
-      try {
-        localStorage.setItem(CACHE_KEY, JSON.stringify({
-          ts: Date.now(),
-          data: ereterData,
-          extractedAt: ereterExtractedAt,
-          players: ereterPlayers,
-        }));
-      } catch {}
-      if (cachedExtractedAt) {
-        console.log(`[step2] ereter 데이터 갱신됨! (${cachedExtractedAt} → ${ereterExtractedAt})`);
-      } else {
-        console.log(`[step2] ereter 데이터 ${ereterData.length}개 fetch 완료, 캐시함`);
-        if (ereterExtractedAt) console.log(`         원본 추출일시: ${ereterExtractedAt}`);
-      }
-    }
-  } catch (e) {
-    console.error('[step2] ereter fetch 실패:', e);
-    alert(`ereter 데이터 fetch 실패: ${e.message}\n네트워크 또는 CSP 문제일 수 있습니다.`);
+  // -------- 0. 데이터 로드 (ereter/textage/ohSorryRating + 별값 lib) — 모듈 공유 __loadCoreData --------
+  //   wrapper 가 모달 떠 있는 동안 Core.prefetch() 로 미리 호출했으면 캐시 hit 으로 즉시 반환(로딩 단축).
+  const __D = await __loadCoreData();
+  if (!__D.ereterData) {
+    alert('ereter 데이터를 못 가져왔어요. 네트워크/Gist 확인 후 다시 시도해주세요.');
+    __ohsorryHideSpinner();
     return;
   }
-  // 메모리 캐시 저장 — 다음 compute 호출 시 fetch skip
-  window.__ohsorryEreterCache = { charts: ereterData, extractedAt: ereterExtractedAt, players: ereterPlayers };
-  }
-  console.log(`[step2] ereter 차트 ${ereterData.length}개 로드`);
+  const { ereterData, ereterPlayers, textageSongs, ratingData, ohSorryRatings, onlyOSR2eLib } = __D;
 
-  // 모듈 lifetime memory cache — batch (라이벌 다수) 처리 시 두 번째 호출부터 외부 lib fetch skip.
-  // 페이지 reload 시 다시 받음 (localStorage 캐시는 24h TTL 별도로 동작).
-  window.__ohsorryLibCache = window.__ohsorryLibCache || {};
-
-  // -------- 0.55. textage 채보 메타 fetch (선택, 실패해도 무시) --------
-  // series 페이지엔 게임레벨이 없어 textage levels 로 gameLevel 역추정(4.5)에 사용.
-  //   캐시 형식 호환 — ohSorryWeb 일부 경로가 raw 전체 (`{generatedAt, count, songs}`) 를 set
-  //   하는 케이스 보완. `.songs` 가 있으면 그것만 사용, 없으면 자체 (= 곡 id → entry Map).
-  let textageSongs = null;
-  if (window.__ohsorryLibCache.textage) {
-    const cached = window.__ohsorryLibCache.textage;
-    textageSongs = (cached && cached.songs && typeof cached.songs === 'object') ? cached.songs : cached;
-    console.log(`[step2] textage 채보 메타 ${Object.keys(textageSongs).length}곡 (memory cache hit)`);
-  } else try {
-    const res = await fetch(TEXTAGE_DATA_URL + '?t=' + Date.now(), { cache: 'no-store' });
-    if (res.ok) {
-      const raw = await res.json();
-      if (raw && raw.songs && typeof raw.songs === 'object') {
-        textageSongs = raw.songs;
-        window.__ohsorryLibCache.textage = textageSongs;
-        console.log(`[step2] textage 채보 메타 ${Object.keys(textageSongs).length}곡 로드`);
-      }
-    }
-  } catch (e) {
-    console.warn('[step2] textage fetch 실패 (무시 가능):', e.message);
-  }
-
-  // -------- 0.6. ohSorryRating 데이터 + 별값 lib fetch (localStorage 캐시) --------
-  //   fetch 실패 시 localStorage 캐시 사용. 캐시도 없으면 별값 산출 불가.
-  const GIST_RAW = 'https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw';
-  const OHSORRY_RATING_URL = GIST_RAW + '/ohSorryRating.json';
-  // v3.3.5: OSR13.5+ (bin50 + 50% 임계 + 상향 bin 부분 보너스) — onlyOSRtoEreter 의 13.5 tier 의존
-  const CALC_OSR135_URL = GIST_RAW + '/OSR13.5%2B.js';
-  // v3.4.0: onlyOSR (전체곡 50% native) + onlyOSRtoEreter (ereter★ 변환, OSR13.5 tier). [Phase 2-0] oldOSR/osr/adopt 제거
-  const CALC_ONLYOSR_URL = GIST_RAW + '/onlyOSR.js';
-  const CALC_ONLYOSR2E_URL = GIST_RAW + '/onlyOSRtoEreter.js';
-
-  // 외부 lib 메모리 캐시 (페이지 lifetime 유지) — batch (라이벌 다수) 처리 시 두 번째부터 fetch skip
-  if (!window.__ohsorryLibCache) window.__ohsorryLibCache = {};
-
-  // localStorage 캐시 헬퍼 — memory > network fetch > localStorage 순으로 fallback
-  const loadWithCache = async (url, cacheKey, isJson) => {
-    // memory cache 우선 — batch (라이벌 다수) 처리 시 두 번째 호출부터 fetch skip
-    if (window.__ohsorryLibCache[cacheKey]) {
-      return window.__ohsorryLibCache[cacheKey];
-    }
-    try {
-      const res = await fetch(url + '?t=' + Date.now(), { cache: 'no-store' });
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      const data = isJson ? await res.json() : await res.text();
-      try {
-        localStorage.setItem(cacheKey, isJson ? JSON.stringify(data) : data);
-        localStorage.setItem(cacheKey + ':ts', new Date().toISOString());
-      } catch {}
-      const result = { data, source: 'fetch' };
-      window.__ohsorryLibCache[cacheKey] = result;
-      return result;
-    } catch (e) {
-      const cached = localStorage.getItem(cacheKey);
-      if (cached != null) {
-        const ts = localStorage.getItem(cacheKey + ':ts') || '시간 불명';
-        console.warn(`[step2] ${cacheKey} fetch 실패 (${e.message}) → localStorage 캐시 사용 (${ts})`);
-        const result = { data: isJson ? JSON.parse(cached) : cached, source: 'cache' };
-        window.__ohsorryLibCache[cacheKey] = result;
-        return result;
-      }
-      throw new Error(`${cacheKey}: fetch 실패 + 캐시 없음 — ${e.message}`);
-    }
-  };
-
-  // ohSorryRating.json — chart 별 EC/HC/EXH 추정값 (v0.0.2)
-  let ohSorryRatings = [], ratingData = null;
-  try {
-    const { data, source } = await loadWithCache(OHSORRY_RATING_URL, 'ohSorry:ratingData', true);
-    ratingData = data;
-    if (data && Array.isArray(data.ratings)) {
-      ohSorryRatings = data.ratings;
-      console.log(`[step2] ohSorryRating ${ohSorryRatings.length}곡 로드 (${source})`);
-    }
-  } catch (e) {
-    console.error('[step2] ohSorryRating 로드 실패:', e.message);
-  }
-
-  // [Phase 2-0] 별값 lib: OSR13.5+ + onlyOSR + onlyOSRtoEreter (구 oldOSR/osr/adopt 제거 — 결과가 사장됐었음).
-  //   eval 은 UMD wrapper 라 window.OSR135 / window.onlyOSR / window.onlyOSRtoEreter 글로벌 등록.
-  let osr135Lib = null;
-  let onlyOSRLib = null, onlyOSR2eLib = null;  // v3.4.0 (+ Phase 2-0)
-  // v3.3.5: OSR13.5+ lib (13.5 이상 ★ 정확도 ↑) — onlyOSRtoEreter 13.5 tier 의 window.OSR135 의존
-  try {
-    const { data: osr135Src, source: src135 } = await loadWithCache(CALC_OSR135_URL, 'ohSorry:libOSR135', false);
-    (new Function(osr135Src))();
-    osr135Lib = window.OSR135;
-    if (!osr135Lib) throw new Error('OSR135 global 등록 실패');
-    console.log(`[step2] OSR13.5+.js v${osr135Lib.version} 로드 (${src135})`);
-  } catch (e) {
-    console.error('[step2] OSR13.5+.js 로드 실패:', e.message);
-  }
-  // v3.4.0: onlyOSR + onlyOSRtoEreter (★ = native 50% → ereter 변환, OSR13.5 tier). window.OhsorryNorm/OSR135 선행 필요(이미 로드됨).
-  try {
-    const { data: ooSrc } = await loadWithCache(CALC_ONLYOSR_URL, 'ohSorry:libOnlyOSR', false);
-    (new Function(ooSrc))();
-    onlyOSRLib = window.onlyOSR;
-    if (!onlyOSRLib) throw new Error('onlyOSR global 등록 실패');
-    const { data: o2eSrc } = await loadWithCache(CALC_ONLYOSR2E_URL, 'ohSorry:libOnlyOSR2e', false);
-    (new Function(o2eSrc))();
-    onlyOSR2eLib = window.onlyOSRtoEreter;
-    if (!onlyOSR2eLib) throw new Error('onlyOSRtoEreter global 등록 실패');
-    console.log(`[step2] onlyOSR v${onlyOSRLib.version} + onlyOSRtoEreter v${onlyOSR2eLib.version} 로드`);
-  } catch (e) {
-    console.warn('[step2] onlyOSR/onlyOSRtoEreter 로드 실패 — ★/native_star 미산출(기존 supabase 값 보존):', e.message);
-  }
   // -------- 1. 곡명 정규화 + 인덱싱 --------
   // [중복 제거] 곡명 norm = normTitle.js 단일 정본(window.OhsorryNorm, wrapper 가 먼저 fetch+eval).
   //   인라인 "간이 norm" 폐기 — 웹/INF/레이팅과 같은 강한 norm 으로 통일(Ø→0 등). dbConn 도 동일 모듈.
@@ -337,12 +343,9 @@ window.OhsorryCore = {
   // 별값(★)은 전체 차트가 있어야 정확 — 일부 시리즈만 크롤하면 데이터 불완전 → 별값 계산 skip(기존 supabase 값 보존).
   const fullCrawl = seriesList.length >= 33;
 
-  // 도메인 체크 — eagate(p.eagate.573.jp) 에서만 의미 있음. 다른 도메인이면 안내 후 이동.
+  // 도메인 체크 — eagate(p.eagate.573.jp) 에서만 의미 있음(wrapper 가 먼저 체크하지만 직접 호출 대비).
   if (!location.hostname.endsWith('p.eagate.573.jp')) {
-    const msg = isRival
-      ? '라이벌 오소리는 p.eagate.573.jp 의 라이벌 페이지에서 실행해야 합니다. 이동할까요?'
-      : 'p.eagate.573.jp 에서 실행해야 결과를 볼 수 있어요. 이동할까요?';
-    if (window.confirm(msg)) location.href = 'https://p.eagate.573.jp/';
+    if (window.confirm('p.eagate.573.jp 에서 실행해야 합니다. 이동할까요?')) location.href = 'https://p.eagate.573.jp/';
     return;
   }
 
@@ -485,82 +488,11 @@ window.OhsorryCore = {
     console.warn('[step2] onlyOSRtoEreter 미로드 — ★/native_star 미산출(기존 supabase 값 보존)');
   }
 
-  // -------- 5.6. status 페이지에서 프로필 정보 fetch --------
-  // 쿠프로(クプロ) 이미지, DJ 이름, IIDX ID, SP/DP 단위(段位), 노트레이더 등
-  let profile = null;
+  // -------- 5.6. 프로필 — own 은 wrapper 가 모달용으로 미리 fetch 한 opts.profile 재사용, rival 은 여기서 fetch --------
+  //   own: 같은 status.html 을 두 번 안 받음(모달에서 이미 받음). rival: rival_status.html(토큰)로 라이벌 프로필.
   updateProgress('프로필 정보 fetch 중...', 96);
-  try {
-    const statusUrl = isRival
-      ? 'https://p.eagate.573.jp/game/2dx/33/djdata/rival/rival_status.html?rival=' + encodeURIComponent(rivalToken)
-      : 'https://p.eagate.573.jp/game/2dx/33/djdata/status.html';
-    const res = await fetch(statusUrl, { credentials: 'include' });
-    if (res.ok) {
-      const html = await res.text();
-      const doc = new DOMParser().parseFromString(html, 'text/html');
-      profile = {};
-      // DJ 프로필 테이블 — 업로드에 쓰는 DJ NAME / IIDX ID 만 추출.
-      const profileTable = doc.querySelector('div.dj-profile table');
-      if (profileTable) {
-        profileTable.querySelectorAll('tr').forEach(tr => {
-          const tds = tr.querySelectorAll('td');
-          if (tds.length === 2) {
-            const key = tds[0].textContent.trim();
-            const val = tds[1].textContent.trim();
-            if (key === 'DJ NAME')      profile.djName = val;
-            else if (key === 'IIDX ID') profile.iidxId = val;
-          }
-        });
-      }
-      // 段位 (단위) / ノーツレーダー - dj-rank 영역들 순회
-      doc.querySelectorAll('div.dj-rank').forEach(dr => {
-        const cn = dr.querySelector('div.cat-name');
-        if (!cn) return;
-        const catName = cn.textContent.trim();
-        if (catName === '段位認定') {
-          dr.querySelectorAll('div.rank-cat').forEach(rc => {
-            const divs = rc.querySelectorAll('div');
-            if (divs.length >= 2) {
-              const style = divs[0].textContent.trim();  // 'SP' or 'DP'
-              const rank = divs[1].textContent.trim();   // '中伝', '十段', '---' 등
-              if (style === 'SP') profile.spRank = rank;
-              if (style === 'DP') profile.dpRank = rank;
-            }
-          });
-        } else if (catName === 'ノーツレーダー') {
-          dr.querySelectorAll('div.rank-cat').forEach(rc => {
-            const style = rc.querySelector('span')?.textContent.trim();
-            if (style !== 'SP' && style !== 'DP') return;
-            const radar = {};
-            // 6각 레이더 이미지 (KONAMI 동적 img_radar.html — relative URL 절대화)
-            const img = rc.querySelector('img');
-            if (img) {
-              let src = img.getAttribute('src') || '';
-              if (src.startsWith('/')) src = 'https://p.eagate.573.jp' + src;
-              else if (!src.startsWith('http')) src = new URL(src, statusUrl).href;
-              radar.img = src;
-            }
-            // 카테고리별 수치 + 합계
-            rc.querySelectorAll('ul li').forEach(li => {
-              const ps = li.querySelectorAll('p');
-              if (ps.length < 2) return;
-              const key = ps[0].textContent.trim();
-              const num = parseFloat(ps[1].textContent.trim());
-              if (isNaN(num)) return;
-              if (key === '合計レーダースコア') radar.total = num;
-              else radar[key] = num;  // NOTES / CHORD / PEAK / CHARGE / SCRATCH / SOF-LAN
-            });
-            if (style === 'SP') profile.spRadar = radar;
-            else profile.dpRadar = radar;
-          });
-        }
-      });
-      console.log('[step2] 프로필 fetch 완료:', profile);
-    } else {
-      console.warn(`[step2] 프로필 fetch 실패 HTTP ${res.status}`);
-    }
-  } catch (e) {
-    console.warn('[step2] 프로필 fetch 실패:', e);
-  }
+  let profile = (!isRival && opts.profile) ? opts.profile : await __fetchProfile({ isRival, rivalToken });
+  console.log('[step2] 프로필:', profile);
 
   // 레이더 데이터 유효성 — 객체이고 6개 카테고리 중 하나라도 숫자값이 있어야 함.
   // (null / undefined / 빈 객체 {} 면 레이더 영역 자체를 만들지 않음)
@@ -707,11 +639,10 @@ window.OhsorryCore = {
   }
 
   // result — 업로드 전용. uploadResult 는 dbPayload + chartScoreRows 만 사용(피처는 dbConn 이 iidx_id 로 자체 계산).
-  //   rivalOhsorry 배치가 result.dbPayload(iidx_id/dj_name/dp_rank)로 최종 목록을 만들므로 dbPayload 는 노출.
   const result = { dbPayload, chartScoreRows };
 
   // -------- 7. 업로드 (users 프로필 + scores + 피처) --------
-  //   own = 완료 박스(djName/iidxId/단위 + 오소리웹 버튼), rival = 조용히 업로드(최종 목록은 wrapper renderRivalList).
+  //   own = 완료 박스(djName/iidxId/단위 + 내 카드 버튼), rival = 조용히 업로드(라이벌 데이터만 갱신).
   if (window.OhsorryDb && window.OhsorryDb.uploadResult) {
     try {
       const up = await window.OhsorryDb.uploadResult(result);
@@ -759,5 +690,5 @@ window.OhsorryCore = {
   // compute: async (opts) => { ... } 의 본문 끝
   },
 };
-// 자동 실행 / 노출 함수 (__dp_render, __dp_render_rival 등) 는 wrapper 가 담당.
+// 자동 실행 / 모달 / 라이벌 분기는 wrapper(ohsorry.js)가 담당. core 는 함수만 노출.
 // core 자체는 window.OhsorryCore 만 등록하고 종료.

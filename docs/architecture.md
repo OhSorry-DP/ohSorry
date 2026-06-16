@@ -50,7 +50,7 @@ eagate 도메인 + dbData 없을 때만 `askFetchOptions(isRival)` 모달로 수
 | `OhSorryShelf` | ohsorryShelf.js | core 가 gist fetch (`:419-430`) | 추천곡 곡명 클릭 토스트 `renderChartRow` |
 | `oldOSR`/`ohSorryRating`/`OSR135`/`adopt`/`onlyOSR`/`onlyOSRtoEreter` | gist `.js` lib | core 가 gist fetch (`:362-415`, **비-DB 모드만**) | ★ 추정 (→ [algorithms.md](algorithms.md)) |
 
-`rivalOhsorry.js`([`modules/rivalOhsorry.js`](../modules/rivalOhsorry.js))는 라이벌 페이지 전용 wrapper(별도 진입점). own wrapper 와 동일하게 모듈 fetch 후 `compute({mode:'rival'})` 를 호출하는 구조입니다.
+라이벌 분석은 별도 wrapper 가 아니라 `ohsorry.js` 모달의 **IIDX ID input** 에서 분기 — 본인 외 ID 입력 시 `Core.fetchRivalToken(id)` → `compute({mode:'rival', rivalToken})`. (구 `rivalOhsorry.js` 별도 진입점은 2026-06-16 제거.)
 
 ### 외부 데이터/lib fetch + 캐시 (`loadWithCache`)
 core 의 `loadWithCache(url, cacheKey, isJson)`(`calcOhsorryCore.js:312-339`) 가 **memory cache → network fetch → localStorage** 순으로 fallback.
