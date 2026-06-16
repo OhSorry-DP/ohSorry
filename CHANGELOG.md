@@ -2,6 +2,15 @@
 
 ohSorry 의 변경 이력입니다. 사용방법은 [README.md](README.md) 를 참고하세요.
 
+### 2026-06-16 — 구조개편 Phase 2B: 헤드리스 모드 활성화 (eagate 실행 = 업로더)
+- 결정: wrapper 가 `headless` 를 켜는 시점 = **(a) eagate 실행 전부**(own+rival). 구현은 `headless: !dbData` — eagate 자동실행(dbData 없음)은 헤드리스, DB 모드(웹·INF 뷰어)는 비-헤드리스 유지(render 표시 경로 보존).
+- [ohsorry.js](ohsorry.js)·[rivalOhsorry.js](modules/rivalOhsorry.js): `Core.compute({ headless: !dbData, ... })` 전달. wrapper 버전 v3.4.0. (ohsorry.js 는 `renderOpts.headless` 로 override 가능.)
+- [calcOhsorryCore.js](modules/calcOhsorryCore.js) (core 0.0.395):
+  - Step2: `headless` 면 추천/렌더 전용 lib·데이터 **fetch 전부 skip** — shelf/patterns/feature-scores/calcWeakness/recommend/rate-reference/weakness-popmean. 별값 lib(OSR13.5+/onlyOSR/onlyOSRtoEreter)는 **유지**(업로드 별값용). 업로드 피처 `computePatternScoreVec` 는 dbConn 자체 fetch 라 무관.
+  - fetch 가 skip 되면 `userVec`/`recommendCtx`/`buildRecs`/`buildWeaknessRecs` 가 기존 null-guard 로 **자동 skip**(추가 분기 불필요).
+  - 완료 UI: `__ohsorryShowDone(profile, style)` 경량 박스 신설 — **✅ 업로드 완료 / djName(iidxId) / 단위(SP·DP) / [오소리웹에서 결과 보기] 버튼**. **own 모드만 표시**, rival 은 조용히 업로드(배치 per-rival 박스 깜빡임 방지 → wrapper 의 `renderRivalList` 가 최종 목록 표시). SP 경량 경로도 headless 면 render 대신 완료 박스.
+- 업로드 데이터(별값/피처/점수)는 풀 모드와 동일 — 추천 계산만 안 함. 비-헤드리스(DB 모드) 경로 동작 불변. 검증: `node --check` 3파일 OK. 정본 [docs/restructure-phase2.md §5/§9](../docs/restructure-phase2.md).
+
 ### 2026-06-16 — 구조개편 Phase 2A: 업로드↔렌더 분리 (헤드리스 직접 업로드 경로)
 - [calcOhsorryCore.js](modules/calcOhsorryCore.js): `opts.headless` 플래그 추가 + 결과 패널 렌더 호출부에 헤드리스 분기 신설. 헤드리스 시 `OhsorryRender.show`(웹 정본 gist, 내부 upsert 트리거) 대신 **`OhsorryDb.uploadResult` 직접 호출** → "업로드↔렌더 결합" 분리. UX(A): 업로드 후 `ohsorry.iidx.in` 안내 로그.
 - 풀 모드와 상호배타(headless=skip render / 풀=core 직접호출 안 함) → 이중 업로드 없음. **기본 off 라 비-헤드리스 경로 동작 불변**(렌더→업로드 그대로). wrapper 가 headless 를 켜는 건 Phase 2B.

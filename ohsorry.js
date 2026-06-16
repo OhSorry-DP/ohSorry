@@ -20,7 +20,7 @@
 // ============================================================
 
 (async function () {
-  const WRAPPER_VERSION = 'v3.3.9';
+  const WRAPPER_VERSION = 'v3.4.0';   // [Phase 2B] eagate 실행 = 헤드리스 업로더 (headless: !dbData)
   const GIST_BASE = 'https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw';
   const CORE_URL     = GIST_BASE + '/calcOhsorryCore.js';
   const RENDER_URL   = GIST_BASE + '/ohsorryRender.js';
@@ -209,6 +209,9 @@
         // statsOnly — 게스트 페이지에서 __dp_render(dbData, { statsOnly:true }) 로 호출 시 통계만 즉시 렌더.
         statsOnly: renderOpts ? !!renderOpts.statsOnly : false,
         noRender: renderOpts ? !!renderOpts.noRender : false,
+        // [구조개편 Phase 2B] eagate 실행(dbData 없음)은 헤드리스 업로더 — 추천/렌더 없이 업로드 + 완료 박스.
+        //   DB 모드(웹·INF 뷰어, dbData 있음)는 비-헤드리스 유지(render 로 표시). renderOpts.headless 로 강제 override 가능.
+        headless: renderOpts && typeof renderOpts.headless === 'boolean' ? renderOpts.headless : !dbData,
       });
     } finally {
       // Core.compute 호출 직후 로딩 박스 제거 — 이어서 Core 가 OhsorryRender.showProgress 로

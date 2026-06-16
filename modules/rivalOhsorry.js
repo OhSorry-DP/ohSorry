@@ -21,7 +21,7 @@
 // ============================================================
 
 (async function () {
-  const WRAPPER_VERSION = 'v3.3.8';
+  const WRAPPER_VERSION = 'v3.4.0';   // [Phase 2B] eagate 라이벌 실행 = 헤드리스 (headless: !dbData)
   const GIST_BASE = 'https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw';
   const CORE_URL     = GIST_BASE + '/calcOhsorryCore.js';
   const RENDER_URL   = GIST_BASE + '/ohsorryRender.js';
@@ -282,6 +282,9 @@
         wrapperVersion: WRAPPER_VERSION,
         fetchMode: fetchOpts ? fetchOpts.fetchMode : undefined,
         levels: fetchOpts ? fetchOpts.levels : undefined,
+        // [구조개편 Phase 2B] eagate 라이벌 실행(dbData 없음)은 헤드리스 — core 가 uploadResult 직접 호출.
+        //   render no-op swap 불필요(render.show 미호출). 완료 박스는 rival 이라 안 뜸 → 최종 renderRivalList 만 표시.
+        headless: !dbData,
       });
     } finally {
       // Core.compute 호출 직후 로딩 박스 제거 — 이어서 Core 가 OhsorryRender.showProgress 로

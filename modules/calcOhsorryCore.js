@@ -55,9 +55,38 @@ function __ohsorryShowSpinner() {
 function __ohsorryHideSpinner() {
   document.getElementById('__ohsorry_loading_spinner')?.remove();
 }
+// [구조개편 Phase 2B] 헤드리스 업로드 완료 박스 — 추천/렌더 패널 없이 "✅ 업로드 완료 + 식별정보 한 줄 + 오소리웹 버튼".
+//   profile: { djName, iidxId, spRank, dpRank }, style: 'SP' | 'DP'(기본). 단위(rank)는 eagate 段位 한자 문자열('中伝' 등).
+//   별값/피처/점수는 업로드만 하고 상세 표시는 오소리웹으로 위임 (설계서 §5 A+식별정보).
+function __ohsorryShowDone(profile, style) {
+  if (typeof document === 'undefined') return;
+  __ohsorryHideSpinner();
+  document.getElementById('__ohsorry_done')?.remove();
+  const p = profile || {};
+  const dj = (p.djName || '?').replace(/[<>]/g, '');
+  const id = p.iidxId || '';
+  const rankRaw = (style === 'SP' ? p.spRank : p.dpRank) || '';
+  const hasRank = rankRaw && rankRaw !== '---' && rankRaw !== '-';
+  const rankLine = hasRank ? `<span style="font-weight:700">${(style === 'SP' ? 'SP' : 'DP')} ${String(rankRaw).replace(/[<>]/g, '')}</span>` : '';
+  const el = document.createElement('div');
+  el.id = '__ohsorry_done';
+  el.style.cssText = 'position:fixed;top:12px;right:12px;z-index:2147483647;background:#fff;border:1px solid #d7dbe0;border-radius:8px;padding:14px 16px;width:260px;max-width:calc(100vw - 24px);box-sizing:border-box;box-shadow:0 6px 18px rgba(0,0,0,.18);font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color:#212529';
+  el.innerHTML =
+    '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px">' +
+      '<div style="font-size:14px;font-weight:700;color:#1d9e75">✅ 업로드 완료</div>' +
+      '<button id="__ohsorry_done_x" style="background:transparent;border:0;color:#aaa;cursor:pointer;font-size:18px;line-height:1;padding:0 2px">×</button>' +
+    '</div>' +
+    `<div style="font-size:13px;font-weight:600;word-break:break-all">${dj}</div>` +
+    (id ? `<div style="font-size:11px;color:#868e96;font-family:monospace;margin-top:1px">${id}</div>` : '') +
+    (rankLine ? `<div style="font-size:12px;margin-top:4px">${rankLine}</div>` : '') +
+    '<a href="https://ohsorry.iidx.in" target="_blank" rel="noopener" ' +
+      'style="display:block;margin-top:12px;padding:8px 0;text-align:center;background:#1d9e75;color:#fff;font-size:12.5px;font-weight:600;border-radius:6px;text-decoration:none">오소리웹에서 결과 보기 →</a>';
+  document.body.appendChild(el);
+  el.querySelector('#__ohsorry_done_x')?.addEventListener('click', () => el.remove());
+}
 
 window.OhsorryCore = {
-  VERSION: '0.0.368',
+  VERSION: '0.0.395',
   compute: async (opts) => {
   __ohsorryShowSpinner();
   opts = opts || {};
@@ -75,7 +104,7 @@ window.OhsorryCore = {
   // headless — [구조개편 Phase 2A] 결과 패널 렌더 없이 업로드만 (헤드리스 크롤러). render 경유가 아니라
   //   OhsorryDb.uploadResult 직접 호출 → "업로드↔렌더 결합" 분리. 기본 off(동작 불변). 2B 에서 wrapper 가 켠다.
   const headless = !!opts.headless;
-  const CORE_VERSION_SHORT = '0.0.394'.replace(/^0\.0\./, '');  // '394' — SP 모드 본인 업로드 시 users 프로필(dj_name/단위/radar)도 저장(star/ereter_star 기존값 보존)
+  const CORE_VERSION_SHORT = '0.0.395'.replace(/^0\.0\./, '');  // '395' — [Phase 2B] 헤드리스 모드: 추천/렌더 lib fetch·계산 skip + 완료 박스(djName/iidxId/단위). own=박스, rival=조용히 업로드
   const dbVersionString = `${wrapperVersion}-core${CORE_VERSION_SHORT}`;
   dbData = dbData || null;
   // 추천 풀의 chart 마다 c.layoutLabel (= w8.bestLabel) 가 채워지면 이 closure map 에도 동시에 기록.
@@ -386,73 +415,80 @@ window.OhsorryCore = {
   } else {
     console.log('[step2] DB 모드 — ★ 추정 lib (OSR13.5+ / onlyOSR / onlyOSRtoEreter) fetch skip');
   }
-  // ohsorryShelf.js — 추천곡 곡명 클릭 토스트 (renderChartRow) 용. 실패해도 무시 (토스트만 비활성).
-  try {
-    const { data: shelfSrc, source: shelfSrcType } = await loadWithCache(CALC_SHELF_URL, 'ohSorry:libShelf', false);
-    (new Function(shelfSrc))();
-    shelfLib = window.OhSorryShelf;
-    if (shelfLib) {
-      shelfLib.injectStyle();
-      console.log(`[step2] ohsorryShelf.js v${shelfLib.version} 로드 (${shelfSrcType})`);
-    }
-  } catch (e) {
-    console.warn('[step2] ohsorryShelf.js 로드 실패 (무시 가능):', e.message);
-  }
-
-  // 패턴 데이터 + weakness 모듈 fetch (실패 시 추천 가중치 없이 진행, 기존 정렬 fallback)
+  // [구조개편 Phase 2B] 추천/렌더 전용 lib·데이터 — headless(헤드리스 업로더)면 전부 fetch skip.
+  //   업로드(별값/피처/점수)엔 불필요하고, 안 받으면 아래 userVec/recommendCtx 가 null-guard 로 자동 skip.
+  //   shelfLib 은 위(별값 lib 블록)에서 선언됨. computePatternScoreVec(업로드 피처)는 dbConn 이 자체 fetch 라 무관(§6).
   let patternsMap = null, weaknessLib = null, rateRefData = null, featureScoresMap = null, weaknessPopMeanData = null;
   // recommendLib — window.OhsorryRecommend (recommend.js gist 로드 결과). createContext(deps) 호출용.
   let recommendLib = null;
-  try {
-    const { data: pData, source: pSrc } = await loadWithCache(PATTERNS_URL, 'ohSorry:patterns:1112', true);
-    patternsMap = pData;
-    console.log(`[step2] patterns 11·12 ${Object.keys(patternsMap).length}곡 로드 (${pSrc})`);
-  } catch (e) {
-    console.warn('[step2] patterns-all-slim.json 로드 실패 (가중치 비활성):', e.message);
-  }
-  // feature-scores-slim.json — 연습곡 패턴 점수 + top 3 feature 분류용. 실패해도 다른 기능 영향 없음.
-  try {
-    const { data: fsData, source: fsSrc } = await loadWithCache(FEATURE_SCORES_URL, 'ohSorry:featureScores', true);
-    featureScoresMap = fsData;
-    const cnt = (fsData && fsData.scores) ? Object.keys(fsData.scores).length : 0;
-    console.log(`[step2] feature-scores-slim.json ${cnt}곡 로드 (${fsSrc})`);
-  } catch (e) {
-    console.warn('[step2] feature-scores-slim.json 로드 실패 (연습곡 알고리즘 비활성):', e.message);
-  }
-  try {
-    const { data: wSrc, source: wSrcType } = await loadWithCache(CALC_WEAKNESS_URL, 'ohSorry:libWeakness', false);
-    (new Function(wSrc))();
-    weaknessLib = window.OhsorryWeakness;
-    if (!weaknessLib) throw new Error('OhsorryWeakness global 등록 실패');
-    console.log(`[step2] calcWeakness.js 로드 (${wSrcType})`);
-  } catch (e) {
-    console.warn('[step2] calcWeakness.js 로드 실패 (가중치 비활성):', e.message);
-  }
-  // recommend.js — 추천 함수 모듈. 실패 시 옛 내장 함수 fallback (인라인 정의 유지 — 점진적 마이그레이션).
-  try {
-    const { data: recSrc, source: recSrcType } = await loadWithCache(RECOMMEND_URL, 'ohSorry:libRecommend', false);
-    (new Function(recSrc))();
-    recommendLib = window.OhsorryRecommend;
-    if (!recommendLib) throw new Error('OhsorryRecommend global 등록 실패');
-    console.log(`[step2] recommend.js 로드 (${recSrcType}, v${recommendLib.VERSION})`);
-  } catch (e) {
-    console.warn('[step2] recommend.js 로드 실패 (인라인 추천 함수 fallback):', e.message);
-  }
-  // rate-reference — calcWeakness 의 absolute 잔차 분석용. 실패해도 self-relative 모드로 fallback.
-  try {
-    const { data: rrData, source: rrSrc } = await loadWithCache(RATE_REF_URL, 'ohSorry:rateRef', true);
-    rateRefData = rrData;
-    console.log(`[step2] rate-reference-slim.json 로드 (${rrSrc})`);
-  } catch (e) {
-    console.warn('[step2] rate-reference-slim.json 로드 실패 (self-relative fallback):', e.message);
-  }
-  // weakness-popmean — 연습추천 약점 vec 정규화용. 실패해도 raw vec fallback (정규화 skip).
-  try {
-    const { data: pmData, source: pmSrc } = await loadWithCache(WEAKNESS_POPMEAN_URL, 'ohSorry:weaknessPopMean', true);
-    weaknessPopMeanData = pmData;
-    console.log(`[step2] weakness-popmean.json 로드 (${pmSrc})`);
-  } catch (e) {
-    console.warn('[step2] weakness-popmean.json 로드 실패 (raw vec fallback):', e.message);
+  if (headless) {
+    console.log('[step2] headless — 추천/렌더 lib·데이터 fetch skip (shelf/patterns/feature-scores/calcWeakness/recommend/rate-ref/popmean)');
+  } else {
+    // ohsorryShelf.js — 추천곡 곡명 클릭 토스트 (renderChartRow) 용. 실패해도 무시 (토스트만 비활성).
+    try {
+      const { data: shelfSrc, source: shelfSrcType } = await loadWithCache(CALC_SHELF_URL, 'ohSorry:libShelf', false);
+      (new Function(shelfSrc))();
+      shelfLib = window.OhSorryShelf;
+      if (shelfLib) {
+        shelfLib.injectStyle();
+        console.log(`[step2] ohsorryShelf.js v${shelfLib.version} 로드 (${shelfSrcType})`);
+      }
+    } catch (e) {
+      console.warn('[step2] ohsorryShelf.js 로드 실패 (무시 가능):', e.message);
+    }
+
+    // 패턴 데이터 + weakness 모듈 fetch (실패 시 추천 가중치 없이 진행, 기존 정렬 fallback)
+    try {
+      const { data: pData, source: pSrc } = await loadWithCache(PATTERNS_URL, 'ohSorry:patterns:1112', true);
+      patternsMap = pData;
+      console.log(`[step2] patterns 11·12 ${Object.keys(patternsMap).length}곡 로드 (${pSrc})`);
+    } catch (e) {
+      console.warn('[step2] patterns-all-slim.json 로드 실패 (가중치 비활성):', e.message);
+    }
+    // feature-scores-slim.json — 연습곡 패턴 점수 + top 3 feature 분류용. 실패해도 다른 기능 영향 없음.
+    try {
+      const { data: fsData, source: fsSrc } = await loadWithCache(FEATURE_SCORES_URL, 'ohSorry:featureScores', true);
+      featureScoresMap = fsData;
+      const cnt = (fsData && fsData.scores) ? Object.keys(fsData.scores).length : 0;
+      console.log(`[step2] feature-scores-slim.json ${cnt}곡 로드 (${fsSrc})`);
+    } catch (e) {
+      console.warn('[step2] feature-scores-slim.json 로드 실패 (연습곡 알고리즘 비활성):', e.message);
+    }
+    try {
+      const { data: wSrc, source: wSrcType } = await loadWithCache(CALC_WEAKNESS_URL, 'ohSorry:libWeakness', false);
+      (new Function(wSrc))();
+      weaknessLib = window.OhsorryWeakness;
+      if (!weaknessLib) throw new Error('OhsorryWeakness global 등록 실패');
+      console.log(`[step2] calcWeakness.js 로드 (${wSrcType})`);
+    } catch (e) {
+      console.warn('[step2] calcWeakness.js 로드 실패 (가중치 비활성):', e.message);
+    }
+    // recommend.js — 추천 함수 모듈. 실패 시 옛 내장 함수 fallback (인라인 정의 유지 — 점진적 마이그레이션).
+    try {
+      const { data: recSrc, source: recSrcType } = await loadWithCache(RECOMMEND_URL, 'ohSorry:libRecommend', false);
+      (new Function(recSrc))();
+      recommendLib = window.OhsorryRecommend;
+      if (!recommendLib) throw new Error('OhsorryRecommend global 등록 실패');
+      console.log(`[step2] recommend.js 로드 (${recSrcType}, v${recommendLib.VERSION})`);
+    } catch (e) {
+      console.warn('[step2] recommend.js 로드 실패 (인라인 추천 함수 fallback):', e.message);
+    }
+    // rate-reference — calcWeakness 의 absolute 잔차 분석용. 실패해도 self-relative 모드로 fallback.
+    try {
+      const { data: rrData, source: rrSrc } = await loadWithCache(RATE_REF_URL, 'ohSorry:rateRef', true);
+      rateRefData = rrData;
+      console.log(`[step2] rate-reference-slim.json 로드 (${rrSrc})`);
+    } catch (e) {
+      console.warn('[step2] rate-reference-slim.json 로드 실패 (self-relative fallback):', e.message);
+    }
+    // weakness-popmean — 연습추천 약점 vec 정규화용. 실패해도 raw vec fallback (정규화 skip).
+    try {
+      const { data: pmData, source: pmSrc } = await loadWithCache(WEAKNESS_POPMEAN_URL, 'ohSorry:weaknessPopMean', true);
+      weaknessPopMeanData = pmData;
+      console.log(`[step2] weakness-popmean.json 로드 (${pmSrc})`);
+    } catch (e) {
+      console.warn('[step2] weakness-popmean.json 로드 실패 (raw vec fallback):', e.message);
+    }
   }
 
   // -------- 1. 곡명 정규화 + 인덱싱 --------
@@ -1119,7 +1155,11 @@ window.OhsorryCore = {
       spRank: profile ? (profile.spRank || null) : null,
       iidxId: spIidx, spChartCount: spPlayed.length, spUploaded,
     };
-    if (!opts.noRender && window.OhsorryRender && window.OhsorryRender.show) {
+    // [Phase 2B] SP 헤드리스 — 렌더 패널 대신 완료 박스(업로드는 위에서 직접 완료). own 만 표시(rival 은 DP 경로에서 SP 보강).
+    if (headless) {
+      if (!isRival) __ohsorryShowDone(profile, 'SP');
+      __ohsorryHideSpinner();
+    } else if (!opts.noRender && window.OhsorryRender && window.OhsorryRender.show) {
       await window.OhsorryRender.show(spResult, {});
     }
     return spResult;
@@ -1497,21 +1537,24 @@ window.OhsorryCore = {
     layoutMap: __pdLayoutMap,   // ohSorryWeb PlayData 탭 — (norm(title) + '|' + diff) → bestLabel
   };
 
-  // [Phase 2A] 헤드리스 — 결과 패널 없이 업로드만. render(웹 정본 gist) 의 내부 upsert 트리거에 의존하지 않고
+  // [Phase 2A/2B] 헤드리스 — 결과 패널 없이 업로드만. render(웹 정본 gist) 의 내부 upsert 트리거에 의존하지 않고
   //   OhsorryDb.uploadResult 를 직접 호출 (업로드↔렌더 분리). DB 모드(다른 유저 열람)는 uploadResult 가 자동 skip.
-  //   풀 모드와 상호배타 → 이중 업로드 없음. 기본 off 라 아래 풀 모드 경로는 동작 불변.
+  //   풀 모드와 상호배타 → 이중 업로드 없음. 2B: own 은 완료 박스(§5 A+식별정보), rival 은 console.log 만
+  //   (배치 시 per-rival 박스 깜빡임 방지 → wrapper 의 renderRivalList 가 최종 목록 표시).
   if (headless) {
+    let uploadedOk = false;
     if (window.OhsorryDb && window.OhsorryDb.uploadResult) {
       try {
         const up = await window.OhsorryDb.uploadResult(result, { dbData });
         if (up && up.skipped) console.log(`[오소리] 헤드리스 — 업로드 skip (${up.reason})`);
-        else console.log('[오소리] 업로드 완료 — 결과는 https://ohsorry.iidx.in 에서 확인하세요.');
+        else { uploadedOk = true; console.log('[오소리] 업로드 완료 — 결과는 https://ohsorry.iidx.in 에서 확인하세요.'); }
       } catch (e) {
         console.warn('[OhsorryCore] headless uploadResult 예외:', e && e.message);
       }
     } else {
       console.warn('[OhsorryCore] headless: OhsorryDb.uploadResult 없음 — 업로드 못 함');
     }
+    if (uploadedOk && !isRival) __ohsorryShowDone(profile, 'DP');
   } else if (!noRender && window.OhsorryRender && window.OhsorryRender.show) {
     // ohsorryRender 모듈은 wrapper 가 미리 fetch 해서 window.OhsorryRender 로 노출했다고 가정.
     await window.OhsorryRender.show(result, { statsOnly });
