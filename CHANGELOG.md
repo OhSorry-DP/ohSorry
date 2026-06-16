@@ -8,7 +8,8 @@ ohSorry 의 변경 이력입니다. 사용방법은 [README.md](README.md) 를 �
 - **여러 명 입력 → 완료 리스트**: 모달 IIDX input 에 여러 ID(공백·쉼표 구분) 입력 시 순차 처리 후 한 명당 **한 줄(가로: DJ명 · IIDX ID · 단위 · 이동버튼)** 리스트로 완료 박스 표시(core 0.0.406, 박스 폭 min(440px)). `showDoneList(entries)` 추가, compute 는 `opts.suppressDone` 면 단일 박스 생략하고 `{ profile, style }` 반환 → wrapper 가 모아서 리스트로.
 - [ohsorry.js](ohsorry.js) wrapper v3.5.2: input 파싱(`/[\s,]+/` split + 중복 제거) → 본인 ID 면 own, 그 외는 라이벌 토큰 검색 → 각각 `compute({ suppressDone:true })` → `Core.showDoneList`. 여러 명 중 일부 실패(라이벌 미발견 등)는 건너뛰고 계속.
 - **SP 완료 카드 = SP 리센트**: core 0.0.405 — 완료 박스 카드 버튼이 SP 모드면 `#user@{ID}#ps@SP#tab@recent`(SP 리센트) 로, DP 는 기본. 단일/리스트 공용 헬퍼 `__ohsorryCardUrl(idNorm, style)`.
-- 검증: `node --check` 2파일 OK. **크롤·라이벌·여러 명 동작은 eagate 테스트 필요.** gist push 미실행.
+- **프로덕션 배포(2026-06-16)**: 프로덕션 gist(`c3da608…`)에 5개 code 모듈(ohsorry.js v3.5.2 / calcOhsorryCore.js 0.0.407 / eagateFetch.js v0.0.3 / normTitle.js / dbConn.js) 푸시 — 구조개편 2C~여러명리스트 전부 반영. CDN 전파 확인. 테스트 gist(af731)·로컬 `.osr-test` 정리.
+- **`rivalOhsorry.js` = redirect 로 전환**(삭제 아님): 라이벌은 메인 IIDX input 으로 통합됐지만, 옛 라이벌 북마크릿 URL 호환 위해 gist `rivalOhsorry.js` 를 `ohsorry.js` fetch+eval redirect 로 교체(2-calc-score.js 와 같은 패턴). 옛 북마크릿이 메인 흐름으로 진입 → 모달에서 라이벌 ID 입력 시 동작.
 
 
 ### 2026-06-16 — 프로필-먼저 모달 + IIDX input 라이벌 통합 + prefetch (라이벌 북마크릿 제거)
