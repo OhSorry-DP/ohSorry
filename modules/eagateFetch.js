@@ -1,4 +1,4 @@
-// eagateFetch.js — eagate djdata 시리즈 페이지 fetch 모듈 (v0.0.2)
+// eagateFetch.js — eagate djdata 시리즈 페이지 fetch 모듈 (v0.0.3)
 //
 // p.eagate.573.jp 의 본인 / 라이벌 점수 데이터를 series.html 시리즈 폴더 단위로 수집.
 //   [2026-06-16] level(difficulty.html) 모드 폐기 — series 단일. 시리즈 폴더가 seriesNo 를 주므로
@@ -9,7 +9,6 @@
 //     seriesList: [32, 31, ...],         // 수집할 eamuse list 값(0~32) 배열. 생략 시 전체 33개 (series_no = list+1)
 //     series: '33',                      // 시즌 (기본 '33')
 //     style: '1',                        // '0'=SP / '1'=DP (기본 '1')
-//     disp: '1',                         // (기본 '1')
 //     isRival: false,                    // 라이벌 페이지 여부 (boolean)
 //     rivalToken: null,                  // 라이벌 토큰 (rival URL 파라미터)
 //     updateProgress: (text, pct) => {}, // 진행도 콜백 (생략 가능)
@@ -21,7 +20,7 @@
 (function () {
   'use strict';
 
-  const VERSION = 'v0.0.2';
+  const VERSION = 'v0.0.3';
 
   // ---- 상수 -----------------------------------------------------------
   // 사람이 페이지 넘기는 속도와 비슷하게: 0.8~1.2초 사이 랜덤 대기 (평균 1초)
@@ -64,26 +63,14 @@
           if (dm) djLevel = dm[1];
         }
         const celText = cel.textContent || '';
-        const sm = celText.match(/(\d+)\((\d+)\/(\d+)\)/);
-        let exScore = 0, pgreat = 0, great = 0;
-        if (sm) {
-          exScore = parseInt(sm[1], 10);
-          pgreat = parseInt(sm[2], 10);
-          great = parseInt(sm[3], 10);
-        } else {
-          const m2 = celText.match(/(\d+)/);
-          if (m2) exScore = parseInt(m2[1], 10);
-        }
-        const missMatch = celText.match(/(?:BP|MISS|BAD)[:\s]*(\d+)/i);
-        const missCount = missMatch ? parseInt(missMatch[1], 10) : null;
+        // EX 점수만 사용 — "1234(986/420)" 또는 단순 숫자. pgreat/great/missCount 는 업로드에 안 써서 미추출.
+        const sm = celText.match(/(\d+)\((\d+)\/(\d+)\)/) || celText.match(/(\d+)/);
+        const exScore = sm ? parseInt(sm[1], 10) : 0;
         out.charts.push({
           title,
           diff: DIFF_NAMES[idx],
           djLevel,
           exScore,
-          pgreat,
-          great,
-          missCount,
           lampNum,
           lamp: LAMP_NAMES[lampNum] || null,
           gameLevel: null,  // 시리즈 페이지엔 레벨 정보 없음 — textage 로 역추정
@@ -174,7 +161,6 @@
     const c = ctx || {};
     const SERIES = c.series || '33';
     const style = c.style || '1';
-    const disp = c.disp || '1';
     const isRival = !!c.isRival;
     const rivalToken = c.rivalToken || null;
     const updateProgress = typeof c.updateProgress === 'function' ? c.updateProgress : function () {};
@@ -188,7 +174,7 @@
     const SERIES_URL = `https://p.eagate.573.jp/game/2dx/${SERIES}/djdata/music/series.html`;
     console.log(`[eagateFetch] 시리즈 ${seriesList.length}개 / ${style === '1' ? 'DP' : 'SP'}${isRival ? ' (라이벌)' : ''} 시작`);
 
-    const ictx = { SERIES_URL, style, disp, isRival, rivalToken, updateProgress, alertFn, seriesList };
+    const ictx = { SERIES_URL, style, isRival, rivalToken, updateProgress, alertFn, seriesList };
     const state = { charts: [], pageCount: 0 };
     const ok = await collectBySeries(ictx, state);
     return { ok, charts: state.charts, pageCount: state.pageCount, fetchMode: 'series' };

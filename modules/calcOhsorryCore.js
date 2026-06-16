@@ -5,7 +5,7 @@
 //   웹·INF 는 코어를 안 쓰고(코어-free, ohsorryRender 직접 호출), 코어는 eagate 업로더에서만 실행된다.
 //
 // 동작:
-//   1. Gist 에서 ereter / zasa / textage / ohSorryRating JSON + 별값 lib(OSR13.5+/onlyOSR/onlyOSRtoEreter) fetch
+//   1. Gist 에서 ereter / textage / ohSorryRating JSON + 별값 lib(OSR13.5+/onlyOSR/onlyOSRtoEreter) fetch
 //   2. eagateFetch 모듈로 series.html 시리즈 폴더 크롤 (클리어램프 + EX점수 + 차트). gameLevel 은 textage 역추정.
 //   3. 별값(★) 추정 = onlyOSRtoEreter (native onlyOSR → ereter★, OSR13.5 tier)
 //   4. status.html 로 프로필(DJ명 / IIDX ID / SP·DP 단위 / 노트레이더) 추출
@@ -73,7 +73,7 @@ function __ohsorryShowDone(profile, style) {
 }
 
 window.OhsorryCore = {
-  VERSION: '0.0.399',
+  VERSION: '0.0.401',
   compute: async (opts) => {
   __ohsorryShowSpinner();
   opts = opts || {};
@@ -81,7 +81,7 @@ window.OhsorryCore = {
   const isRival = mode === 'rival';
   const rivalToken = opts.rivalToken || null;
   const wrapperVersion = opts.wrapperVersion || 'unknown';
-  const CORE_VERSION_SHORT = '0.0.399'.replace(/^0\.0\./, '');  // '399' — series 단일화 + seriesList 선택 + SP/DP gameLevel 역추정 + 완료박스 내 카드 딥링크(iidx.in)
+  const CORE_VERSION_SHORT = '0.0.401'.replace(/^0\.0\./, '');  // '401' — series 단일화 + seriesList 선택 + SP/DP gameLevel 역추정 + 완료박스 내 카드 딥링크(iidx.in)
   const dbVersionString = `${wrapperVersion}-core${CORE_VERSION_SHORT}`;
   // -------- 0. ereter 데이터 로드 (Gist 에서 자동 fetch) --------
   // ereter.net 데이터는 Gist 에 ereter-data.json 으로 올려둔 걸 가져옵니다.
@@ -90,7 +90,7 @@ window.OhsorryCore = {
   // 한 번 받으면 24시간 동안 localStorage 에 캐시됨
   // 강제로 새로 받고 싶으면: localStorage.removeItem('ereter_dp_diff_v4'); 후 재실행
   const ERETER_DATA_URL = 'https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw/ereter-data.json';
-  // textage 채보 메타 — 채보별 총 노트 수 (notes.DN/DH/DA/DX) + 채보 levels. series 모드 gameLevel 역추정 + noteCount 보강.
+  // textage 채보 메타 — 채보별 levels(SP/DP). series 페이지엔 게임레벨이 없어 gameLevel 역추정에 사용(4.5).
   const TEXTAGE_DATA_URL = 'https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw/textage-meta.json';
   const CACHE_KEY = 'ereter_dp_diff_v4';
   const CACHE_TTL_MS = 24 * 60 * 60 * 1000;  // 24시간
@@ -199,7 +199,7 @@ window.OhsorryCore = {
   window.__ohsorryLibCache = window.__ohsorryLibCache || {};
 
   // -------- 0.55. textage 채보 메타 fetch (선택, 실패해도 무시) --------
-  // 채보별 총 노트 수 → charts 의 noteCount 보강 + missCount 계산 (noteCount - pgreat - great).
+  // series 페이지엔 게임레벨이 없어 textage levels 로 gameLevel 역추정(4.5)에 사용.
   //   캐시 형식 호환 — ohSorryWeb 일부 경로가 raw 전체 (`{generatedAt, count, songs}`) 를 set
   //   하는 케이스 보완. `.songs` 가 있으면 그것만 사용, 없으면 자체 (= 곡 id → entry Map).
   let textageSongs = null;
@@ -331,7 +331,6 @@ window.OhsorryCore = {
   const SERIES = '33';            // 현재 시즌 (Sparkle Shower)
   const isSpMode = opts.playStyle === 'SP';   // SP 모드 — style=0 크롤 + ★분석 스킵(경량)
   const style = isSpMode ? '0' : '1';         // 0=SP / 1=DP
-  const disp = '1';
   const seriesList = (Array.isArray(opts.seriesList) && opts.seriesList.length > 0)
     ? [...new Set(opts.seriesList.map(Number).filter((n) => n >= 0 && n <= 32))].sort((a, b) => a - b)
     : Array.from({ length: 33 }, (_, i) => i);   // 전체 33개 (기본)
@@ -347,9 +346,7 @@ window.OhsorryCore = {
     return;
   }
 
-  // -------- 3. eagate 페이지 파싱은 modules/eagateFetch.js (v0.0.1+) 로 분리 --------
-  //   parseDoc (difficulty.html level 모드) + parseSeriesDoc (series.html series 모드)
-  //   둘 다 eagateFetch 모듈 안의 private 함수. core 는 결과 차트 배열만 받음.
+  // -------- 3. eagate series 페이지 파싱은 modules/eagateFetch.js 로 분리 (core 는 차트 배열만 받음) --------
 
   // -------- 4. allCharts / pageCount — eagateFetch 결과 보관 --------
   let allCharts = [];
@@ -390,7 +387,7 @@ window.OhsorryCore = {
   const r = await window.OhsorryEagateFetch.collectCharts({
     seriesList,
     series: SERIES,
-    style, disp,
+    style,
     isRival, rivalToken,
     updateProgress,
   });
@@ -470,7 +467,6 @@ window.OhsorryCore = {
   // ----- 별값 (★) — v3.4.0: onlyOSR(전체곡 native 50%) + onlyOSRtoEreter(ereter★, OSR13.5 tier) -----
   //   onlyOSRtoEreter 가 산출. 실패/미로드 시 star/native_star = null → 업로드에서 기존 supabase 값 보존 + console.warn.
   let starEstimate = null;
-  let starRaw = null;     // raw_s 는 현재 산출 안 함(업로드 시 null) — 컬럼 호환 유지
   let nativeStar = null;
   if (!fullCrawl) {
     console.log('[step2] 일부 시리즈만 크롤 — 별값(★) 계산 skip (전체 차트 필요, 기존 supabase 값 보존)');
@@ -502,15 +498,7 @@ window.OhsorryCore = {
       const html = await res.text();
       const doc = new DOMParser().parseFromString(html, 'text/html');
       profile = {};
-      // 쿠프로 이미지 (절대 URL 로 변환)
-      const qproImg = doc.querySelector('div.qpro-img img');
-      if (qproImg) {
-        let src = qproImg.getAttribute('src') || '';
-        if (src.startsWith('/')) src = 'https://p.eagate.573.jp' + src;
-        else if (!src.startsWith('http')) src = new URL(src, statusUrl).href;
-        profile.qproImg = src;
-      }
-      // DJ 프로필 테이블
+      // DJ 프로필 테이블 — 업로드에 쓰는 DJ NAME / IIDX ID 만 추출.
       const profileTable = doc.querySelector('div.dj-profile table');
       if (profileTable) {
         profileTable.querySelectorAll('tr').forEach(tr => {
@@ -518,11 +506,8 @@ window.OhsorryCore = {
           if (tds.length === 2) {
             const key = tds[0].textContent.trim();
             const val = tds[1].textContent.trim();
-            if (key === 'DJ NAME')        profile.djName = val;
-            else if (key === '所属エリア')  profile.area = val;
-            else if (key === 'IIDX ID')    profile.iidxId = val;
-            else if (key === '所持LIME')   profile.lime = val;
-            else if (key === 'プレー回数') profile.playCount = val;
+            if (key === 'DJ NAME')      profile.djName = val;
+            else if (key === 'IIDX ID') profile.iidxId = val;
           }
         });
       }
@@ -681,7 +666,7 @@ window.OhsorryCore = {
       star_estimate: starEstimate != null ? Number(starEstimate.toFixed(4)) : (preservedStar != null ? Number(preservedStar) : null),  // 부분 크롤이면 기존값 보존
       native_star: nativeStar != null ? Number(nativeStar.toFixed(4)) : null,  // v3.4.0: onlyOSR 전체곡 native (null → COALESCE 보존)
       ereter_star: eraterTrueStar != null ? Number(eraterTrueStar) : null,
-      raw_s: starRaw != null ? Number(starRaw.toFixed(4)) : null,
+      raw_s: null,                  // 현재 미산출 (컬럼 호환). native_star/star_estimate 가 별값 정본.
       version: dbVersionString,
       sp_rank: profile.spRank || null,
       dp_rank: profile.dpRank || null,
@@ -750,7 +735,7 @@ window.OhsorryCore = {
     try {
       const spR = await window.OhsorryEagateFetch.collectCharts({
         seriesList, series: SERIES,
-        style: '0', disp, isRival: true, rivalToken,
+        style: '0', isRival: true, rivalToken,
         updateProgress: (msg) => console.log('[rival SP]', msg),
       });
       if (spR && spR.ok) {
