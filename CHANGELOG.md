@@ -2,6 +2,13 @@
 
 ohSorry 의 변경 이력입니다. 사용방법은 [README.md](README.md) 를 참고하세요.
 
+### 2026-06-16 — 루트 README 다이어트 정합화 (2C 이후 누락분)
+- 직전 "문서 전수조사"가 `docs/*`·`../docs/ohSorry.md`·`package.json` 만 갱신하고 **루트 [README.md](README.md) 는 빠뜨린** 것을 보완.
+- 도구 정체성을 "★ 추정 + 추천곡 + 통계를 **보여주는** 계산기" → "크롤→별값→**업로드** 전용 수집/업로더"로 재정의. 상단에 구조개편 2C 다이어트(1660→약 800줄, 인페이지 렌더 폐지) 안내 추가.
+- **사용법 진입점** `2-calc-score.js` → `ohsorry.js` 로 교체(옛 URL 은 redirect 유지 명시), 라이벌=모달 IIDX input 통합 반영. "약 20~30초 후 결과 표시" → 모달(시리즈+DP/SP+IIDX)·prefetch·완료 박스(오소리웹 카드 버튼)·여러 명 리스트 흐름으로 교체.
+- **이관된 §추천곡 알고리즘·§배치추천·§상세통계** 상세 프로즈(약 180줄)를 "표시는 오소리웹 담당" 포인터로 축약 — [ohSorryWeb/docs/features.md](../ohSorryWeb/docs/features.md)·[ohSorryRating README](../ohSorryRating/README.md) 링크. §★값 추정 원리는 core 가 실제 하는 유일 계산이라 `onlyOSRtoEreter.inferEreter` 중심으로 정리·유지. 트러블슈팅도 렌더 전제 항목을 업로더 전제로 갱신.
+- 코드 변경 없음(문서만).
+
 ### 2026-06-16 — 문서 전수조사: 2C 이후 docs 동기화
 - `docs/*`(README/architecture/modules/algorithms/sp/data-pipeline) + 상위 `../docs/ohSorry.md` + `package.json` description 을 구조개편 2C~여러명리스트 기준으로 갱신.
 - 정정: 버전(wrapper v3.5.2/core 0.0.407/eagate v0.0.3/dbConn 0.0.411), 로딩체인(render 제거·모달/프로필/prefetch), 모드(dbData/statsOnly/noRender/level 제거 → series 단일+playStyle), 별값(onlyOSRtoEreter 단독), 추천/약점/렌더는 "이관됨" 포인터, rivalOhsorry=redirect, SP own·rival 토글 통일.
