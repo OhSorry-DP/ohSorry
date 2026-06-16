@@ -12,7 +12,7 @@
 // ============================================================
 
 (async function () {
-  const WRAPPER_VERSION = 'v3.5.0';   // [구조개편 2C] 프로필-먼저 모달 + IIDX input 라이벌 통합 + prefetch
+  const WRAPPER_VERSION = 'v3.5.1';   // [구조개편 2C] 프로필-먼저 모달 + IIDX input 라이벌 통합 + prefetch
   const GIST_BASE = 'https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw';
   const CORE_URL     = GIST_BASE + '/calcOhsorryCore.js';
   const DB_URL       = GIST_BASE + '/dbConn.js';
@@ -20,7 +20,8 @@
   const EAGATE_URL   = GIST_BASE + '/eagateFetch.js';
 
   async function loadModule(url, globalName) {
-    if (window[globalName]) return window[globalName];
+    // 매 실행 재fetch+eval — 버전 갱신 시 stale window.<globalName> 으로 옛 코드가 도는 것 방지.
+    //   (core 는 최상위 var 라 재eval 안전. 데이터 캐시 __ohsorryEreterCache/__ohsorryLibCache 는 별도 유지.)
     const r = await fetch(url + '?t=' + Date.now(), { cache: 'no-store' });
     if (!r.ok) throw new Error(`${globalName} 모듈 로드 실패: HTTP ${r.status}`);
     const text = await r.text();

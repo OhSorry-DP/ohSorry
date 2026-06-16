@@ -76,8 +76,9 @@ function __ohsorryShowDone(profile, style) {
 // 공유 헬퍼 — compute / prefetch / fetchProfile / fetchRivalToken 가 함께 쓰는 데이터 로딩·파싱.
 //   window 캐시(__ohsorryEreterCache / __ohsorryLibCache)로 idempotent — 두 번째 호출은 즉시 반환.
 // ============================================================
-const __GIST_RAW = 'https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw';
-const __URLS = {
+// var (const 아님) — wrapper 가 모듈을 매 실행 재eval 하므로 최상위 재선언 SyntaxError 방지.
+var __GIST_RAW = 'https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw';
+var __URLS = {
   ereter:    __GIST_RAW + '/ereter-data.json',
   textage:   __GIST_RAW + '/textage-meta.json',
   rating:    __GIST_RAW + '/ohSorryRating.json',
@@ -85,8 +86,8 @@ const __URLS = {
   onlyOSR:   __GIST_RAW + '/onlyOSR.js',
   onlyOSR2e: __GIST_RAW + '/onlyOSRtoEreter.js',
 };
-const __ERETER_CACHE_KEY = 'ereter_dp_diff_v4';
-const __EAGATE = 'https://p.eagate.573.jp';
+var __ERETER_CACHE_KEY = 'ereter_dp_diff_v4';
+var __EAGATE = 'https://p.eagate.573.jp';
 
 // ereter-data.json 형식 정규화 (배열 / {charts} / {charts,players}).
 function __normalizeEreterPayload(raw) {
@@ -287,7 +288,7 @@ async function __fetchRivalToken(iidxId) {
 }
 
 window.OhsorryCore = {
-  VERSION: '0.0.402',
+  VERSION: '0.0.403',
   prefetch: __loadCoreData,        // 모달 떠 있는 동안 미리 호출 → compute 캐시 hit (로딩 단축)
   fetchProfile: __fetchProfile,    // wrapper 가 모달 상단 프로필 채울 때
   fetchRivalToken: __fetchRivalToken,  // IIDX ID → 라이벌 토큰 (라이벌 모드 판정)
@@ -298,7 +299,7 @@ window.OhsorryCore = {
   const isRival = mode === 'rival';
   const rivalToken = opts.rivalToken || null;
   const wrapperVersion = opts.wrapperVersion || 'unknown';
-  const CORE_VERSION_SHORT = '0.0.402'.replace(/^0\.0\./, '');  // '402' — 데이터 로딩/프로필/라이벌토큰 함수 분리(prefetch·fetchProfile·fetchRivalToken) + 라이벌 통합
+  const CORE_VERSION_SHORT = '0.0.403'.replace(/^0\.0\./, '');  // '403' — 데이터 로딩/프로필/라이벌토큰 함수 분리(prefetch·fetchProfile·fetchRivalToken) + 라이벌 통합
   const dbVersionString = `${wrapperVersion}-core${CORE_VERSION_SHORT}`;
 
   // -------- 0. 데이터 로드 (ereter/textage/ohSorryRating + 별값 lib) — 모듈 공유 __loadCoreData --------
