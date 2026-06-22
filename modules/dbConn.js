@@ -617,13 +617,16 @@ window.OhsorryDb = (function () {
 
     const DIFF_INT_TO_FEATURE_KEY = { 1: 'DP_NOR', 2: 'DP_HYP', 3: 'DP_ANO', 4: 'DP_LEG' };
     const DIFF_INT_TO_NOTES_KEY   = { 1: 'DN', 2: 'DH', 3: 'DA', 4: 'DX' };
-    // 28 dim — mirror-invariant 10 + mirror 9 × L/R 18. user_ohsorry_radars 의 모든 컬럼.
-    //   migration_mirror_features.sql (2026-05-27) 에서 18 dim 컬럼 추가됨 — upsert_user_feature_score 도 29 인자.
+    // 36 dim — mirror-invariant 10 + mirror 11 × L/R 22 + chart-level invariant 4(HSTAIR).
+    //   migration_ohsorry_36feat.sql 에서 8 dim(겹계단/계마/양손계단) 추가 — upsert_user_feature_score 37 인자.
+    //   ⚠️ 신규 8값은 gist feature-scores-slim.json 이 36키로 배포된 뒤에야 산출됨(28키면 0).
     const FEATS = [
       'NOTES', 'CHORD', 'PEAK', 'CHARGE', 'SCRATCH', 'SOF-LAN', 'PHRASE', 'JACK', 'TRILL', 'RAND',
       'STAIR_UP_L', 'STAIR_UP_R', 'STAIR_DN_L', 'STAIR_DN_R',
       'K1_L', 'K1_R', 'K2_L', 'K2_R', 'K3_L', 'K3_R',
       'K4_L', 'K4_R', 'K5_L', 'K5_R', 'K6_L', 'K6_R', 'K7_L', 'K7_R',
+      'DOUBLE_STAIR_L', 'DOUBLE_STAIR_R', 'KEIMA_L', 'KEIMA_R',
+      'HSTAIR_ONEHAND', 'HSTAIR_SYNC', 'HSTAIR_SAMESHAPE', 'HSTAIR_DIFFSHAPE',
     ];
 
     const pointsByFeat = {};
@@ -664,10 +667,19 @@ window.OhsorryDb = (function () {
   }
 
   // 오소리 피쳐 스코어 upsert — user_ohsorry_radars (play_style=1, DP).
-  // RPC 시그니처: migration_mirror_features.sql 의 29 인자 (text + 28 numeric).
-  //   기존 10 dim (mirror-invariant) + 신규 18 dim (mirror 9 × L/R) — 모두 보내야 PostgREST 가 매칭.
+  // RPC 시그니처: migration_ohsorry_36feat.sql 의 37 인자 (text + 36 numeric).
+  //   기존 28 dim 뒤에 신규 8 dim(겹계단/계마/양손계단) append. 신규 인자는 DEFAULT NULL 라 28키 gist 에선 0/null 전송.
   async function callUpsertFeatureScore(iidxId, vec) {
     const numOrNull = (v) => typeof v === 'number' && isFinite(v) ? v : null;
+    // payload 직전 신규 8값 로그 (검증용 — window.__OHSORRY_DEBUG_FEAT 켜면 출력)
+    if (typeof window !== 'undefined' && window.__OHSORRY_DEBUG_FEAT) {
+      console.log('[upsert 신규8]', {
+        DOUBLE_STAIR_L: vec.DOUBLE_STAIR_L, DOUBLE_STAIR_R: vec.DOUBLE_STAIR_R,
+        KEIMA_L: vec.KEIMA_L, KEIMA_R: vec.KEIMA_R,
+        HSTAIR_ONEHAND: vec.HSTAIR_ONEHAND, HSTAIR_SYNC: vec.HSTAIR_SYNC,
+        HSTAIR_SAMESHAPE: vec.HSTAIR_SAMESHAPE, HSTAIR_DIFFSHAPE: vec.HSTAIR_DIFFSHAPE,
+      });
+    }
     await callRpc('upsert_user_feature_score', {
       p_iidx_id:    iidxId,
       p_os_notes:   numOrNull(vec.NOTES),
@@ -691,6 +703,11 @@ window.OhsorryDb = (function () {
       p_os_k5_l: numOrNull(vec.K5_L), p_os_k5_r: numOrNull(vec.K5_R),
       p_os_k6_l: numOrNull(vec.K6_L), p_os_k6_r: numOrNull(vec.K6_R),
       p_os_k7_l: numOrNull(vec.K7_L), p_os_k7_r: numOrNull(vec.K7_R),
+      // 신규 8
+      p_os_double_stair_l: numOrNull(vec.DOUBLE_STAIR_L), p_os_double_stair_r: numOrNull(vec.DOUBLE_STAIR_R),
+      p_os_keima_l: numOrNull(vec.KEIMA_L), p_os_keima_r: numOrNull(vec.KEIMA_R),
+      p_os_hstair_onehand: numOrNull(vec.HSTAIR_ONEHAND), p_os_hstair_sync: numOrNull(vec.HSTAIR_SYNC),
+      p_os_hstair_sameshape: numOrNull(vec.HSTAIR_SAMESHAPE), p_os_hstair_diffshape: numOrNull(vec.HSTAIR_DIFFSHAPE),
     });
   }
 

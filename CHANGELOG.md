@@ -2,6 +2,9 @@
 
 ohSorry 의 변경 이력입니다. 사용방법은 [README.md](README.md) 를 참고하세요.
 
+### 2026-06-23 — user_ohsorry_radars 36피처 업로드
+- `dbConn`: `computePatternScoreVec` FEATS 28→36 + `callUpsertFeatureScore` 37-arg. 기존 28 뒤에 겹계단/계마/양손계단 8 컬럼 append(`p_os_double_stair_l/r`·`p_os_keima_l/r`·`p_os_hstair_onehand/sync/sameshape/diffshape`). gist `feature-scores-slim` 36키 + supabase 37-arg RPC. 기존 28 인자/계산 불변.
+
 ### 2026-06-16 — 루트 README 다이어트 정합화 (2C 이후 누락분)
 - 직전 "문서 전수조사"가 `docs/*`·`../docs/ohSorry.md`·`package.json` 만 갱신하고 **루트 [README.md](README.md) 는 빠뜨린** 것을 보완.
 - 도구 정체성을 "★ 추정 + 추천곡 + 통계를 **보여주는** 계산기" → "크롤→별값→**업로드** 전용 수집/업로더"로 재정의. 상단에 구조개편 2C 다이어트(1660→약 800줄, 인페이지 렌더 폐지) 안내 추가.
