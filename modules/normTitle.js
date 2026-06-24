@@ -49,6 +49,8 @@
     'CROSSROAD ～Left Story～': 'CROSSROAD',  // eagate 부제 표기 → songs 'CROSSROAD' (같은 곡)
     'Space Battleship S4TO': 'Space Battleship S4TØ',  // eagate '일반 O' → textage 'Ø' (U+00D8) — 'Ø' 가 norm 에서 '0' 으로 바뀌어 'O' 와 매칭 실패
     'メテオラ-meteor-': 'メテオラ -meteor-',  // eagate Reflux 공백 없는 표기 → textage 공백 있는 표기 (안전망 — norm 공백제거가 이미 처리하지만 cache stale 케이스 대응)
+    'Lagrangian Point ?': 'Lagrangian Point Ø',  // eagate/Reflux 가 'Ø'(U+00D8)를 '?'로 인코딩 깨짐 → textage 'Ø' 로 복원 (norm 에서 Ø→0)
+    'Lagrangian Point 0': 'Lagrangian Point Ø',  // 일부 소스가 'Ø'를 숫자 '0' 으로 표기 → textage 'Ø' 로 통일 (norm 결과는 동일하나 명시)
   };
 
   // 동명이곡 (norm 후 같은 키, raw 만 다른) → 강제 norm 키 분리.

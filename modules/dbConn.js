@@ -1,4 +1,9 @@
-// dbConn.js — 오소리 DB 통신 모듈 (v0.0.408)
+// dbConn.js — 오소리 DB 통신 모듈 (v0.0.412)
+// v0.0.412 — songs 중복 재발방지: 옛 NULL행 입양 (maybeAdopt).
+//            textage-meta 에 txId 가 생겼는데 songMap 후보가 NULL행 1개뿐이면 ensure_song_adopt RPC 로
+//            textage행에 흡수 (중복 textage행 생성/잔존 방지). 조건: NULL행 정확히 1개 + 동명이곡(≥2) 아님
+//            + series_no 동일 + ≠99. RPC 미적용/실패 시 graceful (기존 NULL행 유지, 동작 불변).
+//            songMap 후보에 textage_song_id/series_no 적재. (전제: ohSorryAdmin sql/06·07)
 // v0.0.408 — upsertUserChartScores 가 row 의 play_style(0=SP/1=DP, 기본 1) 통과 + dedup PK 에 play_style 포함.
 //            (scores 04 마이그레이션 대응. SP 행 적재는 calcOhsorryCore 의 SP 크롤 패스에서 play_style:0 으로 전달.)
 //
@@ -143,7 +148,7 @@ window.OhsorryDb = (function () {
     let totalFetched = 0;
     while (true) {
       const url = SUPABASE_URL +
-        `/rest/v1/songs?select=song_id,title,ac,legen&order=song_id.asc&limit=${pageSize}&offset=${offset}`;
+        `/rest/v1/songs?select=song_id,textage_song_id,title,series_no,ac,legen&order=song_id.asc&limit=${pageSize}&offset=${offset}`;
       const res = await fetch(url, { headers: HEADERS });
       if (!res.ok) throw new Error(`songs fetch 실패 HTTP ${res.status}`);
       const rows = await res.json();
@@ -151,7 +156,8 @@ window.OhsorryDb = (function () {
         if (!r.title) continue;
         const k = normTitle(r.title);
         if (!k) continue;
-        const entry = { song_id: r.song_id, title: r.title, ac: r.ac, legen: r.legen };
+        // textage_song_id / series_no 는 입양(maybeAdopt) 판정용.
+        const entry = { song_id: r.song_id, textage_song_id: r.textage_song_id, title: r.title, series_no: r.series_no, ac: r.ac, legen: r.legen };
         if (!byNorm.has(k)) byNorm.set(k, []);
         byNorm.get(k).push(entry);
         // Ø/ø 곡은 eagate 표기가 일관되지 않음 — 'O' 알파벳 alias 도 등록
@@ -194,6 +200,61 @@ window.OhsorryDb = (function () {
     }
     textageByTitle = m;
     return textageByTitle;
+  }
+
+  // textage-meta 원본 (series_no 등 lookup 용)
+  function getTextageMeta() {
+    return (typeof window !== 'undefined' && window.__ohsorryLibCache && window.__ohsorryLibCache.textage) || null;
+  }
+
+  // ── 입양 (재발 방지 B-1) ─────────────────────────────────────
+  // textage-meta 에 txId 가 생겼는데 songMap 후보가 "옛 NULL행 1개" 뿐이면, 그 NULL행을
+  //   textage행으로 흡수(ensure_song_adopt RPC) → 중복 textage행 생성/잔존 방지.
+  // 조건(자동): txId 있음 + NULL행 후보 정확히 1개 + 같은 norm 의 다른 textage행이 동명이곡(≥2)이 아님
+  //   + series_no 동일(textage-meta 기준) + series_no != 99.
+  // 그 외(NULL≥2 / 동명이곡 / series 불일치 / series 99)는 자동 입양 금지 + 로그만.
+  // RPC 미적용/실패 시 graceful — 기존 NULL행 그대로 사용 (동작 불변), 재시도 폭주 방지로 마킹.
+  const adoptedNorms = new Set();
+  async function maybeAdopt(songMap, normKey, candidates) {
+    if (!normKey || !candidates || adoptedNorms.has(normKey)) return;
+    const txId = getTextageByTitle().get(normKey);
+    if (!txId) return;                                 // textage-meta 에 그 곡 없음 → 입양 불가
+    const txRows = candidates.filter((c) => c.textage_song_id != null);
+    // 이미 그 txId 행이 후보에 있으면(=정상 연결) 입양 불필요
+    if (txRows.some((c) => c.textage_song_id === txId)) { adoptedNorms.add(normKey); return; }
+    const distinctTx = new Set(txRows.map((c) => c.textage_song_id));
+    if (distinctTx.size >= 2) { adoptedNorms.add(normKey); console.log(`[OhsorryDb][adopt] skip "${normKey}": textage행 ${distinctTx.size}개(동명이곡)`); return; }
+    const nullCands = candidates.filter((c) => c.textage_song_id == null);
+    if (nullCands.length !== 1) {
+      adoptedNorms.add(normKey);
+      if (nullCands.length > 1) console.log(`[OhsorryDb][adopt] skip "${normKey}": NULL행 ${nullCands.length}개`);
+      return;
+    }
+    const nullRow = nullCands[0];
+    const meta = getTextageMeta();
+    const txSeries = meta && meta.songs && meta.songs[txId] ? meta.songs[txId].series_no : null;
+    if (nullRow.series_no == null || txSeries == null) { adoptedNorms.add(normKey); return; }
+    if (nullRow.series_no === 99) { adoptedNorms.add(normKey); console.log(`[OhsorryDb][adopt] skip "${normKey}": series_no=99 임시값`); return; }
+    if (nullRow.series_no !== txSeries) { adoptedNorms.add(normKey); console.log(`[OhsorryDb][adopt] skip "${normKey}": series 불일치 ${nullRow.series_no}!=${txSeries}`); return; }
+    // 조건 충족 → 입양 RPC (명시 from_null_song_id 전달)
+    try {
+      const ret = await callRpc('ensure_song_adopt', {
+        p_title: nullRow.title,
+        p_textage_song_id: txId,
+        p_ac: nullRow.ac != null ? nullRow.ac : null,
+        p_legen: nullRow.legen != null ? nullRow.legen : null,
+        p_adopt_from_null: nullRow.song_id,
+      });
+      const id = typeof ret === 'number' ? ret : parseInt(ret, 10);
+      if (!Number.isFinite(id) || id <= 0) throw new Error('ensure_song_adopt non-numeric');
+      // songMap 갱신 — 이 norm 을 canonical(textage 연결) 행 1개로 교체
+      songMap.set(normKey, [{ song_id: id, textage_song_id: txId, title: nullRow.title, series_no: txSeries, ac: nullRow.ac, legen: nullRow.legen }]);
+      adoptedNorms.add(normKey);
+      console.log(`[OhsorryDb][adopt] "${normKey}": NULL ${nullRow.song_id} → textage ${txId} (song_id ${id})`);
+    } catch (e) {
+      adoptedNorms.add(normKey);   // 실패해도 재시도 폭주 방지 — 기존 NULL행 그대로 사용 (동작 불변)
+      console.warn(`[OhsorryDb][adopt] 실패 "${normKey}" (${e.message}) — 기존 NULL행 유지`);
+    }
   }
 
   // normKey 후보 array + played_version → song_id 단일 선택
@@ -320,7 +381,10 @@ window.OhsorryDb = (function () {
         if (diffInt == null) { invalidDiff++; continue; }
         const playedVersion = parseInt(r.played_version, 10);
         if (isNaN(playedVersion)) { invalidVersion++; continue; }
-        const candidates = songMap.get(normTitle(r.title));
+        const nk = normTitle(r.title);
+        // 재발 방지(B-1): 옛 NULL행을 textage행으로 입양 (조건 충족 시 songMap 갱신).
+        await maybeAdopt(songMap, nk, songMap.get(nk));
+        const candidates = songMap.get(nk);
         let songId = pickSongId(candidates, playedVersion);
         if (songId == null) {
           // songs 마스터에 미등록 신곡 — ensure_song RPC 로 자동 등록.
@@ -349,7 +413,7 @@ window.OhsorryDb = (function () {
             const k = normTitle(r.title);
             if (!songMap.has(k)) songMap.set(k, []);
             songMap.get(k).push({
-              song_id: songId, title: r.title,
+              song_id: songId, textage_song_id: txId || null, title: r.title, series_no: null,
               ac:    isLeg ? 0 : acBit,
               legen: isLeg ? acBit : 0,
             });

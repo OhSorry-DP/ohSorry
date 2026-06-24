@@ -2,6 +2,11 @@
 
 ohSorry 의 변경 이력입니다. 사용방법은 [README.md](README.md) 를 참고하세요.
 
+### 2026-06-24 — songs 중복 재발방지: dbConn NULL행 입양 (B-1)
+- `dbConn` (v0.0.412): `maybeAdopt` 추가 — textage-meta 에 txId 가 생겼는데 songMap 후보가 옛 NULL행(textage_song_id IS NULL) 1개뿐이면 `ensure_song_adopt` RPC 로 textage행에 입양 → 중복 textage행 생성/잔존 방지. 조건: txId 있음 + NULL행 정확히 1개 + 동명이곡(textage≥2) 아님 + series_no 동일 + ≠99. 그 외(NULL≥2/동명이곡/series 불일치/99)는 자동 입양 금지 + 로그만. RPC 미적용/실패 시 graceful fallback(기존 NULL행 유지, 동작 불변). songMap 후보에 `textage_song_id`/`series_no` 적재.
+- `normTitle`: TITLE_ALIASES 에 `Lagrangian Point ?`/`Lagrangian Point 0` → `Lagrangian Point Ø` (eagate/Reflux 가 Ø 를 ?/0 으로 인코딩 깨뜨려 norm 불일치 → textage 'Ø' 로 복원, norm Ø→0). 마스터=ohSorryRating, syncNormTitle 로 동기 사본.
+- ⚠ 프로덕션 gist **미배포** — 전제: ohSorryAdmin `sql/06_merge_songs.sql`·`sql/07_ensure_song_adopt.sql` 적용(완료). eagate 크롤 런타임 테스트 별도 필요(현재 NULL행 0 이라 입양 분기 라이브 미실행).
+
 ### 2026-06-23 — user_ohsorry_radars 36피처 업로드
 - `dbConn`: `computePatternScoreVec` FEATS 28→36 + `callUpsertFeatureScore` 37-arg. 기존 28 뒤에 겹계단/계마/양손계단 8 컬럼 append(`p_os_double_stair_l/r`·`p_os_keima_l/r`·`p_os_hstair_onehand/sync/sameshape/diffshape`). gist `feature-scores-slim` 36키 + supabase 37-arg RPC. 기존 28 인자/계산 불변.
 
