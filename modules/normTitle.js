@@ -6,11 +6,12 @@
 //   - 브라우저: 오소리 본체 / 라이벌 wrapper 가 gist fetch + eval → window.OhsorryNorm
 //   - Node:     ohSorryAdmin / ohSorryRating 스크립트가 require → module.exports
 //
-// !! 이 파일은 3곳에 동일 사본 — ohSorryRating / ohSorry / ohSorryAdmin.
+// !! 이 파일은 4곳에 동일 사본 — ohSorryRating / ohSorry / ohSorryAdmin / INFOhSorry.
 //    마스터는 ohSorryRating/modules/normTitle.js (구조개편 §0 Phase1B, 2026-06-16 본체→레이팅).
+//    INFOhSorry 는 src/shared/normTitle.js (match.ts 가 import, 타입은 옆 normTitle.d.ts).
 //    수정 후 반드시
 //      node ohSorryAdmin/scripts/syncNormTitle.js
-//    로 나머지 2곳(ohSorry·ohSorryAdmin)에 복사할 것 (별개 repo 라 물리적 단일 파일은 불가).
+//    로 나머지 3곳(ohSorry·ohSorryAdmin·INFOhSorry)에 복사할 것 (별개 repo 라 물리적 단일 파일은 불가).
 //
 // 인터페이스 — norm(s): 정규화 문자열 / denorm(k): NORM_OVERRIDES 키만 raw 복원
 //
