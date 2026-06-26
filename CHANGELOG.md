@@ -2,6 +2,11 @@
 
 ohSorry 의 변경 이력입니다. 사용방법은 [README.md](README.md) 를 참고하세요.
 
+### 2026-06-26 — dbConn computePatternScoreVec 공용 kernel 단일화 (구조개편 Phase 3-1, 미배포)
+- `dbConn`: `computePatternScoreVec` 의 FEATS/WEIGHTS/TOP_N/가중합을 inline kernel 블록(`PATTERN_SCORE_KERNEL_BEGIN/END`, ohSorryRating `patternScoreKernel.js` 정본과 동작 byte-level 동일)으로 추출, rows→entries 어댑터만 함수에 유지. **headless 업로드에서도 외부 fetch/lib 의존 0**(전역 cascade·self-fetch 안 함 → 신규 네트워크 failure mode 없음).
+- matched=0 시 null 반환(기존과 동일), 정상 경로 업로드값 **비트 단위 불변**(레이팅 골든 패리티 `pattern-kernel-parity.js` maxDiff=0).
+- 중복은 실제 **4벌**이었음(dbConn 포함 — dbConn·calcWeakness·backfill·admin). 동일성은 ohSorryRating 골든 패리티 테스트가 강제. **미배포**(gist push 별도, 추가 gist 파일 불필요).
+
 ### 2026-06-24 — songs 중복 재발방지: dbConn NULL행 입양 (B-1)
 - `dbConn` (v0.0.412): `maybeAdopt` 추가 — textage-meta 에 txId 가 생겼는데 songMap 후보가 옛 NULL행(textage_song_id IS NULL) 1개뿐이면 `ensure_song_adopt` RPC 로 textage행에 입양 → 중복 textage행 생성/잔존 방지. 조건: txId 있음 + NULL행 정확히 1개 + 동명이곡(textage≥2) 아님 + series_no 동일 + ≠99. 그 외(NULL≥2/동명이곡/series 불일치/99)는 자동 입양 금지 + 로그만. RPC 미적용/실패 시 graceful fallback(기존 NULL행 유지, 동작 불변). songMap 후보에 `textage_song_id`/`series_no` 적재.
 - `normTitle`: TITLE_ALIASES 에 `Lagrangian Point ?`/`Lagrangian Point 0` → `Lagrangian Point Ø` (eagate/Reflux 가 Ø 를 ?/0 으로 인코딩 깨뜨려 norm 불일치 → textage 'Ø' 로 복원, norm Ø→0). 마스터=ohSorryRating, syncNormTitle 로 동기 사본.

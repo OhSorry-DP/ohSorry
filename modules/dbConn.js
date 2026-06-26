@@ -628,25 +628,70 @@ window.OhsorryDb = (function () {
     return textageMetaCache;
   }
 
-  // make_grid_data 로 유저의 supabase 저장 차트 받아 → feature 별 top 30 가중합.
-  //   1. chart 의 10 feature quantile score (0~100) lookup
-  //   2. score rate = ex_score / (notes × 2)  (IIDX 표준 EX rate, 0~1)
-  //   3. feature 별로 points = chart_score × score_rate 모은 뒤 내림차순 정렬
-  //   4. top 30 만 선택, 가중치 5곡씩 [1, 0.5, 0.25, 0.125, 0.0625, 0.03125] 적용
-  //   5. feature_score = Σ(w_i × points_i)  (분모 없음. 30곡 미만이면 자리 비워짐 → 점수 ↓)
-  //   user_ohsorry_radars 10 feature (SOF-LAN 은 dump 단계에서 changes/ratio 융합됨).
-  //   반환: { NOTES, CHORD, PEAK, CHARGE, SCRATCH, 'SOF-LAN', PHRASE, JACK, TRILL, RAND, __count } 또는 null.
-  const TOP_N = 30;
-  // 가중치: 1~5위 = 1.0, 6~30위 = 0.90 → 0.05 선형 감소.
-  const WEIGHTS = (() => {
-    const ws = [];
-    for (let i = 0; i < 5; i++) ws.push(1.0);
-    for (let i = 0; i < 25; i++) {
-      const pct = 90 - i * (90 - 5) / 24;
+  // ===== PATTERN_SCORE_KERNEL_BEGIN =====
+  // computePatternScoreVec 계열 공용 math kernel — ohSorryRating/modules/patternScoreKernel.js 의 inline 동기 사본.
+  //   ⚠️ Phase 3-1 단일 정본 블록. dbConn 은 headless 업로드에서도 외부 의존 없이 동작해야 하므로 inline 유지하되
+  //      patternScoreKernel.js 와 동작 byte-level 동일 — golden 패리티 테스트(pattern-kernel-parity.js)가 강제.
+  //   UPSERT_FEATS 순서 / UPSERT_WEIGHTS / TOP_N / s<=0 skip / desc 정렬 / 가중합 / matched=0→null
+  //   — DB 업로드값에 직결이므로 단 1비트도 바꾸지 말 것.
+  var UPSERT_FEATS = [
+    'NOTES', 'CHORD', 'PEAK', 'CHARGE', 'SCRATCH', 'SOF-LAN', 'PHRASE', 'JACK', 'TRILL', 'RAND',
+    'STAIR_UP_L', 'STAIR_UP_R', 'STAIR_DN_L', 'STAIR_DN_R',
+    'K1_L', 'K1_R', 'K2_L', 'K2_R', 'K3_L', 'K3_R',
+    'K4_L', 'K4_R', 'K5_L', 'K5_R', 'K6_L', 'K6_R', 'K7_L', 'K7_R',
+    'DOUBLE_STAIR_L', 'DOUBLE_STAIR_R', 'KEIMA_L', 'KEIMA_R',
+    'HSTAIR_ONEHAND', 'HSTAIR_SYNC', 'HSTAIR_SAMESHAPE', 'HSTAIR_DIFFSHAPE',
+  ];
+  var TOP_N = 30;
+  // 가중치: 1~5위 = 1.0, 6~30위 = 0.90 → 0.05 선형 감소 (25 step).
+  var UPSERT_WEIGHTS = (function () {
+    var ws = [];
+    for (var i = 0; i < 5; i++) ws.push(1.0);
+    for (var j = 0; j < 25; j++) {
+      var pct = 90 - j * (90 - 5) / 24;  // j=0 → 90, j=24 → 5
       ws.push(pct / 100);
     }
     return ws;
   })();
+  // entries: [{ scoreRate, chartScores }] → { vec(36키), matched } | { vec:null, matched:0 }.
+  function computePatternScoreKernel(entries) {
+    if (!entries || entries.length === 0) return { vec: null, matched: 0 };
+    var pointsByFeat = {};
+    for (var fa = 0; fa < UPSERT_FEATS.length; fa++) pointsByFeat[UPSERT_FEATS[fa]] = [];
+    var matched = 0;
+    for (var ei = 0; ei < entries.length; ei++) {
+      var e = entries[ei];
+      if (!e || !e.chartScores) continue;
+      var cs = e.chartScores;
+      var rate = e.scoreRate;
+      matched++;
+      for (var fb = 0; fb < UPSERT_FEATS.length; fb++) {
+        var f = UPSERT_FEATS[fb];
+        var s = cs[f];
+        if (typeof s !== 'number' || s <= 0) continue;
+        pointsByFeat[f].push(s * rate);
+      }
+    }
+    if (matched === 0) return { vec: null, matched: 0 };
+    var vec = {};
+    for (var fc = 0; fc < UPSERT_FEATS.length; fc++) {
+      var ff = UPSERT_FEATS[fc];
+      var top = pointsByFeat[ff].sort(function (a, b) { return b - a; }).slice(0, TOP_N);
+      var acc = 0;
+      for (var ti = 0; ti < top.length; ti++) acc += top[ti] * UPSERT_WEIGHTS[ti];
+      vec[ff] = acc;
+    }
+    return { vec: vec, matched: matched };
+  }
+  // ===== PATTERN_SCORE_KERNEL_END =====
+
+  // make_grid_data 로 유저의 supabase 저장 차트 받아 → rows → entries 어댑터 → 공용 kernel.
+  //   1. chart 의 36 feature quantile score (0~100) lookup
+  //   2. score rate = ex_score / (notes × 2)  (IIDX 표준 EX rate, 0~1)
+  //   3. entries 로 모아 kernel 이 feature 별 points desc top30 가중합.
+  //   user_ohsorry_radars 36 feature (SOF-LAN 은 dump 단계에서 changes/ratio 융합됨).
+  //   반환: { __count, NOTES, ..., HSTAIR_DIFFSHAPE } (36 dim) 또는 null (matched=0/데이터 부족).
+  //   ⚠️ headless 업로드에서도 동작 — 외부 fetch/lib 의존 없음(공용 kernel 은 위 inline 블록).
   async function computePatternScoreVec(iidxId) {
     const [fsData, textageMeta] = await Promise.all([
       getFeatureScores().catch(() => null),
@@ -681,21 +726,9 @@ window.OhsorryDb = (function () {
 
     const DIFF_INT_TO_FEATURE_KEY = { 1: 'DP_NOR', 2: 'DP_HYP', 3: 'DP_ANO', 4: 'DP_LEG' };
     const DIFF_INT_TO_NOTES_KEY   = { 1: 'DN', 2: 'DH', 3: 'DA', 4: 'DX' };
-    // 36 dim — mirror-invariant 10 + mirror 11 × L/R 22 + chart-level invariant 4(HSTAIR).
-    //   migration_ohsorry_36feat.sql 에서 8 dim(겹계단/계마/양손계단) 추가 — upsert_user_feature_score 37 인자.
-    //   ⚠️ 신규 8값은 gist feature-scores-slim.json 이 36키로 배포된 뒤에야 산출됨(28키면 0).
-    const FEATS = [
-      'NOTES', 'CHORD', 'PEAK', 'CHARGE', 'SCRATCH', 'SOF-LAN', 'PHRASE', 'JACK', 'TRILL', 'RAND',
-      'STAIR_UP_L', 'STAIR_UP_R', 'STAIR_DN_L', 'STAIR_DN_R',
-      'K1_L', 'K1_R', 'K2_L', 'K2_R', 'K3_L', 'K3_R',
-      'K4_L', 'K4_R', 'K5_L', 'K5_R', 'K6_L', 'K6_R', 'K7_L', 'K7_R',
-      'DOUBLE_STAIR_L', 'DOUBLE_STAIR_R', 'KEIMA_L', 'KEIMA_R',
-      'HSTAIR_ONEHAND', 'HSTAIR_SYNC', 'HSTAIR_SAMESHAPE', 'HSTAIR_DIFFSHAPE',
-    ];
 
-    const pointsByFeat = {};
-    for (const f of FEATS) pointsByFeat[f] = [];
-    let matched = 0;
+    // rows → entries 어댑터 (song/chart/notes lookup + skip). 가중합은 공용 kernel.
+    const entries = [];
     for (const r of rows) {
       if (!r || !r.ex_score || r.ex_score <= 0) continue;
       const sid = r.textage_song_id;
@@ -712,22 +745,11 @@ window.OhsorryDb = (function () {
       const noteCount = songMeta.notes[notesKey];
       if (!noteCount || noteCount <= 0) continue;
       const scoreRate = r.ex_score / (noteCount * 2);
-      matched++;
-      for (const f of FEATS) {
-        const s = chartScores[f];
-        if (typeof s !== 'number' || s <= 0) continue;
-        pointsByFeat[f].push(s * scoreRate);
-      }
+      entries.push({ scoreRate, chartScores });
     }
-    if (matched === 0) return null;
-    const vec = { __count: matched };
-    for (const f of FEATS) {
-      const top = pointsByFeat[f].sort((a, b) => b - a).slice(0, TOP_N);
-      let acc = 0;
-      for (let i = 0; i < top.length; i++) acc += top[i] * WEIGHTS[i];
-      vec[f] = acc;
-    }
-    return vec;
+    const { vec, matched } = computePatternScoreKernel(entries);
+    if (!vec) return null;
+    return Object.assign({ __count: matched }, vec);
   }
 
   // 오소리 피쳐 스코어 upsert — user_ohsorry_radars (play_style=1, DP).
