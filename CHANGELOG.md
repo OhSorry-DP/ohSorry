@@ -2,6 +2,10 @@
 
 ohSorry 의 변경 이력입니다. 사용방법은 [README.md](README.md) 를 참고하세요.
 
+### 2026-06-27 — calcOhsorryCore 0.0.409: SP 대표 실력값 sp_star 게이지 보정 채택
+- [modules/calcOhsorryCore.js](modules/calcOhsorryCore.js): CORE_VERSION `0.0.408` → **`0.0.409`**. SP 업로드 시 `spSkillLib.computeUserSpCpi(unified)` → **`computeSpStarGuarded`**(있으면) 로 교체 — `sp_star = max(unified85★, guardedGaugeAvg50)`(게이지 편향 보정), `sp_cpi` 는 unified85 원좌표 보존. 정본 커널 = ohSorryRating `modules/spSkillCpi.js`.
+- **graceful**: `computeSpStarGuarded` 미배포(구 gist) 환경은 `computeUserSpCpi(unified)` 로 자동 fallback. 로그에 unified85★ + gauge보정 적용 여부 표기.
+
 ### 2026-06-27 — 시리즈 선택 모달: 체크박스 숨기고 선택 시리즈를 색상으로 표시
 - [ohsorry.js](ohsorry.js) 모달 `<style>`: eagate 전역 CSS 가 체크박스를 가려(빈 칸조차 안 보임) 선택 여부 확인 불가하던 문제. **체크박스 `display:none` + 선택된 시리즈 라벨을 색으로 표시**(`input:checked ~ span` → 초록 #1d9e75 굵게 + 라벨 배경 #e3f5ee, 미선택은 흐린 회색 #c1c7cd). 라벨 클릭 토글·`change` 핸들러 등 동작 무변경.
 - `#__dp_fetch_modal` 스코프 + `!important` 로 eagate reset 에 안 짐. reset 흉내 로컬 렌더로 검증(선택 초록/배경·미선택 회색·체크박스 비표시), `node --check` OK.

@@ -377,7 +377,7 @@ window.OhsorryCore = {
   const isRival = mode === 'rival';
   const rivalToken = opts.rivalToken || null;
   const wrapperVersion = opts.wrapperVersion || 'unknown';
-  const CORE_VERSION_SHORT = '0.0.408'.replace(/^0\.0\./, '');  // '408' — SP 모드 대표 실력값(sp_cpi/sp_star) 산출·업로드
+  const CORE_VERSION_SHORT = '0.0.409'.replace(/^0\.0\./, '');  // '409' — sp_star 게이지 보정 max(unified85, guardedGaugeAvg50)
   const dbVersionString = `${wrapperVersion}-core${CORE_VERSION_SHORT}`;
 
   // -------- 0. 데이터 로드 (ereter/textage/ohSorryRating + 별값 lib) — 모듈 공유 __loadCoreData --------
@@ -597,15 +597,19 @@ window.OhsorryCore = {
           const prev = await window.OhsorryDb.fetchUserStars(spIidx);
           if (prev) { prevStar = prev.star; prevEreterStar = prev.ereter_star; }
         }
-        // SP 대표 실력값 — SP12 클리어(allCharts) × cpi.json 으로 실력선(클리어율 85% 교차, 게이지 통합) 산출.
-        //   표본<5(SP12 클리어 5곡 미만)면 null → upsert_user COALESCE 로 기존 sp_cpi/sp_star 보존.
+        // SP 대표 실력값 — SP12 클리어(allCharts) × cpi.json.
+        //   sp_cpi  = unified85 원좌표(클리어율 85% 교차 CPI). sp_star = max(unified85★, guardedGaugeAvg50)
+        //   (게이지 편향 보정). 표본<5(SP12 클리어 5곡 미만)면 null → upsert_user COALESCE 로 기존값 보존.
+        //   computeSpStarGuarded 미배포(구 gist) 환경은 computeUserSpCpi(unified)로 graceful fallback.
         let spCpiInt = null, spStarRounded = null;
         if (spSkillLib && cpiData) {
           try {
-            const sp = spSkillLib.computeUserSpCpi(allCharts, cpiData, { normFn: norm, mode: 'unified' });
+            const sp = spSkillLib.computeSpStarGuarded
+              ? spSkillLib.computeSpStarGuarded(allCharts, cpiData, { normFn: norm })
+              : spSkillLib.computeUserSpCpi(allCharts, cpiData, { normFn: norm, mode: 'unified' });
             spCpiInt = sp.cpiInt; spStarRounded = sp.starRounded;
-            console.log(`[SP] 대표 실력값 sp_cpi=${spCpiInt} sp_star=${spStarRounded} (pairs ${sp.nPairs})`);
-          } catch (e) { console.warn('[SP] computeUserSpCpi 실패:', e && e.message); }
+            console.log(`[SP] 대표 실력값 sp_cpi=${spCpiInt} sp_star=${spStarRounded}${sp.uniStarRounded != null ? ` (unified85 ★${sp.uniStarRounded}${sp.applied ? ', gauge보정' : ''})` : ''} (pairs ${sp.nPairs})`);
+          } catch (e) { console.warn('[SP] computeSpStarGuarded 실패:', e && e.message); }
         }
         await window.OhsorryDb.upsertUserProfile({
           iidx_id: spIidx,
