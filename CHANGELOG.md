@@ -5,6 +5,7 @@ ohSorry 의 변경 이력입니다. 사용방법은 [README.md](README.md) 를 �
 ### 2026-06-27 — 시리즈 선택 모달: 체크박스 숨기고 선택 시리즈를 색상으로 표시
 - [ohsorry.js](ohsorry.js) 모달 `<style>`: eagate 전역 CSS 가 체크박스를 가려(빈 칸조차 안 보임) 선택 여부 확인 불가하던 문제. **체크박스 `display:none` + 선택된 시리즈 라벨을 색으로 표시**(`input:checked ~ span` → 초록 #1d9e75 굵게 + 라벨 배경 #e3f5ee, 미선택은 흐린 회색 #c1c7cd). 라벨 클릭 토글·`change` 핸들러 등 동작 무변경.
 - `#__dp_fetch_modal` 스코프 + `!important` 로 eagate reset 에 안 짐. reset 흉내 로컬 렌더로 검증(선택 초록/배경·미선택 회색·체크박스 비표시), `node --check` OK.
+- 후속: 배경색(#e3f5ee)을 **'전체' 라벨 + 숫자 칸에만** 한정(`#__dp_all:checked ~ span`, `.__dpsr:checked ~ span:first-of-type`). 시리즈명 글자는 초록색만(배경 없음), 그룹 라벨은 기존 회색 유지.
 
 ### 2026-06-27 — SP 대표 실력값 sp_star 게이지 보정 (core 0.0.409)
 - `calcOhsorryCore.js`: SP 크롤 시 `computeUserSpCpi(unified)` → ohSorryRating **`computeSpStarGuarded`** 로 교체. `sp_star = max(unified85★, guardedGaugeAvg50)` — EXH/FC 약한 게이지 편향 유저의 unified85 저평가를 게이지별 50% 도전선 평균으로 보정(하방 보호). `sp_cpi` 는 **unified85 원좌표 보존**(추천/정렬 base).

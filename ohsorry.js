@@ -113,7 +113,9 @@
         #__dp_fetch_modal input[type=checkbox]{ display:none !important; }
         #__dp_fetch_modal label input[type=checkbox] ~ span{ color:#c1c7cd !important; }                                  /* 미선택 = 흐린 회색 */
         #__dp_fetch_modal label input[type=checkbox]:checked ~ span{ color:#1d9e75 !important; font-weight:700 !important; } /* 선택 = 초록 굵게 */
-        #__dp_fetch_modal label:has(input[type=checkbox]:checked){ background:#e3f5ee !important; border-radius:6px; }      /* 선택 라벨 배경(:has 지원 시) */
+        /* 배경색은 '전체'와 숫자 칸에만 — 시리즈명 글자에는 배경 없음 */
+        #__dp_fetch_modal #__dp_all:checked ~ span{ background:#e3f5ee !important; border-radius:5px; padding:1px 8px; }
+        #__dp_fetch_modal label .__dpsr:checked ~ span:first-of-type{ background:#e3f5ee !important; border-radius:5px; padding:1px 4px; }
         @media (max-width:560px){
           #__dp_fetch_modal{align-items:stretch;justify-content:stretch}
           #__dp_fetch_modal .__dp_card{width:100vw;max-width:100vw;height:100vh;max-height:100vh;border-radius:0;padding:16px 16px env(safe-area-inset-bottom,16px)}
