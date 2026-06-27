@@ -2,6 +2,13 @@
 
 ohSorry 의 변경 이력입니다. 사용방법은 [README.md](README.md) 를 참고하세요.
 
+### 2026-06-27 — SP 모드 대표 실력값(sp_cpi/sp_star) 산출·업로드 (core 0.0.408, ⚠️DB 마이그레이션 선행)
+- `calcOhsorryCore.js`: SP 크롤 시 `allCharts × cpi.json` 으로 **SP 대표 실력값** 산출 → users 업로드. 산식 = 오소리웹 SP12 추천 기준값(실력선, 클리어율 85% 교차 CPI, 게이지 통합) = ohSorryRating `spSkillCpi.computeUserSpCpi(mode:'unified')`. CPI는 단일 축(노마게/하드 미분리). 표본부족(SP12 클리어 0곡 매칭)이면 null → COALESCE 보존.
+  - 신규 gist 의존: `cpi.json`(기존, 웹과 공유) + `cpiStar.js`·`spSkillCpi.js`(신규 커널, fetch+eval → window). `__loadCoreData` 에 `cpiData`/`spSkillLib` 추가.
+- `dbConn.js`: `upsert_user` 호출에 `p_sp_cpi`/`p_sp_star` 추가(9-arg).
+- ⚠️ **배포 순서**: ohSorryAdmin `migration_sp_star.sql`(users +2컬럼, upsert_user 9-arg) **적용 후** calcOhsorryCore.js·dbConn.js gist 배포할 것. 미적용 상태로 배포 시 upsert_user 시그니처 불일치로 **프로필 업로드 전체 실패**. cpiStar.js·spSkillCpi.js 는 선배포 안전(미참조).
+- DP 모드는 SP 데이터가 없어 sp_cpi 미산출(null 전송 → 기존값 보존).
+
 ### 2026-06-26 — dbConn computePatternScoreVec 공용 kernel 단일화 (구조개편 Phase 3-1, 미배포)
 - `dbConn`: `computePatternScoreVec` 의 FEATS/WEIGHTS/TOP_N/가중합을 inline kernel 블록(`PATTERN_SCORE_KERNEL_BEGIN/END`, ohSorryRating `patternScoreKernel.js` 정본과 동작 byte-level 동일)으로 추출, rows→entries 어댑터만 함수에 유지. **headless 업로드에서도 외부 fetch/lib 의존 0**(전역 cascade·self-fetch 안 함 → 신규 네트워크 failure mode 없음).
 - matched=0 시 null 반환(기존과 동일), 정상 경로 업로드값 **비트 단위 불변**(레이팅 골든 패리티 `pattern-kernel-parity.js` maxDiff=0).

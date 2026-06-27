@@ -134,6 +134,9 @@ var __URLS = {
   osr135:    __GIST_RAW + '/OSR13.5%2B.js',     // onlyOSRtoEreter 13.5 tier 의존
   onlyOSR:   __GIST_RAW + '/onlyOSR.js',
   onlyOSR2e: __GIST_RAW + '/onlyOSRtoEreter.js',
+  cpi:       __GIST_RAW + '/cpi.json',          // SP12 채보별 램프 CPI (SP 대표 실력값 산출)
+  cpiStar:   __GIST_RAW + '/cpiStar.js',        // CPI → 発狂★相当 변환 커널
+  spSkillCpi:__GIST_RAW + '/spSkillCpi.js',     // 유저 SP 대표 실력값(sp_cpi/sp_star) 산출 커널(cpiStar 의존)
 };
 var __ERETER_CACHE_KEY = 'ereter_dp_diff_v4';
 var __EAGATE = 'https://p.eagate.573.jp';
@@ -235,6 +238,29 @@ async function __loadStarLibs() {
   return window.onlyOSRtoEreter || null;   // 별값 산출에 직접 쓰는 건 onlyOSRtoEreter (OSR13.5+/onlyOSR 은 글로벌 의존)
 }
 
+// SP12 CPI 데이터 (cpi.json) — 캐시 우선. 실패해도 무시(null) → SP 대표 실력값 미산출(기존값 보존).
+async function __loadCpi() {
+  window.__ohsorryLibCache = window.__ohsorryLibCache || {};
+  if (window.__ohsorryLibCache.cpi) return window.__ohsorryLibCache.cpi;
+  try {
+    const { data } = await __loadWithCache(__URLS.cpi, 'ohSorry:cpi', true);
+    if (Array.isArray(data)) { window.__ohsorryLibCache.cpi = data; console.log(`[데이터] cpi ${data.length}채보 로드`); return data; }
+  } catch (e) { console.warn('[데이터] cpi fetch 실패 (SP 대표 실력값 skip):', e.message); }
+  return null;
+}
+
+// SP 대표 실력값 커널 eval — cpiStar → spSkillCpi 순(spSkillCpi 가 window.cpiStar 의존). window.spSkillCpi 등록.
+async function __loadSpStarLibs() {
+  if (window.spSkillCpi && window.cpiStar) return window.spSkillCpi;
+  try {
+    const { data: cs } = await __loadWithCache(__URLS.cpiStar, 'ohSorry:libCpiStar', false);
+    (new Function(cs))();
+    const { data: ss } = await __loadWithCache(__URLS.spSkillCpi, 'ohSorry:libSpSkillCpi', false);
+    (new Function(ss))();
+  } catch (e) { console.warn('[데이터] cpiStar/spSkillCpi 로드 실패 — SP 대표 실력값 skip:', e.message); }
+  return window.spSkillCpi || null;
+}
+
 // 전체 데이터 로드 (compute + prefetch 공유). 모달 떠 있는 동안 미리 호출하면 compute 가 캐시 hit.
 async function __loadCoreData() {
   const ereter = await __loadEreter();
@@ -246,11 +272,13 @@ async function __loadCoreData() {
     if (data && Array.isArray(data.ratings)) ohSorryRatings = data.ratings;
   } catch (e) { console.error('[데이터] ohSorryRating 로드 실패:', e.message); }
   const onlyOSR2eLib = await __loadStarLibs();   // OSR13.5+/onlyOSR 는 글로벌 등록(side-effect), 반환은 onlyOSRtoEreter
+  const cpiData = await __loadCpi();              // SP12 CPI (SP 모드 대표 실력값용, 실패 시 null)
+  const spSkillLib = await __loadSpStarLibs();    // window.spSkillCpi (computeUserSpCpi), 실패 시 null
   return {
     ereterData: ereter ? ereter.charts : null,
     ereterPlayers: ereter ? ereter.players : null,
     textageSongs, ratingData, ohSorryRatings,
-    onlyOSR2eLib,
+    onlyOSR2eLib, cpiData, spSkillLib,
   };
 }
 
@@ -349,7 +377,7 @@ window.OhsorryCore = {
   const isRival = mode === 'rival';
   const rivalToken = opts.rivalToken || null;
   const wrapperVersion = opts.wrapperVersion || 'unknown';
-  const CORE_VERSION_SHORT = '0.0.407'.replace(/^0\.0\./, '');  // '407' — 완료 리스트 폭 축소(max-content, 상한 360px)
+  const CORE_VERSION_SHORT = '0.0.408'.replace(/^0\.0\./, '');  // '408' — SP 모드 대표 실력값(sp_cpi/sp_star) 산출·업로드
   const dbVersionString = `${wrapperVersion}-core${CORE_VERSION_SHORT}`;
 
   // -------- 0. 데이터 로드 (ereter/textage/ohSorryRating + 별값 lib) — 모듈 공유 __loadCoreData --------
@@ -360,7 +388,7 @@ window.OhsorryCore = {
     __ohsorryHideSpinner();
     return;
   }
-  const { ereterData, ereterPlayers, textageSongs, ratingData, ohSorryRatings, onlyOSR2eLib } = __D;
+  const { ereterData, ereterPlayers, textageSongs, ratingData, ohSorryRatings, onlyOSR2eLib, cpiData, spSkillLib } = __D;
 
   // -------- 1. 곡명 정규화 + 인덱싱 --------
   // [중복 제거] 곡명 norm = normTitle.js 단일 정본(window.OhsorryNorm, wrapper 가 먼저 fetch+eval).
@@ -569,6 +597,16 @@ window.OhsorryCore = {
           const prev = await window.OhsorryDb.fetchUserStars(spIidx);
           if (prev) { prevStar = prev.star; prevEreterStar = prev.ereter_star; }
         }
+        // SP 대표 실력값 — SP12 클리어(allCharts) × cpi.json 으로 실력선(클리어율 85% 교차, 게이지 통합) 산출.
+        //   표본<5(SP12 클리어 5곡 미만)면 null → upsert_user COALESCE 로 기존 sp_cpi/sp_star 보존.
+        let spCpiInt = null, spStarRounded = null;
+        if (spSkillLib && cpiData) {
+          try {
+            const sp = spSkillLib.computeUserSpCpi(allCharts, cpiData, { normFn: norm, mode: 'unified' });
+            spCpiInt = sp.cpiInt; spStarRounded = sp.starRounded;
+            console.log(`[SP] 대표 실력값 sp_cpi=${spCpiInt} sp_star=${spStarRounded} (pairs ${sp.nPairs})`);
+          } catch (e) { console.warn('[SP] computeUserSpCpi 실패:', e && e.message); }
+        }
         await window.OhsorryDb.upsertUserProfile({
           iidx_id: spIidx,
           dj_name: profile.djName || null,
@@ -576,6 +614,8 @@ window.OhsorryCore = {
           ereter_star: prevEreterStar,   // 기존값 보존 (없으면 null)
           sp_rank: profile.spRank || null,
           dp_rank: profile.dpRank || null,
+          sp_cpi: spCpiInt,              // SP 대표 실력값(CPI). null(표본부족)이면 COALESCE 보존
+          sp_star: spStarRounded,        // 発狂★相当
           notes_radar: profileHasRadar
             ? { sp: hasRadarData(profile.spRadar) ? profile.spRadar : null, dp: hasRadarData(profile.dpRadar) ? profile.dpRadar : null }
             : null,

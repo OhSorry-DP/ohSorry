@@ -327,6 +327,8 @@ window.OhsorryDb = (function () {
         p_sp_rank: rankToInt(payload.sp_rank),
         p_dp_rank: rankToInt(payload.dp_rank),
         p_native_star: payload.native_star != null ? Number(payload.native_star) : null,  // v3.4.0
+        p_sp_cpi: payload.sp_cpi != null ? Math.round(Number(payload.sp_cpi)) : null,      // SP 대표 실력값(CPI). null → COALESCE 보존
+        p_sp_star: payload.sp_star != null ? Number(payload.sp_star) : null,               // 発狂★相当. SP 크롤/INF 만 채움
       });
       // 2. user_radars (SP / DP 각각, 있을 때만)
       const radar = payload.notes_radar;
