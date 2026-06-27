@@ -109,6 +109,11 @@
     ov.innerHTML = `
       <style>
         #__dp_fetch_modal .__dp_card{width:min(680px, calc(100vw - 24px))}
+        /* eagate 체크박스 렌더에 의존하지 않게 — 체크박스는 숨기고 선택된 시리즈를 색(글자+배경)으로 표시. 라벨 클릭으로 토글(동작 동일). */
+        #__dp_fetch_modal input[type=checkbox]{ display:none !important; }
+        #__dp_fetch_modal label input[type=checkbox] ~ span{ color:#c1c7cd !important; }                                  /* 미선택 = 흐린 회색 */
+        #__dp_fetch_modal label input[type=checkbox]:checked ~ span{ color:#1d9e75 !important; font-weight:700 !important; } /* 선택 = 초록 굵게 */
+        #__dp_fetch_modal label:has(input[type=checkbox]:checked){ background:#e3f5ee !important; border-radius:6px; }      /* 선택 라벨 배경(:has 지원 시) */
         @media (max-width:560px){
           #__dp_fetch_modal{align-items:stretch;justify-content:stretch}
           #__dp_fetch_modal .__dp_card{width:100vw;max-width:100vw;height:100vh;max-height:100vh;border-radius:0;padding:16px 16px env(safe-area-inset-bottom,16px)}

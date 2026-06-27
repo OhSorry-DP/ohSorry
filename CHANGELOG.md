@@ -2,6 +2,15 @@
 
 ohSorry 의 변경 이력입니다. 사용방법은 [README.md](README.md) 를 참고하세요.
 
+### 2026-06-27 — 시리즈 선택 모달: 체크박스 숨기고 선택 시리즈를 색상으로 표시
+- [ohsorry.js](ohsorry.js) 모달 `<style>`: eagate 전역 CSS 가 체크박스를 가려(빈 칸조차 안 보임) 선택 여부 확인 불가하던 문제. **체크박스 `display:none` + 선택된 시리즈 라벨을 색으로 표시**(`input:checked ~ span` → 초록 #1d9e75 굵게 + 라벨 배경 #e3f5ee, 미선택은 흐린 회색 #c1c7cd). 라벨 클릭 토글·`change` 핸들러 등 동작 무변경.
+- `#__dp_fetch_modal` 스코프 + `!important` 로 eagate reset 에 안 짐. reset 흉내 로컬 렌더로 검증(선택 초록/배경·미선택 회색·체크박스 비표시), `node --check` OK.
+
+### 2026-06-27 — SP 대표 실력값 sp_star 게이지 보정 (core 0.0.409)
+- `calcOhsorryCore.js`: SP 크롤 시 `computeUserSpCpi(unified)` → ohSorryRating **`computeSpStarGuarded`** 로 교체. `sp_star = max(unified85★, guardedGaugeAvg50)` — EXH/FC 약한 게이지 편향 유저의 unified85 저평가를 게이지별 50% 도전선 평균으로 보정(하방 보호). `sp_cpi` 는 **unified85 원좌표 보존**(추천/정렬 base).
+- 구 gist(`computeSpStarGuarded` 미배포) 환경은 `computeUserSpCpi(unified)` 로 graceful fallback. SP 로그에 `unified85 ★X.X, gauge보정` 표기 추가. `sp_cpi == cpiToHakkyoStar(sp_star)` 불변식은 더 이상 전제 안 함.
+- DB 스키마/RPC(`upsert_user` 9-arg) **무변경** — sp_cpi/sp_star 컬럼 그대로, 저장값(sp_star)만 보정. ⚠️ gist 배포는 spSkillCpi.js(커널) 선배포 후.
+
 ### 2026-06-27 — SP 모드 대표 실력값(sp_cpi/sp_star) 산출·업로드 (core 0.0.408, ⚠️DB 마이그레이션 선행)
 - `calcOhsorryCore.js`: SP 크롤 시 `allCharts × cpi.json` 으로 **SP 대표 실력값** 산출 → users 업로드. 산식 = 오소리웹 SP12 추천 기준값(실력선, 클리어율 85% 교차 CPI, 게이지 통합) = ohSorryRating `spSkillCpi.computeUserSpCpi(mode:'unified')`. CPI는 단일 축(노마게/하드 미분리). 표본부족(SP12 클리어 0곡 매칭)이면 null → COALESCE 보존.
   - 신규 gist 의존: `cpi.json`(기존, 웹과 공유) + `cpiStar.js`·`spSkillCpi.js`(신규 커널, fetch+eval → window). `__loadCoreData` 에 `cpiData`/`spSkillLib` 추가.
