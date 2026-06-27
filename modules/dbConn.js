@@ -69,6 +69,20 @@ window.OhsorryDb = (function () {
   // 원격 service status — gist 의 service-status.json 으로 uploadEnabled toggle.
   // fail-closed: fetch 실패 시 disabled 로 취급 (모든 upload 차단).
   // 캐시: 5분 메모리.
+  //
+  // 스키마 정본: docs/service-status-schema.md (이 repo, cross-repo 계약 — 본체/웹/INF 공유).
+  //   본체는 uploadEnabled/shelfEnabled/message 만 소비(notInAC/notInINF/배지 필드는 웹·INF 전용).
+  /**
+   * @typedef {Object} ServiceStatus  원격 service-status.json 스키마(전체 superset). 정의 정본=docs/service-status-schema.md.
+   * @property {boolean}  uploadEnabled        업로드 허용 토글(누락/실패=false → 차단).
+   * @property {boolean}  shelfEnabled         서열표 탭 활성(누락/실패=false → skip).
+   * @property {string}  [message]             차단/점검 안내 문구.
+   * @property {string}  [updatedAt]           갱신 시각(운영 메모용, 로직 비사용).
+   * @property {{title:string,diff:string}[]} [notInAC]   AC 미수록 채보(웹 전용, diff=slot 콤마 다중). 기본 [].
+   * @property {{title:string,diff:string}[]} [notInINF]  INF 미수록 채보(웹+INF, diff=slot 단일). 기본 [].
+   * @property {boolean} [showEstimatedBadge]  Grid 推定 배지 표시(웹 전용, 기본 false).
+   * @property {string}  [estimatedBadgeText]  推定 배지 문구(웹 전용, 기본 '推定').
+   */
   const SERVICE_STATUS_URL =
     'https://gist.githubusercontent.com/OhSorry-DP/30c3ba6f87df9847291c42ea216a8d2a/raw/service-status.json';
   const SERVICE_STATUS_CACHE_MS = 5 * 60 * 1000;
