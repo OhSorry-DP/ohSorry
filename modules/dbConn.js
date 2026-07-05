@@ -1,4 +1,8 @@
-// dbConn.js — 오소리 DB 통신 모듈 (v0.0.412)
+// dbConn.js — 오소리 DB 통신 모듈 (v0.0.413)
+// v0.0.413 — maybeAdopt 변종(AC≠INF 동일 title+diff 다중채보) 곡 자동입양 차단.
+//            getTextageByTitle() 의 "같은 키 중복 시 첫 번째 우선" 이 변종 10곡에선 AC/INF 중 어느 쪽
+//            textage_song_id 를 고를지 근거가 없어(서버 ensure_song_adopt G1/G2 도 title 만 봐서 못 거름),
+//            잘못된 textage_song_id 가 NULL행에 영구 부착될 위험 — 해당 title 이면 자동 입양 skip.
 // v0.0.412 — songs 중복 재발방지: 옛 NULL행 입양 (maybeAdopt).
 //            textage-meta 에 txId 가 생겼는데 songMap 후보가 NULL행 1개뿐이면 ensure_song_adopt RPC 로
 //            textage행에 흡수 (중복 textage행 생성/잔존 방지). 조건: NULL행 정확히 1개 + 동명이곡(≥2) 아님
@@ -221,6 +225,15 @@ window.OhsorryDb = (function () {
     return (typeof window !== 'undefined' && window.__ohsorryLibCache && window.__ohsorryLibCache.textage) || null;
   }
 
+  // 변종(AC≠INF 동일 title+diff 다중채보) 곡 — getTextageByTitle() 의 "같은 키 중복 시 첫 번째 우선"
+  //   은 이 목록엔 안전하지 않다(어느 variant textage_song_id 를 고를지 근거가 없음). 서버 ensure_song_adopt
+  //   의 G1/G2 가드는 title 일치만 보고 variant 는 구분 못 하므로(변종은 정의상 title 이 같음), 여기서 막는다.
+  //   정본 = ohSorryRating/variant-map.json — 이 repo 는 fetch+eval 단일파일 구조라 import 불가, 수동 동기화.
+  const VARIANT_NORM_TITLES = new Set([
+    "L'amour et la liberté", 'VJ ARMY', 'MAX 300', 'ADVANCE', 'PARANOIA survivor MAX',
+    'DEEP ROAR', 'madrugada', 'THE SHINING POLARIS (kors k mix)', 'ミッドナイト堕天使', 'New Castle Legions',
+  ].map((t) => normTitle(t)));
+
   // ── 입양 (재발 방지 B-1) ─────────────────────────────────────
   // textage-meta 에 txId 가 생겼는데 songMap 후보가 "옛 NULL행 1개" 뿐이면, 그 NULL행을
   //   textage행으로 흡수(ensure_song_adopt RPC) → 중복 textage행 생성/잔존 방지.
@@ -231,6 +244,7 @@ window.OhsorryDb = (function () {
   const adoptedNorms = new Set();
   async function maybeAdopt(songMap, normKey, candidates) {
     if (!normKey || !candidates || adoptedNorms.has(normKey)) return;
+    if (VARIANT_NORM_TITLES.has(normKey)) { adoptedNorms.add(normKey); console.log(`[OhsorryDb][adopt] skip "${normKey}": 변종(AC≠INF) 곡 — 자동 입양 안전하지 않음`); return; }
     const txId = getTextageByTitle().get(normKey);
     if (!txId) return;                                 // textage-meta 에 그 곡 없음 → 입양 불가
     const txRows = candidates.filter((c) => c.textage_song_id != null);
@@ -813,7 +827,7 @@ window.OhsorryDb = (function () {
   }
 
   return {
-    VERSION: '0.0.411',
+    VERSION: '0.0.413',
     upsertUserProfile: upsertUserProfile,
     upsertUserChartScores: upsertUserChartScores,
     uploadResult: uploadResult,
