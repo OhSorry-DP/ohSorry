@@ -225,8 +225,8 @@ window.OhsorryDb = (function () {
   // textage-meta 에 txId 가 생겼는데 songMap 후보가 "옛 NULL행 1개" 뿐이면, 그 NULL행을
   //   textage행으로 흡수(ensure_song_adopt RPC) → 중복 textage행 생성/잔존 방지.
   // 조건(자동): txId 있음 + NULL행 후보 정확히 1개 + 같은 norm 의 다른 textage행이 동명이곡(≥2)이 아님
-  //   + series_no 동일(textage-meta 기준) + series_no != 99.
-  // 그 외(NULL≥2 / 동명이곡 / series 불일치 / series 99)는 자동 입양 금지 + 로그만.
+  //   + (series_no == 99(미검증 와일드카드) 이거나 series_no 동일). 최종 판단은 서버 title-norm 가드(ensure_song_adopt G1/G2)에 위임.
+  // 그 외(NULL≥2 / 동명이곡 / series 불일치(99 아닌데 다름))는 자동 입양 금지 + 로그만.
   // RPC 미적용/실패 시 graceful — 기존 NULL행 그대로 사용 (동작 불변), 재시도 폭주 방지로 마킹.
   const adoptedNorms = new Set();
   async function maybeAdopt(songMap, normKey, candidates) {
@@ -248,8 +248,7 @@ window.OhsorryDb = (function () {
     const meta = getTextageMeta();
     const txSeries = meta && meta.songs && meta.songs[txId] ? meta.songs[txId].series_no : null;
     if (nullRow.series_no == null || txSeries == null) { adoptedNorms.add(normKey); return; }
-    if (nullRow.series_no === 99) { adoptedNorms.add(normKey); console.log(`[OhsorryDb][adopt] skip "${normKey}": series_no=99 임시값`); return; }
-    if (nullRow.series_no !== txSeries) { adoptedNorms.add(normKey); console.log(`[OhsorryDb][adopt] skip "${normKey}": series 불일치 ${nullRow.series_no}!=${txSeries}`); return; }
+    if (nullRow.series_no !== 99 && nullRow.series_no !== txSeries) { adoptedNorms.add(normKey); console.log(`[OhsorryDb][adopt] skip "${normKey}": series 불일치 ${nullRow.series_no}!=${txSeries}`); return; }
     // 조건 충족 → 입양 RPC (명시 from_null_song_id 전달)
     try {
       const ret = await callRpc('ensure_song_adopt', {
