@@ -6,6 +6,10 @@ ohSorry 의 변경 이력입니다. 사용방법은 [README.md](README.md) 를 �
 - [modules/dbConn.js](modules/dbConn.js): `VERSION` `0.0.411` → **`0.0.413`**. `maybeAdopt`(옛 NULL행 → textage행 자동 입양)이 변종(AC≠INF 동일 title+diff 다중채보) 10곡에서 발동하면, `getTextageByTitle()`의 "같은 키 중복 시 첫 번째 우선" 로직이 AC/INF 중 어느 textage_song_id를 고를지 근거가 없어 잘못된 값이 NULL행에 영구 부착될 위험이 있었음. 서버 `ensure_song_adopt`의 G1/G2 가드도 title 일치만 검사해(변종은 정의상 title이 같음) 이 케이스를 걸러내지 못함 — 해당 title이면 자동 입양을 skip하도록 방어 추가(정본 title 목록은 ohSorryRating/variant-map.json에서 수동 복사, 이 repo는 fetch+eval 단일파일 구조라 import 불가).
 - 검증: 실 supabase 조회로 variant 10곡의 `songs.ac` 비트가 현재 AC/INF 각각 정확히 분리돼 있음을 확인(추가 안전장치, 즉각적인 데이터 오염은 없었음).
 
+### 2026-07-05 — dbConn maybeAdopt: NULL행 series_no=99 를 와일드카드로 통과 (입양 판단 서버 위임)
+- [modules/dbConn.js](modules/dbConn.js): `maybeAdopt`(옛 NULL행 → textage행 자동 입양) 의 series_no 게이트를 완화. 기존엔 NULL행 `series_no === 99`(임시/미검증값)를 무조건 skip 했는데, 99 는 "미검증"일 뿐 불일치가 아니므로 **와일드카드로 통과**시키고 최종 병합 가부는 서버 `ensure_song_adopt` 의 title-norm 가드(G1/G2)에 위임. 진짜 series 불일치(`nr.series_no !== 99 && nr.series_no !== txSeries`)만 skip 유지.
+- 서버 가드(약한 norm 일치)가 최종 방어선이라 클라이언트에서 99 를 미리 막을 근거가 없었고, 막으면 실제로 입양돼야 할 NULL행이 영구 잔존하던 문제. RPC 미적용/실패 시 graceful fallback(기존 NULL행 유지) 동작 불변.
+
 ### 2026-06-27 — calcOhsorryCore 0.0.409: SP 대표 실력값 sp_star 게이지 보정 채택
 - [modules/calcOhsorryCore.js](modules/calcOhsorryCore.js): CORE_VERSION `0.0.408` → **`0.0.409`**. SP 업로드 시 `spSkillLib.computeUserSpCpi(unified)` → **`computeSpStarGuarded`**(있으면) 로 교체 — `sp_star = max(unified85★, guardedGaugeAvg50)`(게이지 편향 보정), `sp_cpi` 는 unified85 원좌표 보존. 정본 커널 = ohSorryRating `modules/spSkillCpi.js`.
 - **graceful**: `computeSpStarGuarded` 미배포(구 gist) 환경은 `computeUserSpCpi(unified)` 로 자동 fallback. 로그에 unified85★ + gauge보정 적용 여부 표기.
