@@ -2,6 +2,11 @@
 
 ohSorry 의 변경 이력입니다. 사용방법은 [README.md](README.md) 를 참고하세요.
 
+### 2026-07-18 — calcOhsorryCore 0.0.410: SP 단독 입력 웹훅 미발화 레이스 수정
+- [modules/calcOhsorryCore.js](modules/calcOhsorryCore.js): `VERSION`/`CORE_VERSION_SHORT` `0.0.409` → **`0.0.410`**. SP 경로의 `upsertUserProfile`(users 갱신 = dump-trigger 웹훅 트리거) 호출이 리턴값을 확인하지 않아, `checkUploadEnabled` 의 fail-closed(service-status gist fetch 순간 실패, 결과 미캐시)로 이 호출만 조용히 차단되고 뒤이은 scores upsert 는 재fetch 성공으로 통과하던 레이스를 수정. → **profile upsert 리턴값 체크 + 실패 시 400ms 후 1회 재시도**, 최종 실패 시 명시적 경고 로그.
+- 증상: users row 미갱신 → 웹훅 미발화 → 리포트가 만들어지지 않음. scores 는 DB 에 정상 반영돼 "데이터는 있는데 SP 리포트만 없음"으로 나타남(72281972 전례, 수동 재덤프로 복구). profile 이 성공하면 service-status 성공응답이 캐시(5분)에 채워져 뒤의 scores upsert 통과도 함께 보장.
+- `dbConn.js` 는 무변경(DP 전체 플로우 무영향). `node --check` OK.
+
 ### 2026-07-17 — docs 현행화: SP 대표 실력값 + 버전(core 0.0.409/dbConn 0.0.413) + 36피처 (코드 무변경)
 - 7월 변경(SP `sp_cpi`/`sp_star` 산출, dbConn 변종곡 입양 차단·99 와일드카드)과 그간 누락분을 대조해 docs 를 실제 소스에 맞춰 정정. **문서만 수정, 코드 무변경.**
 - [docs/sp.md](docs/sp.md): "SP 는 ★추정을 건너뛴 경량 업로드"만 서술하던 것을 정정 — DP 별값 ★추정은 여전히 skip 하되 **SP12 클리어 × `cpi.json` 로 SP 대표 실력값 `sp_cpi`(unified85 CPI)·`sp_star`(発狂★, `max(unified85★, guardedGaugeAvg50)` 게이지 보정)를 산출해 `users` 에 upsert** 함을 §2 단계·요약표·한줄요약에 반영. 버전 `core 0.0.407→0.0.409` / `dbConn 0.0.411→0.0.413`.

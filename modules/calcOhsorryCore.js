@@ -365,7 +365,7 @@ async function __fetchRivalToken(iidxId) {
 }
 
 window.OhsorryCore = {
-  VERSION: '0.0.407',
+  VERSION: '0.0.410',
   prefetch: __loadCoreData,        // 모달 떠 있는 동안 미리 호출 → compute 캐시 hit (로딩 단축)
   fetchProfile: __fetchProfile,    // wrapper 가 모달 상단 프로필 채울 때
   fetchRivalToken: __fetchRivalToken,  // IIDX ID → 라이벌 토큰 (라이벌 모드 판정)
@@ -377,7 +377,7 @@ window.OhsorryCore = {
   const isRival = mode === 'rival';
   const rivalToken = opts.rivalToken || null;
   const wrapperVersion = opts.wrapperVersion || 'unknown';
-  const CORE_VERSION_SHORT = '0.0.409'.replace(/^0\.0\./, '');  // '409' — sp_star 게이지 보정 max(unified85, guardedGaugeAvg50)
+  const CORE_VERSION_SHORT = '0.0.410'.replace(/^0\.0\./, '');  // '410' — SP profile upsert 리턴값 체크+재시도(웹훅 미발화 레이스 방지)
   const dbVersionString = `${wrapperVersion}-core${CORE_VERSION_SHORT}`;
 
   // -------- 0. 데이터 로드 (ereter/textage/ohSorryRating + 별값 lib) — 모듈 공유 __loadCoreData --------
@@ -611,7 +611,15 @@ window.OhsorryCore = {
             console.log(`[SP] 대표 실력값 sp_cpi=${spCpiInt} sp_star=${spStarRounded}${sp.uniStarRounded != null ? ` (unified85 ★${sp.uniStarRounded}${sp.applied ? ', gauge보정' : ''})` : ''} (pairs ${sp.nPairs})`);
           } catch (e) { console.warn('[SP] computeSpStarGuarded 실패:', e && e.message); }
         }
-        await window.OhsorryDb.upsertUserProfile({
+        // SP 단독 입력은 이 profile upsert(users 테이블 갱신)가 사실상 "웹훅 트리거 전용" 호출이다.
+        //   users row 가 안 바뀌면 dump-trigger 웹훅이 안 떠서 리포트가 영영 안 만들어진다.
+        //   그런데 upsertUserProfile / upsertUserChartScores 는 각각 따로 checkUploadEnabled() 를 호출하고,
+        //   그 안의 service-status gist fetch 가 순간 실패하면 fail-closed(그 결과는 캐시 안 함)로 이 호출만
+        //   조용히 차단(return {ok:false})된다. 뒤이은 scores upsert 는 재fetch 성공으로 통과 →
+        //   "scores 만 반영되고 리포트는 미발화" 레이스가 실제로 발생(72281972).
+        //   → 리턴값을 확인하고 실패 시 1회 재시도한다. profile 이 성공하면 service-status 성공응답이
+        //     캐시(5분)에 채워져 바로 뒤의 scores upsert 통과도 함께 보장된다.
+        const spProfilePayload = {
           iidx_id: spIidx,
           dj_name: profile.djName || null,
           star_estimate: prevStar,       // 기존값 보존 (없으면 null)
@@ -623,7 +631,17 @@ window.OhsorryCore = {
           notes_radar: profileHasRadar
             ? { sp: hasRadarData(profile.spRadar) ? profile.spRadar : null, dp: hasRadarData(profile.dpRadar) ? profile.dpRadar : null }
             : null,
-        });
+        };
+        let spProfRes = await window.OhsorryDb.upsertUserProfile(spProfilePayload);
+        if (!spProfRes || !spProfRes.ok) {
+          console.warn('[SP profile upsert] 1차 실패 — 재시도:', spProfRes && spProfRes.error);
+          await new Promise((r) => setTimeout(r, 400));
+          spProfRes = await window.OhsorryDb.upsertUserProfile(spProfilePayload);
+        }
+        if (!spProfRes || !spProfRes.ok) {
+          // 최종 실패 시 users 미갱신 → 웹훅/리포트 미발화. 로그로 명시(scores 는 아래에서 별도 진행).
+          console.warn('[SP profile upsert] 최종 실패 — 웹훅/리포트 미발화 위험:', spProfRes && spProfRes.error);
+        }
       } catch (e) { console.warn('[SP profile upsert]', e && e.message); }
 
       const spRows = spPlayed
