@@ -58,7 +58,7 @@ zasa.sakura.ne.jp 콘솔. 가드 `zasa.sakura.ne.jp`(`:17`). 대상 `/dp/run.php
 | `ereter-data.json` (gist) | `extractedAt, source, count, playerCount, charts[], players{}` | charts: `{title, diff, level, ec, hc, exh, ec_n, hc_n, exh_n}` / players: `{iidxId: ★}` | **(core)** 별값 추정·매칭·ereter_star 룩업의 정본 |
 | `ohSorryRating.json` (gist) | `{ratings:[...]}` | `{title, diff, zasaLevel, gameLevel, estEc, estHc, estExh, nEcCleared...}` | **(core)** 별값 inferEreter 입력 + chartScoreRows.level/lv12 카운트 fallback |
 | `textage-meta.json` (gist) | `{generatedAt, count, songs:{id:{...}}}` | `{title, notes:{DN,DH,DA,DX,DB}, levels:{...}, series_no}` | **(core)** series gameLevel 역추정. **(dbConn)** noteCount(피처 scoreRate) |
-| `feature-scores-slim.json` (gist) | `{scores:{songId:{chartName:{feat:0~100}}}}` | 차트별 28 feature quantile | **(dbConn)** 28차 feature score upsert |
+| `feature-scores-slim.json` (gist) | `{scores:{songId:{chartName:{feat:0~100}}}}` | 차트별 36 feature quantile | **(dbConn)** 36차 feature score upsert |
 | `service-status.json` (gist 30c3ba6) | `{uploadEnabled, shelfEnabled, message, notInINF[]}` | — | **(dbConn)** 업로드 kill-switch |
 | `zasa-data.json` (gist) | `extractedAt, source, count, …, charts[]` | `{title, diff, gameLevel, level}` | ereter 미등록 차트 곡수 보강 — **core 미사용**(웹/관리자용) |
 | `patterns-dp-1112.json` (+0810/rest, gist) | `{songId:{t, c:{DP_NOR,…}}}` | 차트별 28차 패턴 pt | userVec/추천 매칭 — **오소리웹·레이팅 전용**(core 미사용) |

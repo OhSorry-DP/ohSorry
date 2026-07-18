@@ -2,6 +2,12 @@
 
 ohSorry 의 변경 이력입니다. 사용방법은 [README.md](README.md) 를 참고하세요.
 
+### 2026-07-17 — docs 현행화: SP 대표 실력값 + 버전(core 0.0.409/dbConn 0.0.413) + 36피처 (코드 무변경)
+- 7월 변경(SP `sp_cpi`/`sp_star` 산출, dbConn 변종곡 입양 차단·99 와일드카드)과 그간 누락분을 대조해 docs 를 실제 소스에 맞춰 정정. **문서만 수정, 코드 무변경.**
+- [docs/sp.md](docs/sp.md): "SP 는 ★추정을 건너뛴 경량 업로드"만 서술하던 것을 정정 — DP 별값 ★추정은 여전히 skip 하되 **SP12 클리어 × `cpi.json` 로 SP 대표 실력값 `sp_cpi`(unified85 CPI)·`sp_star`(発狂★, `max(unified85★, guardedGaugeAvg50)` 게이지 보정)를 산출해 `users` 에 upsert** 함을 §2 단계·요약표·한줄요약에 반영. 버전 `core 0.0.407→0.0.409` / `dbConn 0.0.411→0.0.413`.
+- [docs/README.md](docs/README.md)·[docs/modules.md](docs/modules.md): calcOhsorryCore `0.0.407→0.0.409`, dbConn `0.0.411→0.0.413`. modules RPC 표 — `upsert_user` 7-arg→**9-arg**(`p_sp_cpi`/`p_sp_star`), `upsert_scores` row 에 `play_style`, `upsert_user_feature_score` 28→**36 numeric**(신규 8). 헤더-객체 버전 불일치 주의문(옛 예시 0.0.401 vs 0.0.411)을 현행(주석 잔재)으로 갱신.
+- [docs/algorithms.md](docs/algorithms.md)·[docs/data-pipeline.md](docs/data-pipeline.md): "28차 피쳐 점수"→**36차**(겹계단·계마·양손계단 8 추가), `feature-scores-slim` 28→36 feature.
+
 ### 2026-07-05 — dbConn 0.0.413: 변종곡 자동입양 차단 (E1 후속)
 - [modules/dbConn.js](modules/dbConn.js): `VERSION` `0.0.411` → **`0.0.413`**. `maybeAdopt`(옛 NULL행 → textage행 자동 입양)이 변종(AC≠INF 동일 title+diff 다중채보) 10곡에서 발동하면, `getTextageByTitle()`의 "같은 키 중복 시 첫 번째 우선" 로직이 AC/INF 중 어느 textage_song_id를 고를지 근거가 없어 잘못된 값이 NULL행에 영구 부착될 위험이 있었음. 서버 `ensure_song_adopt`의 G1/G2 가드도 title 일치만 검사해(변종은 정의상 title이 같음) 이 케이스를 걸러내지 못함 — 해당 title이면 자동 입양을 skip하도록 방어 추가(정본 title 목록은 ohSorryRating/variant-map.json에서 수동 복사, 이 repo는 fetch+eval 단일파일 구조라 import 불가).
 - 검증: 실 supabase 조회로 variant 10곡의 `songs.ac` 비트가 현재 AC/INF 각각 정확히 분리돼 있음을 확인(추가 안전장치, 즉각적인 데이터 오염은 없었음).

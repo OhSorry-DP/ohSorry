@@ -1,6 +1,6 @@
-# algorithms — 별값 추정·28차 피쳐 점수
+# algorithms — 별값 추정·36차 피쳐 점수
 
-> **[구조개편 2C, 2026-06-16]** core 가 실제로 하는 계산은 **별값(★) 추정 한 가지** + dbConn 의 28차 피쳐 점수뿐입니다. 추천곡·약점분석·★-모델 내부 수식은 core 에서 제거돼 **오소리레이팅**으로 이관됐습니다(아래 §3 포인터).
+> **[구조개편 2C, 2026-06-16]** core 가 실제로 하는 계산은 **별값(★) 추정 한 가지** + dbConn 의 36차 피쳐 점수뿐입니다. 추천곡·약점분석·★-모델 내부 수식은 core 에서 제거돼 **오소리레이팅**으로 이관됐습니다(아래 §3 포인터).
 > 상위 조망: [`../../docs/ohSorry.md`](../../docs/ohSorry.md) · 인덱스: [README.md](README.md)
 
 > ★추정 모델 본체(OSR13.5+/onlyOSR/onlyOSRtoEreter)는 core 가 fetch+eval 하는 **별도 gist lib** 라 이 repo `modules/` 에는 소스가 없습니다. 실제 소스·수식은 [ohSorryRating](../../ohSorryRating/) 의 [`modules/`](../../ohSorryRating/modules/) + [docs/model.md](../../ohSorryRating/docs/model.md). 아래는 "core 가 호출하는 인터페이스" 까지만.
@@ -43,15 +43,15 @@ nativeStar   = r2e.ohsorryStar;  // 전체곡 native 50% (절대 실력)
 
 ---
 
-## 2. 28차 피쳐 점수 (supabase 저장용) — dbConn
+## 2. 36차 피쳐 점수 (supabase 저장용) — dbConn
 
-추천/약점 userVec 와 달리, **28차 손별 feature score 는 dbConn 이 업로드 시 자체 계산**(`computePatternScoreVec(iidxId)`, `dbConn.js:558-636`):
+추천/약점 userVec 와 달리, **36차 손별 feature score 는 dbConn 이 업로드 시 자체 계산**(`computePatternScoreVec(iidxId)`, `dbConn.js:724~`. 산식은 ohSorryRating `patternScoreKernel.js` 정본의 inline 동기 사본 `:661~`):
 - `feature-scores-slim.json`(차트별 quantile 0~100) + textage notes 로 `scoreRate = ex_score/(noteCount·2)`.
 - `points = featureScore · scoreRate`, score=0 제외, feature 별 desc top 30(`TOP_N`) 가중합.
 - `SKILL_WEIGHTS`(dbConn `:549-557`): 1~5위 = 1.0, 6~30위 = `(90 − i·85/24)/100` 선형 감소(90%→약 5%).
-- 결과 28차 → `upsert_user_feature_score` RPC. userVec(휘발, 개인 내 상대)와 달리 feature_score 는 절대(사용자간 비교) + supabase 영속.
+- 결과 36차 → `upsert_user_feature_score`(37-arg) RPC. userVec(휘발, 개인 내 상대)와 달리 feature_score 는 절대(사용자간 비교) + supabase 영속.
 
-기본 10 feature(NOTES/CHORD/PEAK/CHARGE/SCRATCH/SOF-LAN/PHRASE/JACK/TRILL/RAND) + 손별 18(STAIR_UP/DN_L·R, K1~K7_L·R). 키 매핑은 [data-pipeline.md](data-pipeline.md#32-키-매핑-메모).
+기본 10 feature(NOTES/CHORD/PEAK/CHARGE/SCRATCH/SOF-LAN/PHRASE/JACK/TRILL/RAND) + 손별 18(STAIR_UP/DN_L·R, K1~K7_L·R) + 신규 8(DOUBLE_STAIR_L·R, KEIMA_L·R, HSTAIR_ONEHAND/SYNC/SAMESHAPE/DIFFSHAPE). 키 매핑은 [data-pipeline.md](data-pipeline.md#32-키-매핑-메모).
 
 ---
 

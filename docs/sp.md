@@ -1,6 +1,6 @@
 # SP(싱글플레이) 모드 — ohSorry 본체
 
-> **한 줄 요약**: 본체가 eagate 에서 **SP10~12 점수**를 크롤해 Supabase `scores` 에 `play_style:0` 으로 적재한다(웹 SP 표시용 데이터 생산). 모달 DP/SP 탭은 **own·rival 공통** — DP 누르면 DP만, SP 누르면 SP만. SP 는 ★추정을 건너뛴 **경량 업로드**. (2026-06-16, core 0.0.407 / dbConn 0.0.411)
+> **한 줄 요약**: 본체가 eagate 에서 **SP10~12 점수**를 크롤해 Supabase `scores` 에 `play_style:0` 으로 적재한다(웹 SP 표시용 데이터 생산). 모달 DP/SP 탭은 **own·rival 공통** — DP 누르면 DP만, SP 누르면 SP만. DP 방식의 ★추정은 건너뛰지만(**경량 업로드**), SP12 클리어 × `cpi.json` 로 **SP 대표 실력값 `sp_cpi`/`sp_star`** 를 산출해 `users` 에 함께 올린다. (2026-06-16 도입 / SP 대표 실력값 2026-06-27, core 0.0.409 / dbConn 0.0.413)
 
 이 문서는 본체의 **SP 분기**만 다룹니다. DP 별값 계산은 [algorithms.md](algorithms.md), 모듈 구조는 [modules.md](modules.md), 로딩 흐름은 [architecture.md](architecture.md) 를 보세요. (추천/약점은 core 에서 제거돼 오소리레이팅 담당.)
 
@@ -26,26 +26,27 @@
 
 ## 2. SP — 경량 업로드 분기 (`calcOhsorryCore.js:556-606`)
 
-[../modules/calcOhsorryCore.js](../modules/calcOhsorryCore.js) (CORE_VERSION `0.0.407`)
+[../modules/calcOhsorryCore.js](../modules/calcOhsorryCore.js) (CORE_VERSION `0.0.409`)
 
 ```js
 const isSpMode = opts.playStyle === 'SP';   // 모달 SP 탭
 const style = isSpMode ? '0' : '1';          // eagate 크롤 style: 0=SP, 1=DP
 ```
 
-`isSpMode` 면 **★추정 스킵**(추천/약점은 DP·SP 무관하게 이미 core 에서 제거됨)하고 다음만 한다:
+`isSpMode` 면 **DP 방식의 ★추정 스킵**(추천/약점은 DP·SP 무관하게 이미 core 에서 제거됨)하고 다음만 한다:
 1. eagate SP(style=0) series 크롤 → textage 로 SP gameLevel 역추정(`fillGameLevel(charts, true)`).
-2. 프로필(users + user_radars) upsert — ★는 새로 안 구하므로 `fetchUserStars` 로 기존 star/ereter_star 조회해 그대로 재전송(없으면 null), dj_name/단위/radar 만 갱신.
-3. `gameLevel 10~12` & 플레이 흔적 있는 행을 `play_style:0` 으로 `upsertUserChartScores(spRows)` 업로드.
-4. own·rival 모두 **완료 박스**(`__ohsorryShowDone(profile, 'SP')`) — DJ명·SP단위 + 오소리웹 **SP 리센트** 카드 버튼(`#user@{id}#ps@SP#tab@recent`). 여러 명이면 wrapper 가 리스트로(`suppressDone`).
+2. **SP 대표 실력값 산출**(`spSkillLib` + `cpi.json` 로드 시) — SP12 클리어(`allCharts`) × `cpi.json` 로 `computeSpStarGuarded`(있으면) 호출. `sp_cpi` = unified85 원좌표(클리어율 85% 교차 CPI), `sp_star` = `max(unified85★, guardedGaugeAvg50)`(게이지 편향 보정). 표본부족(SP12 클리어 5곡 미만)이면 null. `computeSpStarGuarded` 미배포(구 gist)면 `computeUserSpCpi(unified)` 로 graceful fallback.
+3. 프로필(users + user_radars) upsert — DP 별값 `star`/`ereter_star` 는 새로 안 구하므로 `fetchUserStars` 로 기존값 조회해 그대로 재전송(없으면 null), `sp_cpi`/`sp_star`(2번 산출값, null 이면 COALESCE 보존)·dj_name/단위/radar 갱신.
+4. `gameLevel 10~12` & 플레이 흔적 있는 행을 `play_style:0` 으로 `upsertUserChartScores(spRows)` 업로드.
+5. own·rival 모두 **완료 박스**(`__ohsorryShowDone(profile, 'SP')`) — DJ명·SP단위 + 오소리웹 **SP 리센트** 카드 버튼(`#user@{id}#ps@SP#tab@recent`). 여러 명이면 wrapper 가 리스트로(`suppressDone`).
 
-> ★를 거치지 않는 이유: SP 별값 모델이 아직 없다(DP 전용). 본체는 SP **점수만 수집**하고, 표시는 웹이 gist 데이터(서열표/피처/CPI)로 처리한다.
+> DP **별값(★) 모델을 SP 에 쓰지 않는 이유**: DP 전용 모델이라 SP 에 직접 적용 못 한다. 대신 SP 는 CPI(클리어율 실력선) 기반의 별도 대표 실력값 `sp_cpi`/`sp_star` 를 쓴다(정본 커널 = ohSorryRating `spSkillCpi.js`). 서열표/피처 등 나머지 표시는 웹이 gist 데이터로 처리한다.
 
 ---
 
 ## 3. dbConn — `play_style` PK 분리
 
-[../modules/dbConn.js](../modules/dbConn.js) (v0.0.411, `upsertUserChartScores`)
+[../modules/dbConn.js](../modules/dbConn.js) (v0.0.413, `upsertUserChartScores`)
 
 SP/DP 가 **같은 곡·같은 채보·같은 버전**이어도 공존하도록, `play_style` 을 upsert row 와 dedup PK 에 포함했다.
 
@@ -79,10 +80,11 @@ const pk = `${songId}|${r.iidx_id}|${diffInt}|${playedVersion}|${playStyle}`;  /
 | 진입 | 모달 DP/SP 탭 (own·rival 공통) |
 | SP 크롤 style | `0` (DP=`1`) |
 | SP 적재 레벨 | gameLevel 10·11·12 (textage 역추정) |
-| ★추정 | **SP 는 스킵**(경량, 기존 star 보존) |
+| ★추정(DP 별값) | **SP 는 스킵**(경량, 기존 star/ereter_star 보존) |
+| SP 대표 실력값 | `sp_cpi`(unified85 CPI)·`sp_star`(発狂★, 게이지 보정) 산출 → `users` upsert. 표본부족이면 null(COALESCE 보존) |
 | 완료 박스 | own·rival 공통 — DJ명·SP단위 + SP 리센트 카드 버튼 |
 | 적재 | `scores` `play_style:0`, gameLevel 10~12 |
 | dedup PK | `song_id\|iidx_id\|diff\|played_version\|play_style` |
-| 핵심 파일 | `ohsorry.js`(탭/파싱), `calcOhsorryCore.js`(0.0.407), `dbConn.js`(0.0.411) |
+| 핵심 파일 | `ohsorry.js`(탭/파싱), `calcOhsorryCore.js`(0.0.409), `dbConn.js`(0.0.413) |
 
 > **상태: 구현됨 · 데이터 생산만** — 본체는 SP 점수 수집/적재까지. SP 의 서열표·추천·분석·배치 표시는 오소리웹 담당([../../docs/ohSorryWeb.md], [../../ohSorryWeb/docs/sp.md](../../ohSorryWeb/docs/sp.md)).

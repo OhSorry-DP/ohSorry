@@ -9,7 +9,7 @@
 
 ## calcOhsorryCore.js — 수집/업로더 마스터
 
-- 등록: `window.OhsorryCore`, `VERSION: '0.0.407'` (`calcOhsorryCore.js:290-291`)
+- 등록: `window.OhsorryCore`, `VERSION: '0.0.409'` (`calcOhsorryCore.js:380`, `CORE_VERSION_SHORT`)
 - export: `prefetch`(=`__loadCoreData`), `fetchProfile`, `fetchRivalToken`, `showDoneList`, `compute(opts)` (`:290-295`)
 - 책임: ereter/textage/rating JSON + 별값 lib 3종 fetch+캐시, eagate series 크롤 위임, 곡 매칭, **별값(★) 추정**, 프로필 fetch, dbPayload/chartScoreRows build, `dbConn.uploadResult` 호출, 완료 박스/리스트. **결과 렌더·추천·약점분석은 안 함**(이관·제거, 작은 floating spinner + 완료 박스만 DOM 조작).
 
@@ -40,25 +40,25 @@
 
 ## dbConn.js — Supabase 통신
 
-- 등록: `window.OhsorryDb`, `VERSION: '0.0.411'` (`dbConn.js:698`; 헤더 주석 `0.0.401` 과 불일치 — 객체값 정본)
+- 등록: `window.OhsorryDb`, `VERSION: '0.0.413'` (`dbConn.js:830`; 헤더 주석도 `v0.0.413` 일치. 소스 중간의 주석 처리된 `// VERSION: '0.0.401'` 은 옛 잔재 — 객체값 정본)
 - export(`:669-677`): `upsertUserProfile`, `upsertUserChartScores`, `uploadResult`, `fetchUserProfile`, `fetchServiceStatus`, `getSongsByNorm`(=`getSongsCache`)
 - 연결: `SUPABASE_URL='https://cvxpeecxiawddmrzbdvn.supabase.co'` (`:52`), legacy JWT anon key `SUPABASE_KEY` (`:54`). RPC wrapper `callRpc(name, body)` → `POST /rest/v1/rpc/{name}` (`:213-226`).
 
 ### 호출 RPC / 테이블
 | RPC | 코드 | 페이로드 |
 |-----|------|----------|
-| `upsert_user` | `:259-267` | `p_iidx_id, p_dj_name, p_star, p_ereter_star, p_sp_rank, p_dp_rank, p_native_star` |
+| `upsert_user` | `:349-359` | `p_iidx_id, p_dj_name, p_star, p_ereter_star, p_sp_rank, p_dp_rank, p_native_star, p_sp_cpi, p_sp_star` (9-arg — SP 대표 실력값 `sp_cpi`/`sp_star` 포함, null 이면 COALESCE 보존) |
 | `upsert_user_radar` | `:234-243` | `p_iidx_id, p_play_style(0=SP/1=DP), p_notes/peak/charge/chord/scratch/soft` |
-| `upsert_scores` | `:404` | `p_rows:[{song_id, iidx_id, diff, lamp, ex_score, played_version, date}]` |
+| `upsert_scores` | `:404` | `p_rows:[{song_id, iidx_id, diff, lamp, ex_score, played_version, play_style, date}]` (`play_style` 0=SP/1=DP, 기본 1 — dedup PK 에 포함) |
 | `ensure_song` | `:337-342` | `p_title, p_textage_song_id, p_ac, p_legen` → song_id 반환 |
 | `bump_song_series` | `:411-414` | `p_song_ids[], p_series_no` |
-| `upsert_user_feature_score` | `:643-666` | `p_iidx_id` + 28 numeric(`p_os_notes...p_os_k7_r`) |
+| `upsert_user_feature_score` | `:798-825` | `p_iidx_id` + 36 numeric(`p_os_notes...p_os_k7_r` + 신규 8: `p_os_double_stair_l/r`·`p_os_keima_l/r`·`p_os_hstair_onehand/sync/sameshape/diffshape`) |
 | `get_user_profile_full` | `:436-439` | `p_iidx_id` (직접 fetch) |
 | `make_grid_data` | `:574-580` | `p_iidx_id` + `?limit&offset` 페이지네이션 (직접 fetch) |
 | `GET /rest/v1/songs` | `:143-144` | `select=song_id,title,ac,legen` 1000개씩 페이징 |
 
 - `uploadResult(result)`: `result.dbPayload` 기반. payload 없음 시 skip → `upsertUserProfile` → `upsertUserChartScores` → 패턴 점수 `computePatternScoreVec(iidxId)` → `upsert_user_feature_score`. (구 `opts.dbData`(타유저 DB뷰) skip 분기는 core 가 DB 모드를 안 보내므로 사실상 미사용.)
-- **28차 손별 feature score 는 dbConn 이 직접 계산**(`computePatternScoreVec`, `:558-636`) — calcWeakness 호출 아님. feature-scores-slim.json + textage notes 로 `scoreRate=ex_score/(noteCount×2)`, feature별 top 30 가중합.
+- **36차 손별 feature score 는 dbConn 이 직접 계산**(`computePatternScoreVec`, `:724~`; 산식은 ohSorryRating `patternScoreKernel.js` inline 동기 사본 `:661~`) — calcWeakness 호출 아님. feature-scores-slim.json + textage notes 로 `scoreRate=ex_score/(noteCount×2)`, feature별 top 30 가중합.
 - `getSongsByNorm()` (`:136-174`): songs 를 `Map<normKey, [{song_id,title,ac,legen}]>` 로. ac/legen 비트맵(INF=2, AC=1) + Ø/ø alias 추가 등록.
 - kill-switch: `fetchServiceStatus()` (`:70-90`) gist service-status.json 5분 캐시 **fail-closed**. `checkUploadEnabled()` 가 업로드 2종 진입부에서 차단.
 
