@@ -630,6 +630,17 @@ window.OhsorryDb = (function () {
       } catch (e) {
         console.warn('[OhsorryDb] pattern 점수 계산/upsert 예외:', e && e.message);
       }
+      // 5b. SP 피쳐 스코어 — DB 에 SP 채보 점수(play_style=0)가 있는 유저만. 없으면 null → 조용히 skip.
+      //     DP 와 별개 row(play_style=0)라 서로 덮어쓰지 않는다. DP 와 독립 try — SP 실패가 DP 결과에 영향 없게.
+      try {
+        const spVec = await computeSpPatternScoreVec(iidxId);
+        if (spVec) {
+          await callUpsertFeatureScore(iidxId, spVec, 0);
+          console.log('[OhsorryDb] SP feature score upsert 성공 (NOTES=' + spVec.NOTES.toFixed(1) + ' charts=' + spVec.__count + ')');
+        }
+      } catch (e) {
+        console.warn('[OhsorryDb] SP pattern 점수 계산/upsert 예외:', e && e.message);
+      }
     }
     return out;
   }
@@ -639,8 +650,10 @@ window.OhsorryDb = (function () {
   //   textage-meta: 차트별 notes 수 (score rate = ex_score / (notes×2) 계산용).
   //   첫 호출 시 fetch + cache (메모리, 페이지 lifetime).
   const FEATURE_SCORES_URL = 'https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw/feature-scores-slim.json';
+  const SP_FEATURE_SCORES_URL = 'https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw/sp-feature-scores-slim.json';
   const TEXTAGE_META_URL   = 'https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw/textage-meta.json';
   let featureScoresCache = null;
+  let spFeatureScoresCache = null;
   let textageMetaCache = null;
   async function getFeatureScores() {
     if (featureScoresCache) return featureScoresCache;
@@ -648,6 +661,13 @@ window.OhsorryDb = (function () {
     if (!res.ok) throw new Error('feature-scores HTTP ' + res.status);
     featureScoresCache = await res.json();
     return featureScoresCache;
+  }
+  async function getSpFeatureScores() {
+    if (spFeatureScoresCache) return spFeatureScoresCache;
+    const res = await fetch(SP_FEATURE_SCORES_URL + '?t=' + Date.now(), { cache: 'no-store' });
+    if (!res.ok) throw new Error('sp-feature-scores HTTP ' + res.status);
+    spFeatureScoresCache = await res.json();
+    return spFeatureScoresCache;
   }
   async function getTextageMeta() {
     if (textageMetaCache) return textageMetaCache;
@@ -714,6 +734,31 @@ window.OhsorryDb = (function () {
   }
   // ===== PATTERN_SCORE_KERNEL_END =====
 
+  // make_grid_data 페이지네이션 fetch (DP/SP 공용).
+  //   PostgREST RPC 는 기본 max_rows=1000. plays 많은 유저는 한 번에 다 못 받으므로
+  //   ?limit=&offset= 페이지네이션 (ohSorryWeb api.js / backfill-pattern-score.js 와 동일 패턴).
+  //   playStyle 을 넘기면 p_play_style 인자 전송(0=SP). 생략 시 미전송 → RPC DEFAULT 1(DP), 기존 호출과 동일.
+  async function fetchGridRows(iidxId, playStyle) {
+    const pageSize = 1000;
+    const rows = [];
+    let offset = 0;
+    for (;;) {
+      const body = { p_iidx_id: iidxId };
+      if (playStyle != null) body.p_play_style = playStyle;
+      const res = await fetch(
+        SUPABASE_URL + `/rest/v1/rpc/make_grid_data?limit=${pageSize}&offset=${offset}`,
+        { method: 'POST', headers: HEADERS, body: JSON.stringify(body) },
+      );
+      if (!res.ok) throw new Error('make_grid_data HTTP ' + res.status);
+      const page = await res.json();
+      if (!Array.isArray(page) || page.length === 0) break;
+      rows.push(...page);
+      if (page.length < pageSize) break;
+      offset += pageSize;
+    }
+    return rows;
+  }
+
   // make_grid_data 로 유저의 supabase 저장 차트 받아 → rows → entries 어댑터 → 공용 kernel.
   //   1. chart 의 36 feature quantile score (0~100) lookup
   //   2. score rate = ex_score / (notes × 2)  (IIDX 표준 EX rate, 0~1)
@@ -731,26 +776,7 @@ window.OhsorryDb = (function () {
     const scores = fsData.scores;
     const songsMeta = textageMeta.songs;
 
-    // PostgREST RPC 는 기본 max_rows=1000. plays 많은 유저는 한 번에 다 못 받으므로
-    //   ?limit=&offset= 페이지네이션 (ohSorryWeb api.js / backfill-pattern-score.js 와 동일 패턴).
-    const pageSize = 1000;
-    const rows = [];
-    let offset = 0;
-    for (;;) {
-      const res = await fetch(
-        SUPABASE_URL + `/rest/v1/rpc/make_grid_data?limit=${pageSize}&offset=${offset}`,
-        {
-          method: 'POST', headers: HEADERS,
-          body: JSON.stringify({ p_iidx_id: iidxId }),
-        },
-      );
-      if (!res.ok) throw new Error('make_grid_data HTTP ' + res.status);
-      const page = await res.json();
-      if (!Array.isArray(page) || page.length === 0) break;
-      rows.push(...page);
-      if (page.length < pageSize) break;
-      offset += pageSize;
-    }
+    const rows = await fetchGridRows(iidxId);
     if (rows.length === 0) return null;
 
     const DIFF_INT_TO_FEATURE_KEY = { 1: 'DP_NOR', 2: 'DP_HYP', 3: 'DP_ANO', 4: 'DP_LEG' };
@@ -781,10 +807,67 @@ window.OhsorryDb = (function () {
     return Object.assign({ __count: matched }, vec);
   }
 
-  // 오소리 피쳐 스코어 upsert — user_ohsorry_radars (play_style=1, DP).
-  // RPC 시그니처: migration_ohsorry_36feat.sql 의 37 인자 (text + 36 numeric).
+  // SP 오소리 피쳐 스코어 — 위 DP computePatternScoreVec 의 SP 판. 공용 kernel 을 그대로 재사용한다.
+  //   DP 와 다른 것은 입력 3가지뿐:
+  //     1) rows  = make_grid_data(p_play_style=0)  — SP 채보 점수
+  //     2) 채보키 = sp-feature-scores-slim.json 의 SP_NOR/SP_HYP/SP_ANO/SP_LEG
+  //     3) 노트수 = textage-meta notes 의 SN/SH/SA/SX
+  //   ⚠️ 반환은 10 피처만. SP 채보 피처엔 K1~K7/STAIR_UP/STAIR_DN 도 있으나 SP 는 손(L/R) 구분이 없어
+  //      DP 전용 26 dim(K*_L/R·STAIR_*_L/R·겹계단/계마/양손계단) 컬럼에 대응시킬 수 없다. kernel 은 키가 없는
+  //      feature 를 0 으로 내므로 그 0 들은 버리고(=DB 에 NULL 전송) 10 피처만 적재한다.
+  const SP_UPSERT_FEATS = [
+    'NOTES', 'CHORD', 'PEAK', 'CHARGE', 'SCRATCH', 'SOF-LAN', 'PHRASE', 'JACK', 'TRILL', 'RAND',
+  ];
+  async function computeSpPatternScoreVec(iidxId) {
+    const [fsData, textageMeta] = await Promise.all([
+      getSpFeatureScores().catch(() => null),
+      getTextageMeta().catch(() => null),
+    ]);
+    if (!fsData || !fsData.scores) return null;
+    if (!textageMeta || !textageMeta.songs) return null;
+    const scores = fsData.scores;
+    const songsMeta = textageMeta.songs;
+
+    const rows = await fetchGridRows(iidxId, 0);
+    if (rows.length === 0) return null;
+
+    const DIFF_INT_TO_FEATURE_KEY = { 1: 'SP_NOR', 2: 'SP_HYP', 3: 'SP_ANO', 4: 'SP_LEG' };
+    const DIFF_INT_TO_NOTES_KEY   = { 1: 'SN', 2: 'SH', 3: 'SA', 4: 'SX' };
+
+    // rows → entries 어댑터 (DP 와 동일 구조 — 매핑표만 SP). 가중합은 공용 kernel.
+    const entries = [];
+    for (const r of rows) {
+      if (!r || !r.ex_score || r.ex_score <= 0) continue;
+      const sid = r.textage_song_id;
+      if (!sid) continue;
+      const featureKey = DIFF_INT_TO_FEATURE_KEY[r.diff];
+      const notesKey   = DIFF_INT_TO_NOTES_KEY[r.diff];
+      if (!featureKey || !notesKey) continue;
+      const songScores = scores[sid];
+      if (!songScores) continue;
+      const chartScores = songScores[featureKey];
+      if (!chartScores) continue;
+      const songMeta = songsMeta[sid];
+      if (!songMeta || !songMeta.notes) continue;
+      const noteCount = songMeta.notes[notesKey];
+      if (!noteCount || noteCount <= 0) continue;
+      const scoreRate = r.ex_score / (noteCount * 2);
+      entries.push({ scoreRate, chartScores });
+    }
+    const { vec, matched } = computePatternScoreKernel(entries);
+    if (!vec) return null;
+    const out = { __count: matched };
+    for (const f of SP_UPSERT_FEATS) out[f] = vec[f];
+    return out;
+  }
+
+  // 오소리 피쳐 스코어 upsert — user_ohsorry_radars.
+  // RPC 시그니처: migration_ohsorry_36feat.sql 의 37 인자 (text + 36 numeric) + 12_sp_feature_score.sql 의 p_play_style.
   //   기존 28 dim 뒤에 신규 8 dim(겹계단/계마/양손계단) append. 신규 인자는 DEFAULT NULL 라 28키 gist 에선 0/null 전송.
-  async function callUpsertFeatureScore(iidxId, vec) {
+  //   ⚠️ playStyle 은 0(SP) 일 때만 전송한다. DP(기본)는 인자를 안 실어 보내 구 37-arg RPC 와도 그대로 매칭 —
+  //      12_sp_feature_score.sql 미적용 상태에서 이 파일이 먼저 배포돼도 DP 업로드는 무손상, SP 만 조용히 실패한다.
+  //   SP vec 은 10 키만 있어 나머지 26 인자는 numOrNull 이 null 로 보낸다(RPC 의 COALESCE 로 컬럼 NULL 유지).
+  async function callUpsertFeatureScore(iidxId, vec, playStyle) {
     const numOrNull = (v) => typeof v === 'number' && isFinite(v) ? v : null;
     // payload 직전 신규 8값 로그 (검증용 — window.__OHSORRY_DEBUG_FEAT 켜면 출력)
     if (typeof window !== 'undefined' && window.__OHSORRY_DEBUG_FEAT) {
@@ -795,7 +878,7 @@ window.OhsorryDb = (function () {
         HSTAIR_SAMESHAPE: vec.HSTAIR_SAMESHAPE, HSTAIR_DIFFSHAPE: vec.HSTAIR_DIFFSHAPE,
       });
     }
-    await callRpc('upsert_user_feature_score', {
+    const payload = {
       p_iidx_id:    iidxId,
       p_os_notes:   numOrNull(vec.NOTES),
       p_os_chord:   numOrNull(vec.CHORD),
@@ -823,14 +906,24 @@ window.OhsorryDb = (function () {
       p_os_keima_l: numOrNull(vec.KEIMA_L), p_os_keima_r: numOrNull(vec.KEIMA_R),
       p_os_hstair_onehand: numOrNull(vec.HSTAIR_ONEHAND), p_os_hstair_sync: numOrNull(vec.HSTAIR_SYNC),
       p_os_hstair_sameshape: numOrNull(vec.HSTAIR_SAMESHAPE), p_os_hstair_diffshape: numOrNull(vec.HSTAIR_DIFFSHAPE),
-    });
+    };
+    if (playStyle === 0) payload.p_play_style = 0;
+    await callRpc('upsert_user_feature_score', payload);
   }
 
   return {
-    VERSION: '0.0.413',
+    VERSION: '0.0.414',
     upsertUserProfile: upsertUserProfile,
     upsertUserChartScores: upsertUserChartScores,
     uploadResult: uploadResult,
+    // SP 피쳐 스코어 계산+적재 (play_style=0). uploadResult 5b 가 자동 호출하지만,
+    //   SP 전용 경량 경로(calcOhsorryCore SP 크롤)처럼 uploadResult 를 안 타는 흐름에서 직접 부를 수 있게 노출.
+    upsertSpPatternScore: async function (iidxId) {
+      const vec = await computeSpPatternScoreVec(iidxId);
+      if (!vec) return null;
+      await callUpsertFeatureScore(iidxId, vec, 0);
+      return vec;
+    },
     fetchUserProfile: fetchUserProfile,
     fetchUserStars: fetchUserStars,
     fetchServiceStatus: fetchServiceStatus,

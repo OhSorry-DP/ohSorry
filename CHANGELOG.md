@@ -2,6 +2,18 @@
 
 ohSorry 의 변경 이력입니다. 사용방법은 [README.md](README.md) 를 참고하세요.
 
+### 2026-08-04 — dbConn 0.0.414: SP 오소리 피쳐 스코어 생산·적재 (play_style=0)
+- **배경**: `user_ohsorry_radars` 는 처음부터 `(iidx_id, play_style)` 복합키였지만 upsert 가 play_style 을 1(DP)로 하드코딩해 SP 를 넣을 방법이 없었다. 그래서 오소리웹 SP 분석탭은 전체 유저 비교축(랭킹/percentile)이 없었다.
+- [modules/dbConn.js](modules/dbConn.js) `VERSION` `0.0.413` → **`0.0.414`**:
+  - `computeSpPatternScoreVec(iidxId)` 신설 — **공용 kernel 무수정 재사용**. DP 와 다른 건 입력 3가지뿐: `make_grid_data(p_play_style=0)` / `sp-feature-scores-slim.json` 의 `SP_NOR·SP_HYP·SP_ANO·SP_LEG` 채보키 / textage notes `SN·SH·SA·SX`. (kernel 은 `patternScoreKernel.js` 골든 패리티 대상이라 손대지 않음.)
+  - **10 피처만 적재.** SP 채보 피처엔 `K1~K7`/`STAIR_UP`/`STAIR_DN` 도 있지만 SP 는 손(L/R) 구분이 없어 DP 전용 26 dim 컬럼에 대응시킬 수 없다. kernel 이 키 없는 feature 에 내는 0 은 버리고 NULL 전송.
+  - `callUpsertFeatureScore(iidxId, vec, playStyle)` — **`playStyle===0` 일 때만 `p_play_style` 전송**. DP 는 인자를 안 실어 보내 구 37-arg RPC 와도 그대로 매칭되므로, SQL 미적용 상태에서 이 파일이 먼저 배포돼도 **DP 업로드는 무손상**(SP 만 조용히 실패).
+  - `fetchGridRows(iidxId, playStyle)` 로 make_grid_data 페이지네이션 공용화(DP 호출은 인자 미전달 → 종전과 동일 body).
+  - `uploadResult` **5b** 단계 추가(DP upsert 와 독립 try) + `upsertSpPatternScore` export.
+- [modules/calcOhsorryCore.js](modules/calcOhsorryCore.js): SP 크롤 패스는 `uploadResult` 를 안 타므로, SP scores upsert **직후**(방금 올린 점수가 `make_grid_data` 에 반영된 뒤) `upsertSpPatternScore` 호출. 구 dbConn gist 환경은 함수 부재로 조용히 skip.
+- ⚠️ **배포 순서**: ohSorryAdmin `sql/12_sp_feature_score.sql` 적용 → dbConn/calcOhsorryCore gist 배포. (역순이어도 DP 는 안전, SP 만 warn.)
+- 짝 변경: ohSorryRating `scripts/derive/sp/backfill-sp-pattern-score.js`(백필), ohsorry-data 덤프 3종 + ohSorryAdmin `dump-data-repo.js`(`sp_pattern_score`), ohSorryWeb SP 분석탭 랭킹. `node --check` 2파일 OK.
+
 ### 2026-07-18 — calcOhsorryCore 0.0.410: SP 단독 입력 웹훅 미발화 레이스 수정
 - [modules/calcOhsorryCore.js](modules/calcOhsorryCore.js): `VERSION`/`CORE_VERSION_SHORT` `0.0.409` → **`0.0.410`**. SP 경로의 `upsertUserProfile`(users 갱신 = dump-trigger 웹훅 트리거) 호출이 리턴값을 확인하지 않아, `checkUploadEnabled` 의 fail-closed(service-status gist fetch 순간 실패, 결과 미캐시)로 이 호출만 조용히 차단되고 뒤이은 scores upsert 는 재fetch 성공으로 통과하던 레이스를 수정. → **profile upsert 리턴값 체크 + 실패 시 400ms 후 1회 재시도**, 최종 실패 시 명시적 경고 로그.
 - 증상: users row 미갱신 → 웹훅 미발화 → 리포트가 만들어지지 않음. scores 는 DB 에 정상 반영돼 "데이터는 있는데 SP 리포트만 없음"으로 나타남(72281972 전례, 수동 재덤프로 복구). profile 이 성공하면 service-status 성공응답이 캐시(5분)에 채워져 뒤의 scores upsert 통과도 함께 보장.

@@ -655,6 +655,15 @@ window.OhsorryCore = {
         try { const res = await window.OhsorryDb.upsertUserChartScores(spRows); spUploaded = (res && res.ok) ? spRows.length : null; }
         catch (e) { console.warn('[SP upload]', e && e.message); }
       }
+      // SP 오소리 피쳐 스코어(user_ohsorry_radars play_style=0) — 웹 SP 분석탭의 피처별 랭킹/상대평가 baseline.
+      //   scores upsert **뒤에** 계산해야 방금 올린 점수가 make_grid_data 에 반영된다.
+      //   구 dbConn gist 환경(함수 부재)에서는 조용히 skip — SP 업로드 자체는 영향 없음.
+      if (window.OhsorryDb.upsertSpPatternScore) {
+        try {
+          const spVec = await window.OhsorryDb.upsertSpPatternScore(spIidx);
+          if (spVec) console.log(`[SP] 피쳐 스코어 upsert 성공 (NOTES=${spVec.NOTES.toFixed(1)} charts=${spVec.__count})`);
+        } catch (e) { console.warn('[SP feature score]', e && e.message); }
+      }
     }
     const spResult = {
       spMode: true, mode, isRival, wrapperVersion, dbVersionString,
