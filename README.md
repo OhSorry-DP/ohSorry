@@ -1,4 +1,4 @@
-# 짭레터넷 (IIDX DP ★12 실력 추정 — 수집/업로더)
+# IIDX DP ★12 실력 추정 — 수집/업로더
 
 ereter.net 의 ☆12 난이도 분석 데이터를 e-amusement 의 DP(·SP) 플레이 기록에 매칭해서 **★값을 추정**하고 **Supabase 에 업로드**합니다. 추정된 별값·추천곡·통계 등 **결과 표시는 [오소리웹](https://ohsorry.vercel.app/)** 에서 봅니다.
 
