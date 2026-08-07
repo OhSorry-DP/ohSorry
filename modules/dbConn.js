@@ -690,6 +690,7 @@ window.OhsorryDb = (function () {
     'K4_L', 'K4_R', 'K5_L', 'K5_R', 'K6_L', 'K6_R', 'K7_L', 'K7_R',
     'DOUBLE_STAIR_L', 'DOUBLE_STAIR_R', 'KEIMA_L', 'KEIMA_R',
     'HSTAIR_ONEHAND', 'HSTAIR_SYNC', 'HSTAIR_SAMESHAPE', 'HSTAIR_DIFFSHAPE',
+    'HANDS',
   ];
   var TOP_N = 30;
   // 가중치: 1~5위 = 1.0, 6~30위 = 0.90 → 0.05 선형 감소 (25 step).
