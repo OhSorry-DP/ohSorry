@@ -4,7 +4,9 @@
   "description": "e-amusement 플레이 기록을 series.html 로 크롤 → 별값(★) 추정 → Supabase 업로드하는 수집/업로더(구조개편 2C). 표시·추천은 오소리웹·오소리레이팅.",
   "main": "ohsorry.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "push:gist-modules": "node ../ohSorryAdmin/scripts/publishAsset.js modules/calcOhsorryCore.js modules/dbConn.js modules/normTitle.js modules/eagateFetch.js",
+    "push:bookmarklet": "node ../ohSorryAdmin/scripts/publishAsset.js ohsorry.js"
   },
   "repository": {
     "type": "git",

@@ -2,6 +2,13 @@
 
 ohSorry 의 변경 이력입니다. 사용방법은 [README.md](README.md) 를 참고하세요.
 
+### 2026-08-09 — 코어 모듈 배포 스크립트 신설 (gist+R2 이중 배포 · CF 통합 §3)
+
+- [package.json](package.json): `push:gist-modules`(calcOhsorryCore / dbConn / normTitle / eagateFetch) · `push:bookmarklet`(ohsorry.js) 추가. 종전엔 배포 스크립트가 없어 `gh gist edit` 를 손으로 쳐야 했다.
+- 공용 퍼블리셔(`../ohSorryAdmin/scripts/publishAsset.js`)를 쓰므로 gist 와 R2(`data.iidx.in/lib/`)에 같은 내용이 함께 올라간다.
+- ⚠️ **`ohsorry.js`(북마클릿 본체)는 gist 전용** — 사용자 즐겨찾기에 gist raw URL 이 박혀 있어 회수가 불가능하다. 퍼블리셔가 이 파일만 R2 를 건너뛴다.
+- 북마클릿이 `p.eagate.573.jp` 안에서 fetch+eval 하므로 페이지 CSP 의 영향을 받는데, eagate 는 CSP 헤더도 `<meta>` 도 없고 이미 gist·supabase 두 외부 오리진을 쓰고 있다 — `data.iidx.in` 추가에 문제 없음(2026-08-09 확인).
+
 ### 2026-08-04 — dbConn 0.0.414: SP 오소리 피쳐 스코어 생산·적재 (play_style=0)
 - **배경**: `user_ohsorry_radars` 는 처음부터 `(iidx_id, play_style)` 복합키였지만 upsert 가 play_style 을 1(DP)로 하드코딩해 SP 를 넣을 방법이 없었다. 그래서 오소리웹 SP 분석탭은 전체 유저 비교축(랭킹/percentile)이 없었다.
 - [modules/dbConn.js](modules/dbConn.js) `VERSION` `0.0.413` → **`0.0.414`**:
