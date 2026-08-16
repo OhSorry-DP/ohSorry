@@ -1,4 +1,8 @@
-// dbConn.js — 오소리 DB 통신 모듈 (v0.0.413)
+// dbConn.js — 오소리 DB 통신 모듈 (v0.0.415)
+// v0.0.415 — upsertUserChartScores 가 row 의 bp(미스카운트)/note_count 를 있으면 그대로 upsert_scores 로 전달.
+//            공식 e-amusement CSV 업로드(웹 CSV Upload 탭, 2026-08-16)가 BP 를 실어보내는 첫 입력 경로 —
+//            eagate 시리즈페이지 크롤은 BP 를 못 가져와 여전히 null. ohSorryAdmin sql/14 의 upsert_scores RPC 가
+//            이미 bp/note_count 인자를 받으므로 여기만 채워 보내면 됨(RPC 쪽 무수정).
 // v0.0.413 — maybeAdopt 변종(AC≠INF 동일 title+diff 다중채보) 곡 자동입양 차단.
 //            getTextageByTitle() 의 "같은 키 중복 시 첫 번째 우선" 이 변종 10곡에선 AC/INF 중 어느 쪽
 //            textage_song_id 를 고를지 근거가 없어(서버 ensure_song_adopt G1/G2 도 title 만 봐서 못 거름),
@@ -472,6 +476,9 @@ window.OhsorryDb = (function () {
           played_version: playedVersion,
           play_style: playStyle,
           date: r.date,
+          // bp(미스카운트)/note_count — 공식 CSV 업로드(웹 CSV Upload 탭) 전용, 있을 때만. eagate 크롤은 못 채움(기존과 동일 null).
+          bp: (typeof r.bp === 'number') ? r.bp : null,
+          note_count: (typeof r.note_count === 'number') ? r.note_count : null,
         };
         const pk = `${songId}|${r.iidx_id}|${diffInt}|${playedVersion}|${playStyle}`;
         const prev = dedup.get(pk);
@@ -913,7 +920,7 @@ window.OhsorryDb = (function () {
   }
 
   return {
-    VERSION: '0.0.414',
+    VERSION: '0.0.415',
     upsertUserProfile: upsertUserProfile,
     upsertUserChartScores: upsertUserChartScores,
     uploadResult: uploadResult,

@@ -2,6 +2,12 @@
 
 ohSorry 의 변경 이력입니다. 사용방법은 [README.md](README.md) 를 참고하세요.
 
+### 2026-08-16 — dbConn 0.0.415: upsertUserChartScores 가 bp/note_count 전달
+
+[modules/dbConn.js](modules/dbConn.js) `VERSION` `0.0.414` → **`0.0.415`**. `upsertUserChartScores(rows)`가 row 에 `bp`/`note_count`가 있으면 그대로 `upsert_scores` RPC 로 전달하도록 추가(없으면 기존과 동일하게 null). ohSorryAdmin sql/14 의 `upsert_scores` RPC 는 이미 이 두 인자를 받으므로 RPC 쪽은 무수정.
+
+- 계기: 오소리웹에 "CSV Upload" 탭 신설(같은 날 ohSorryWeb CHANGELOG 참고) — e-amusement 공식 스코어 데이터 CSV(미스카운트 포함)를 업로드하는 첫 입력 경로. eagate 시리즈페이지 크롤(calcOhsorryCore 의 기존 AC 경로)은 여전히 BP 를 못 가져와 null 유지.
+
 ### 2026-08-09 — 코어 모듈 배포 스크립트 신설 (gist+R2 이중 배포 · CF 통합 §3)
 
 - [package.json](package.json): `push:gist-modules`(calcOhsorryCore / dbConn / normTitle / eagateFetch) · `push:bookmarklet`(ohsorry.js) 추가. 종전엔 배포 스크립트가 없어 `gh gist edit` 를 손으로 쳐야 했다.
