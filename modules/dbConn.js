@@ -1,4 +1,7 @@
-// dbConn.js — 오소리 DB 통신 모듈 (v0.0.415)
+// dbConn.js — 오소리 DB 통신 모듈 (v0.0.416)
+// v0.0.416 — recomputeAndSaveStar(iidxId) 신설. onlyOSR/onlyOSRtoEreter(gist UMD 모듈)로 코어 없이
+//            ★값(star_estimate/native_star) 재계산 + upsert_user 저장. users.date 갱신 → 웹훅이
+//            dump-user 를 깨워 R2 재덤프 + 페르소나 재생성까지 자동 이어짐. CSV Upload 탭 후속 호출용.
 // v0.0.415 — upsertUserChartScores 가 row 의 bp(미스카운트)/note_count 를 있으면 그대로 upsert_scores 로 전달.
 //            공식 e-amusement CSV 업로드(웹 CSV Upload 탭, 2026-08-16)가 BP 를 실어보내는 첫 입력 경로 —
 //            eagate 시리즈페이지 크롤은 BP 를 못 가져와 여전히 null. ohSorryAdmin sql/14 의 upsert_scores RPC 가
@@ -572,6 +575,65 @@ window.OhsorryDb = (function () {
     }
   }
 
+  // ★값 재계산 + 저장 — 코어(calcOhsorryCore, eagate 풀크롤) 없이 점수만 바뀐 경우(CSV 업로드 등)에
+  //   onlyOSR/onlyOSRtoEreter(둘 다 gist 배포된 UMD 모듈)로 가볍게 재산정해서 users.star/native_star 갱신.
+  //   upsert_user 호출 자체가 users.date 를 갱신 → supabase 웹훅이 dump-user 를 깨워 R2 재덤프(+페르소나
+  //   재생성)까지 자동으로 이어진다(§CSV Upload 탭, 2026-08-16).
+  //   ereter_star(ereter.net 실측값, EXCLUDED 무조건 덮어쓰기 컬럼)는 여기서 재계산 불가 — fetchUserStars 로
+  //   기존값을 그대로 재전송해 보존(위 fetchUserStars 와 동일 이유).
+  const ONLYOSR_URL = 'https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw/onlyOSR.js';
+  const OSR135_URL = 'https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw/OSR13.5%2B.js';
+  const ONLYOSR_TO_ERETER_URL = 'https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw/onlyOSRtoEreter.js';
+  const RATING_DATA_URL = 'https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw/ohSorryRating.json';
+  const DIFF_INT_TO_STR = { 0: 'BEGINNER', 1: 'NORMAL', 2: 'HYPER', 3: 'ANOTHER', 4: 'LEGGENDARIA' };
+  let onlyOsrLoaded = false;
+  async function ensureOnlyOsrLoaded() {
+    if (onlyOsrLoaded && window.onlyOSR && window.OSR135 && window.onlyOSRtoEreter) return;
+    // 순서 중요 — onlyOSRtoEreter.js 가 evaluate 되는 순간(top-level const) window.onlyOSR/window.OSR135 를
+    //   바로 참조하므로, 그 둘을 먼저 확실히 로드한 뒤 onlyOSRtoEreter 를 eval 해야 한다.
+    const [osrText, osr135Text, o2eText] = await Promise.all([
+      fetch(ONLYOSR_URL, { cache: 'default' }).then((r) => { if (!r.ok) throw new Error('onlyOSR HTTP ' + r.status); return r.text(); }),
+      fetch(OSR135_URL, { cache: 'default' }).then((r) => { if (!r.ok) throw new Error('OSR13.5+ HTTP ' + r.status); return r.text(); }),
+      fetch(ONLYOSR_TO_ERETER_URL, { cache: 'default' }).then((r) => { if (!r.ok) throw new Error('onlyOSRtoEreter HTTP ' + r.status); return r.text(); }),
+    ]);
+    // eslint-disable-next-line no-eval
+    if (!window.onlyOSR) (0, eval)(osrText);
+    // eslint-disable-next-line no-eval
+    if (!window.OSR135) (0, eval)(osr135Text);
+    // eslint-disable-next-line no-eval
+    if (!window.onlyOSRtoEreter) (0, eval)(o2eText);
+    if (!window.onlyOSR || !window.OSR135 || !window.onlyOSRtoEreter) throw new Error('onlyOSR/OSR135/onlyOSRtoEreter 전역 등록 실패');
+    onlyOsrLoaded = true;
+  }
+  async function recomputeAndSaveStar(iidxId) {
+    const id = String(iidxId || '').trim().replace(/-/g, '');
+    if (!id) return { ok: false, error: 'iidx_id 가 없습니다' };
+    try {
+      const [, ratingData, gridRows, prevStars] = await Promise.all([
+        ensureOnlyOsrLoaded(),
+        fetch(RATING_DATA_URL + '?t=' + Date.now(), { cache: 'no-store' }).then((r) => { if (!r.ok) throw new Error('ohSorryRating.json HTTP ' + r.status); return r.json(); }),
+        fetchGridRows(id),   // DP 전체(all charts, play_style 기본 1) — CSV 로 방금 갱신된 값 포함
+        fetchUserStars(id),
+      ]);
+      const charts = gridRows
+        .filter((r) => r && typeof r.diff === 'number' && DIFF_INT_TO_STR[r.diff] && r.title)
+        .map((r) => ({ title: r.title, diff: DIFF_INT_TO_STR[r.diff], lampNum: typeof r.lamp === 'number' ? r.lamp : 0 }));
+      if (charts.length === 0) return { ok: false, error: '재계산할 차트 없음' };
+      const result = window.onlyOSRtoEreter.inferEreter(charts, ratingData);
+      if (result.ereterStar == null) return { ok: false, error: result.reason || '별값 산출 불가(표본 부족)' };
+      const profileRes = await upsertUserProfile({
+        iidx_id: id,
+        star_estimate: result.ereterStar,
+        native_star: result.ohsorryStar,
+        ereter_star: prevStars.ereter_star,   // 무조건 덮어쓰기 컬럼 — 기존값 보존
+      });
+      if (!profileRes.ok) return { ok: false, error: profileRes.error };
+      return { ok: true, star: result.ereterStar, nativeStar: result.ohsorryStar, nFit12: result.nFit12, reason: result.reason };
+    } catch (e) {
+      return { ok: false, error: e && e.message };
+    }
+  }
+
   // ============================================================
   // uploadResult — 결과 패널 렌더 직후의 supabase 업로드 trigger.
   // ohsorryRender 의 supabase upload 블록을 흡수. DB 모드 (dbData 있음) 자동 skip.
@@ -920,10 +982,13 @@ window.OhsorryDb = (function () {
   }
 
   return {
-    VERSION: '0.0.415',
+    VERSION: '0.0.416',
     upsertUserProfile: upsertUserProfile,
     upsertUserChartScores: upsertUserChartScores,
     uploadResult: uploadResult,
+    // ★값 재계산 + 저장(onlyOSR/onlyOSRtoEreter) — CSV Upload 등 코어 없이 점수만 바뀐 경우용.
+    //   upsert_user 호출이 users.date 를 갱신 → 웹훅이 dump-user 를 깨워 페르소나까지 자동 재생성.
+    recomputeAndSaveStar: recomputeAndSaveStar,
     // SP 피쳐 스코어 계산+적재 (play_style=0). uploadResult 5b 가 자동 호출하지만,
     //   SP 전용 경량 경로(calcOhsorryCore SP 크롤)처럼 uploadResult 를 안 타는 흐름에서 직접 부를 수 있게 노출.
     upsertSpPatternScore: async function (iidxId) {

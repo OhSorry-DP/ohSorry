@@ -2,6 +2,14 @@
 
 ohSorry 의 변경 이력입니다. 사용방법은 [README.md](README.md) 를 참고하세요.
 
+### 2026-08-16 — dbConn 0.0.416: recomputeAndSaveStar (CSV 업로드 후 ★ 재계산 자동화)
+
+CSV Upload 탭처럼 코어(calcOhsorryCore, eagate 풀크롤) 없이 `scores` 만 바뀌는 입력 경로에서, ★값(star_estimate/native_star)을 다시 계산해 저장하고 — 그 저장(`upsert_user`)이 `users.date` 를 갱신해 **supabase 웹훅 → dump-user GitHub Action → R2 재덤프 → 페르소나 재생성**까지 자동으로 이어지게 한다.
+
+- [modules/dbConn.js](modules/dbConn.js) `VERSION` `0.0.415` → **`0.0.416`**. `recomputeAndSaveStar(iidxId)` 신설 — `onlyOSR.js`/`OSR13.5+.js`/`onlyOSRtoEreter.js`(전부 gist 배포된 UMD 모듈) lazy 로드 + `ohSorryRating.json` + `make_grid_data`(전체 DP 차트) → `onlyOSRtoEreter.inferEreter(charts, ratingData)` → `star_estimate`/`native_star` 재산정 → `upsertUserProfile` 저장. `ereter_star`(ereter.net 실측값, `upsert_user` 가 무조건 덮어쓰는 컬럼)는 `fetchUserStars` 로 기존값을 그대로 재전송해 보존.
+  - ⚠️ `onlyOSRtoEreter.js` 가 evaluate 시점에 곧바로 `window.onlyOSR`/`window.OSR135` 를 참조하므로, 세 모듈을 반드시 이 순서(onlyOSR → OSR135 → onlyOSRtoEreter)로 로드해야 한다 — 순서를 안 지키면 브라우저에서 "require is not defined" 로 즉시 실패(실측 확인).
+- 실제 유저(`15116402`)로 검증: `recomputeAndSaveStar` 호출 → `users.date` 갱신 확인 → supabase 웹훅이 **수동 개입 없이** `dump-user` Action 을 자동 기동하는 것까지 확인.
+- 소비처: ohSorryWeb `user/logic/csvUpload.js` `uploadCsvRows` — 점수 업로드 성공 후 자동 호출(같은 날 ohSorryWeb CHANGELOG 참고).
 ### 2026-08-16 — dbConn 0.0.415: upsertUserChartScores 가 bp/note_count 전달
 
 [modules/dbConn.js](modules/dbConn.js) `VERSION` `0.0.414` → **`0.0.415`**. `upsertUserChartScores(rows)`가 row 에 `bp`/`note_count`가 있으면 그대로 `upsert_scores` RPC 로 전달하도록 추가(없으면 기존과 동일하게 null). ohSorryAdmin sql/14 의 `upsert_scores` RPC 는 이미 이 두 인자를 받으므로 RPC 쪽은 무수정.
