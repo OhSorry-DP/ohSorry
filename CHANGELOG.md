@@ -2,6 +2,15 @@
 
 ohSorry 의 변경 이력입니다. 사용방법은 [README.md](README.md) 를 참고하세요.
 
+### 2026-08-21 — 완료 박스에 오소리웹 로그인 버튼 (3단계)
+
+업로드 완료 박스에서 오소리웹에 바로 로그인할 수 있는 버튼을 추가했다. DBR 비밀번호를 몰라도(또는 잊었어도) 이 경로로 들어가 설정에서 새로 정할 수 있다.
+
+- [modules/calcOhsorryCore.js](modules/calcOhsorryCore.js): `__ohsorryLoginBtnHtml` / `__ohsorryBindLoginBtns` 추가. 클릭 시 `POST https://iidx.in/auth/issue` 로 일회용 티켓을 받아 새 탭으로 연다.
+- **본인 모드에서만 버튼이 붙는다.** `__ohsorryShowDone(profile, style, isOwn)` 의 `isOwn` 에 `!isRival` 을 넘긴다 — 라이벌 크롤링에서 티켓을 요청하면 남의 계정으로 로그인되는 링크가 열린다.
+- 티켓은 완료 박스를 열 때가 아니라 **클릭할 때** 발급한다(5분 만료·1회 소비라 미리 받으면 낭비된다).
+- `__ohsorryShowDoneList` 는 항목마다 `isOwn` 을 받으며, 안 주면 버튼이 붙지 않는다(안전한 기본값). 여러 명 모드에서 본인 행에 버튼을 붙이려면 wrapper 가 `isOwn` 을 채워야 한다.
+
 ### 2026-08-16 — dbConn 0.0.416: recomputeAndSaveStar (CSV 업로드 후 ★ 재계산 자동화)
 
 CSV Upload 탭처럼 코어(calcOhsorryCore, eagate 풀크롤) 없이 `scores` 만 바뀌는 입력 경로에서, ★값(star_estimate/native_star)을 다시 계산해 저장하고 — 그 저장(`upsert_user`)이 `users.date` 를 갱신해 **supabase 웹훅 → dump-user GitHub Action → R2 재덤프 → 페르소나 재생성**까지 자동으로 이어지게 한다.

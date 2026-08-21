@@ -47,10 +47,44 @@ function __ohsorryCardUrl(idNorm, style) {
   const ps = style === 'SP' ? '#ps@SP' : '';
   return `https://iidx.in/#user@${idNorm}${ps}#tab@recent`;
 }
+// 오소리웹 로그인 버튼 — **본인 모드에서만** 붙인다(isOwn). 라이벌 크롤링에서 티켓을 요청하면
+//   남의 계정으로 로그인되는 링크가 열린다(계획서 docs/ohsorryAuthPlan.md §5-1).
+//   클릭 시점에 발급받는다 — 완료 박스를 여는 것만으로 티켓이 소모되지 않게.
+function __ohsorryLoginBtnHtml(idNorm, isOwn, compact) {
+  if (!isOwn || !idNorm) return '';
+  const base = 'cursor:pointer;border:0;font-weight:600;border-radius:6px;background:#495057;color:#fff';
+  return compact
+    ? `<button class="__ohsorry_login" data-id="${idNorm}" style="${base};flex:none;padding:6px 9px;font-size:11.5px">로그인</button>`
+    : `<button class="__ohsorry_login" data-id="${idNorm}" style="${base};display:block;width:100%;margin-top:6px;padding:8px 0;font-size:12.5px">오소리웹 로그인 / 설정 →</button>`;
+}
+// 완료 박스에 붙인 로그인 버튼들의 클릭 핸들러를 건다. 티켓은 1회용·5분 만료라 클릭할 때 발급받는다.
+function __ohsorryBindLoginBtns(el) {
+  el.querySelectorAll('.__ohsorry_login').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const idNorm = btn.getAttribute('data-id');
+      const label = btn.textContent;
+      btn.disabled = true; btn.textContent = '발급 중…';
+      try {
+        const r = await fetch('https://iidx.in/auth/issue', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ iidx_id: idNorm, source: 'crawler' }),
+        });
+        const body = await r.json().catch(() => ({}));
+        if (!r.ok || !body.url) throw new Error(body.error || ('HTTP ' + r.status));
+        window.open(body.url, '_blank', 'noopener');
+        btn.textContent = '새 탭에서 로그인 중';
+      } catch (e) {
+        btn.disabled = false; btn.textContent = label;
+        alert('로그인 링크 발급 실패: ' + (e && e.message ? e.message : e));
+      }
+    });
+  });
+}
 // [구조개편 Phase 2B] 헤드리스 업로드 완료 박스 — 추천/렌더 패널 없이 "✅ 업로드 완료 + 식별정보 한 줄 + 오소리웹 버튼".
 //   profile: { djName, iidxId, spRank, dpRank }, style: 'SP' | 'DP'(기본). 단위(rank)는 eagate 段位 한자 문자열('中伝' 등).
 //   별값/피처/점수는 업로드만 하고 상세 표시는 오소리웹으로 위임 (설계서 §5 A+식별정보).
-function __ohsorryShowDone(profile, style) {
+function __ohsorryShowDone(profile, style, isOwn) {
   if (typeof document === 'undefined') return;
   __ohsorryHideSpinner();
   document.getElementById('__ohsorry_done')?.remove();
@@ -74,9 +108,11 @@ function __ohsorryShowDone(profile, style) {
     (id ? `<div style="font-size:11px;color:#868e96;font-family:monospace;margin-top:1px">${id}</div>` : '') +
     (rankLine ? `<div style="font-size:12px;margin-top:4px">${rankLine}</div>` : '') +
     `<a href="${webUrl}" target="_blank" rel="noopener" ` +
-      'style="display:block;margin-top:12px;padding:8px 0;text-align:center;background:#1d9e75;color:#fff;font-size:12.5px;font-weight:600;border-radius:6px;text-decoration:none">오소리웹에서 내 카드 보기 →</a>';
+      'style="display:block;margin-top:12px;padding:8px 0;text-align:center;background:#1d9e75;color:#fff;font-size:12.5px;font-weight:600;border-radius:6px;text-decoration:none">오소리웹에서 내 카드 보기 →</a>' +
+    __ohsorryLoginBtnHtml(idNorm, isOwn, false);
   document.body.appendChild(el);
   el.querySelector('#__ohsorry_done_x')?.addEventListener('click', () => el.remove());
+  __ohsorryBindLoginBtns(el);
 }
 
 // 여러 명(IIDX ID 여러 개) 업로드 완료 시 — DJ명 · IIDX ID · 단위 · 이동버튼을 한 줄(가로)로 한 명씩.
@@ -87,7 +123,7 @@ function __ohsorryShowDoneList(entries) {
   document.getElementById('__ohsorry_done')?.remove();
   const list = (entries || []).filter((e) => e && e.profile);
   if (list.length === 0) return;
-  if (list.length === 1) { __ohsorryShowDone(list[0].profile, list[0].style); return; }
+  if (list.length === 1) { __ohsorryShowDone(list[0].profile, list[0].style, list[0].isOwn); return; }
   const rowsHtml = list.map((e) => {
     const p = e.profile || {};
     const dj = (p.djName || '?').replace(/[<>]/g, '');
@@ -105,6 +141,7 @@ function __ohsorryShowDoneList(entries) {
         (rankTxt ? `<span style="flex:none;font-size:11.5px;color:#495057">${rankTxt}</span>` : '') +
         `<a href="${webUrl}" target="_blank" rel="noopener" ` +
           'style="flex:none;padding:6px 9px;background:#1d9e75;color:#fff;font-size:11.5px;font-weight:600;border-radius:6px;text-decoration:none">이동 →</a>' +
+        __ohsorryLoginBtnHtml(idNorm, e.isOwn, true) +
       '</div>'
     );
   }).join('');
@@ -671,7 +708,7 @@ window.OhsorryCore = {
       iidxId: spIidx, spChartCount: spPlayed.length, spUploaded,
     };
     // own·rival 모두 완료 박스(대상 IIDX ID 의 카드로 이동). 여러 명이면 wrapper 가 리스트로(suppressDone).
-    if (!opts.suppressDone) __ohsorryShowDone(profile, 'SP');
+    if (!opts.suppressDone) __ohsorryShowDone(profile, 'SP', !isRival);
     __ohsorryHideSpinner();
     return spResult;
   }
@@ -772,7 +809,7 @@ window.OhsorryCore = {
       if (up && up.skipped) console.log(`[오소리] 업로드 skip (${up.reason})`);
       else {
         console.log('[오소리] 업로드 완료 — https://iidx.in 에서 카드 확인.');
-        if (!opts.suppressDone) __ohsorryShowDone(profile, 'DP');   // 여러 명이면 wrapper 가 리스트로
+        if (!opts.suppressDone) __ohsorryShowDone(profile, 'DP', !isRival);   // 여러 명이면 wrapper 가 리스트로
       }
     } catch (e) {
       console.warn('[OhsorryCore] uploadResult 예외:', e && e.message);
