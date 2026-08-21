@@ -63,6 +63,9 @@ function __ohsorryBindLoginBtns(el) {
     btn.addEventListener('click', async () => {
       const idNorm = btn.getAttribute('data-id');
       const label = btn.textContent;
+      // 탭은 클릭 시점에 **동기로** 연다. await 뒤에 window.open 을 부르면 사용자 제스처가 이미 소모돼
+      //   팝업 차단에 걸린다(eagate 는 오소리 도메인이 아니라 예외 허용도 기대할 수 없다).
+      const tab = window.open('', '_blank');
       btn.disabled = true; btn.textContent = '발급 중…';
       try {
         const r = await fetch('https://iidx.in/auth/issue', {
@@ -72,9 +75,10 @@ function __ohsorryBindLoginBtns(el) {
         });
         const body = await r.json().catch(() => ({}));
         if (!r.ok || !body.url) throw new Error(body.error || ('HTTP ' + r.status));
-        window.open(body.url, '_blank', 'noopener');
-        btn.textContent = '새 탭에서 로그인 중';
+        if (tab) { tab.opener = null; tab.location.replace(body.url); btn.textContent = '새 탭에서 로그인 중'; }
+        else { location.href = body.url; }   // 팝업이 막혔으면 현재 탭으로 이동(티켓을 버리지 않는다)
       } catch (e) {
+        tab?.close();
         btn.disabled = false; btn.textContent = label;
         alert('로그인 링크 발급 실패: ' + (e && e.message ? e.message : e));
       }
