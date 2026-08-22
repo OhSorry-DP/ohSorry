@@ -2,6 +2,15 @@
 
 ohSorry 의 변경 이력입니다. 사용방법은 [README.md](README.md) 를 참고하세요.
 
+### 2026-08-22 — 별값 단조 래칫 (core 0.0.412 / dbConn 0.0.417)
+
+별값 계수 재fit([ohSorryRating CHANGELOG](../ohSorryRating/CHANGELOG.md)) 의 소비처 쪽 대응. 계수 교체만으로는 **미플레이 곡을 새로 클리어할 때** 별값이 내려가는 경우가 남는다 — 클리어율의 분모가 "친 곡 수"라 신규곡이 들어오면 분모도 같이 늘기 때문이고, 모델 안에서는 원리적으로 못 막는다. 저장·표시 단계에서 덮는다.
+
+- [modules/calcOhsorryCore.js](modules/calcOhsorryCore.js): 기존 `star` 조회를 **풀 크롤에서도** 하도록 바꾸고(전에는 부분 크롤일 때만), 계산값이 기존값보다 낮으면 기존값을 유지한다. 래칫이 걸리면 콘솔에 남긴다.
+- [modules/dbConn.js](modules/dbConn.js): `recomputeAndSaveStar` 가 `inferEreter(..., { prevStar })` 로 호출한다. `prevStars` 는 이미 `ereter_star` 보존용으로 받아오고 있어 추가 조회가 없다.
+- `native_star` 는 래칫 대상이 아니다 — 추천 baseStar 라 고착되면 추천 난이도까지 같이 굳는다.
+- ⚠️ 계수·난이도축 재배포 후 재기준화는 래칫을 안 타는 `ohSorryAdmin/scripts/backfillStars.js --apply` 로 한다.
+
 ### 2026-08-22 — 시작 모달에도 오소리웹 로그인 버튼 (core 0.0.411)
 
 크롤러를 실행하면 업로드 전에 본인 프로필(DJ명·단위·IIDX ID)을 먼저 읽어 시작 모달에 채운다. 그 자리에서 바로 오소리웹으로 갈 수 있게 버튼을 붙였다 — 비밀번호만 바꾸려는 사람이 전곡 크롤링을 끝까지 돌릴 이유가 없다.

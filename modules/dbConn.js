@@ -1,4 +1,9 @@
-// dbConn.js — 오소리 DB 통신 모듈 (v0.0.416)
+// dbConn.js — 오소리 DB 통신 모듈 (v0.0.417)
+// v0.0.417 — recomputeAndSaveStar 에 단조 래칫 적용. onlyOSRtoEreter v0.0.4 의 opts.prevStar 로
+//            기존 star 보다 낮아지지 않게 한다. 클리어를 더했는데 별값이 내려가는 걸 막는 최종 방어선
+//            (모델 자체는 미플레이 곡 신규 클리어 케이스를 원리적으로 못 막는다 — 클리어율 분모가
+//            "친 곡 수"라 신규곡이 들어오면 같이 늘기 때문). 계수/난이도축 재배포 후 재기준화는
+//            래칫을 안 타는 backfillStars.js --apply 로 한다.
 // v0.0.416 — recomputeAndSaveStar(iidxId) 신설. onlyOSR/onlyOSRtoEreter(gist UMD 모듈)로 코어 없이
 //            ★값(star_estimate/native_star) 재계산 + upsert_user 저장. users.date 갱신 → 웹훅이
 //            dump-user 를 깨워 R2 재덤프 + 페르소나 재생성까지 자동 이어짐. CSV Upload 탭 후속 호출용.
@@ -619,7 +624,8 @@ window.OhsorryDb = (function () {
         .filter((r) => r && typeof r.diff === 'number' && DIFF_INT_TO_STR[r.diff] && r.title)
         .map((r) => ({ title: r.title, diff: DIFF_INT_TO_STR[r.diff], lampNum: typeof r.lamp === 'number' ? r.lamp : 0 }));
       if (charts.length === 0) return { ok: false, error: '재계산할 차트 없음' };
-      const result = window.onlyOSRtoEreter.inferEreter(charts, ratingData);
+      //   4번째 인자 opts.prevStar = 단조 래칫(기존 star 아래로 안 내려감). ereterData 는 여기선 미사용.
+      const result = window.onlyOSRtoEreter.inferEreter(charts, ratingData, null, { prevStar: prevStars.star });
       if (result.ereterStar == null) return { ok: false, error: result.reason || '별값 산출 불가(표본 부족)' };
       const profileRes = await upsertUserProfile({
         iidx_id: id,

@@ -414,7 +414,7 @@ async function __fetchRivalToken(iidxId) {
 }
 
 window.OhsorryCore = {
-  VERSION: '0.0.411',
+  VERSION: '0.0.412',
   prefetch: __loadCoreData,        // 모달 떠 있는 동안 미리 호출 → compute 캐시 hit (로딩 단축)
   fetchProfile: __fetchProfile,    // wrapper 가 모달 상단 프로필 채울 때
   fetchRivalToken: __fetchRivalToken,  // IIDX ID → 라이벌 토큰 (라이벌 모드 판정)
@@ -430,7 +430,7 @@ window.OhsorryCore = {
   const isRival = mode === 'rival';
   const rivalToken = opts.rivalToken || null;
   const wrapperVersion = opts.wrapperVersion || 'unknown';
-  const CORE_VERSION_SHORT = '0.0.411'.replace(/^0\.0\./, '');  // '411' — 시작 모달에도 오소리웹 로그인 버튼
+  const CORE_VERSION_SHORT = '0.0.412'.replace(/^0\.0\./, '');  // '412' — 별값 단조 래칫(star 가 내려가지 않음)
   const dbVersionString = `${wrapperVersion}-core${CORE_VERSION_SHORT}`;
 
   // -------- 0. 데이터 로드 (ereter/textage/ohSorryRating + 별값 lib) — 모듈 공유 __loadCoreData --------
@@ -740,11 +740,22 @@ window.OhsorryCore = {
   if (profile && profile.iidxId) {
     const iidxIdNorm = profile.iidxId.replace(/-/g, '');
     const nowIso = new Date().toISOString();
-    // 부분 크롤이면 별값 미계산 → 기존 star 를 조회해 그대로 재전송(upsert_user 의 star EXCLUDED 덮어쓰기로 null wipe 방지).
+    // 기존 star 조회 — 용도가 둘이다.
+    //   ① 부분 크롤이면 별값 미계산 → 그대로 재전송(upsert_user 의 star EXCLUDED 덮어쓰기로 null wipe 방지).
+    //   ② 풀 크롤이면 단조 래칫의 하한 — 클리어를 더했는데 별값이 내려가는 걸 막는다. 모델(onlyOSRtoEreter)
+    //      자체는 미플레이 곡을 새로 클리어하는 케이스를 원리적으로 못 막는다(클리어율 분모가 "친 곡 수"라
+    //      신규곡이 들어오면 분모도 같이 늘어난다). 계수/난이도축 재배포 후 재기준화는 래칫을 안 타는
+    //      backfillStars.js --apply 로 한다.
     //   native_star 는 COALESCE 라 null 전송 시 자동 보존. ereter_star 는 ereter 룩업(크롤 무관)이라 그대로.
     let preservedStar = null;
-    if (!fullCrawl && window.OhsorryDb && window.OhsorryDb.fetchUserStars) {
+    if (window.OhsorryDb && window.OhsorryDb.fetchUserStars) {
       try { const prev = await window.OhsorryDb.fetchUserStars(iidxIdNorm); if (prev && prev.star != null) preservedStar = prev.star; } catch {}
+    }
+    // 래칫 적용 후 최종 star. starEstimate 가 null(부분 크롤/산출 실패)이면 기존값 그대로 쓴다.
+    let finalStar = starEstimate;
+    if (finalStar != null && preservedStar != null && Number(preservedStar) > finalStar) {
+      console.log('[step2] ★ 래칫 — 계산값 ' + finalStar.toFixed(2) + ' < 기존 ' + Number(preservedStar).toFixed(2) + ' → 기존값 유지');
+      finalStar = Number(preservedStar);
     }
     let nPlayedLv12 = 0, fcCount = 0, exhCount = 0, hcCount = 0, nClearedLv12 = 0;
     for (const c of allCharts) {
@@ -770,7 +781,7 @@ window.OhsorryCore = {
     dbPayload = {
       iidx_id: iidxIdNorm,
       dj_name: profile.djName || null,
-      star_estimate: starEstimate != null ? Number(starEstimate.toFixed(4)) : (preservedStar != null ? Number(preservedStar) : null),  // 부분 크롤이면 기존값 보존
+      star_estimate: finalStar != null ? Number(finalStar.toFixed(4)) : (preservedStar != null ? Number(preservedStar) : null),  // 래칫 적용값 / 부분 크롤이면 기존값 보존
       native_star: nativeStar != null ? Number(nativeStar.toFixed(4)) : null,  // v3.4.0: onlyOSR 전체곡 native (null → COALESCE 보존)
       ereter_star: eraterTrueStar != null ? Number(eraterTrueStar) : null,
       raw_s: null,                  // 현재 미산출 (컬럼 호환). native_star/star_estimate 가 별값 정본.
