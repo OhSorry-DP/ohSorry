@@ -50,12 +50,20 @@ function __ohsorryCardUrl(idNorm, style) {
 // 오소리웹 로그인 버튼 — **본인 모드에서만** 붙인다(isOwn). 라이벌 크롤링에서 티켓을 요청하면
 //   남의 계정으로 로그인되는 링크가 열린다(계획서 docs/ohsorryAuthPlan.md §5-1).
 //   클릭 시점에 발급받는다 — 완료 박스를 여는 것만으로 티켓이 소모되지 않게.
-function __ohsorryLoginBtnHtml(idNorm, isOwn, compact) {
+//   variant: 'compact'(여러 명 리스트 한 줄) | 'start'(시작 모달, 흰 배경) | 그 외(완료 박스 전폭)
+function __ohsorryLoginBtnHtml(idNorm, isOwn, variant) {
   if (!isOwn || !idNorm) return '';
   const base = 'cursor:pointer;border:0;font-weight:600;border-radius:6px;background:#495057;color:#fff';
-  return compact
-    ? `<button class="__ohsorry_login" data-id="${idNorm}" style="${base};flex:none;padding:6px 9px;font-size:11.5px">로그인</button>`
-    : `<button class="__ohsorry_login" data-id="${idNorm}" style="${base};display:block;width:100%;margin-top:6px;padding:8px 0;font-size:12.5px">오소리웹 로그인 / 설정 →</button>`;
+  if (variant === 'compact') {
+    return `<button class="__ohsorry_login" data-id="${idNorm}" style="${base};flex:none;padding:6px 9px;font-size:11.5px">로그인</button>`;
+  }
+  if (variant === 'start') {
+    // 시작 모달은 흰 배경이라 완료 박스(어두운 배경)와 같은 회색 버튼을 쓰면 묻힌다 — 초록 아웃라인으로.
+    return `<button type="button" class="__ohsorry_login" data-id="${idNorm}"`
+      + ` style="cursor:pointer;border:1px solid #1d9e75;border-radius:6px;background:#fff;color:#1d9e75;`
+      + `font-weight:700;font-size:11.5px;padding:5px 9px;margin-top:8px;white-space:nowrap">오소리웹 로그인 / 비밀번호 변경 →</button>`;
+  }
+  return `<button class="__ohsorry_login" data-id="${idNorm}" style="${base};display:block;width:100%;margin-top:6px;padding:8px 0;font-size:12.5px">오소리웹 로그인 / 설정 →</button>`;
 }
 // 완료 박스에 붙인 로그인 버튼들의 클릭 핸들러를 건다. 티켓은 1회용·5분 만료라 클릭할 때 발급받는다.
 function __ohsorryBindLoginBtns(el) {
@@ -113,7 +121,7 @@ function __ohsorryShowDone(profile, style, isOwn) {
     (rankLine ? `<div style="font-size:12px;margin-top:4px">${rankLine}</div>` : '') +
     `<a href="${webUrl}" target="_blank" rel="noopener" ` +
       'style="display:block;margin-top:12px;padding:8px 0;text-align:center;background:#1d9e75;color:#fff;font-size:12.5px;font-weight:600;border-radius:6px;text-decoration:none">오소리웹에서 내 카드 보기 →</a>' +
-    __ohsorryLoginBtnHtml(idNorm, isOwn, false);
+    __ohsorryLoginBtnHtml(idNorm, isOwn, 'full');
   document.body.appendChild(el);
   el.querySelector('#__ohsorry_done_x')?.addEventListener('click', () => el.remove());
   __ohsorryBindLoginBtns(el);
@@ -145,7 +153,7 @@ function __ohsorryShowDoneList(entries) {
         (rankTxt ? `<span style="flex:none;font-size:11.5px;color:#495057">${rankTxt}</span>` : '') +
         `<a href="${webUrl}" target="_blank" rel="noopener" ` +
           'style="flex:none;padding:6px 9px;background:#1d9e75;color:#fff;font-size:11.5px;font-weight:600;border-radius:6px;text-decoration:none">이동 →</a>' +
-        __ohsorryLoginBtnHtml(idNorm, e.isOwn, true) +
+        __ohsorryLoginBtnHtml(idNorm, e.isOwn, 'compact') +
       '</div>'
     );
   }).join('');
@@ -406,11 +414,15 @@ async function __fetchRivalToken(iidxId) {
 }
 
 window.OhsorryCore = {
-  VERSION: '0.0.410',
+  VERSION: '0.0.411',
   prefetch: __loadCoreData,        // 모달 떠 있는 동안 미리 호출 → compute 캐시 hit (로딩 단축)
   fetchProfile: __fetchProfile,    // wrapper 가 모달 상단 프로필 채울 때
   fetchRivalToken: __fetchRivalToken,  // IIDX ID → 라이벌 토큰 (라이벌 모드 판정)
   showDoneList: __ohsorryShowDoneList, // wrapper 가 여러 명 결과를 한 번에 리스트로 표시
+  // 로그인 버튼 — 완료 박스뿐 아니라 **시작 모달**(부트로더)에서도 쓴다. 기록을 올리지 않고
+  //   비밀번호만 바꾸려는 사람이 크롤링을 끝까지 돌릴 이유가 없다. 티켓 발급 로직은 한 벌뿐이다.
+  loginBtnHtml: __ohsorryLoginBtnHtml,
+  bindLoginBtns: __ohsorryBindLoginBtns,
   compute: async (opts) => {
   __ohsorryShowSpinner();
   opts = opts || {};
@@ -418,7 +430,7 @@ window.OhsorryCore = {
   const isRival = mode === 'rival';
   const rivalToken = opts.rivalToken || null;
   const wrapperVersion = opts.wrapperVersion || 'unknown';
-  const CORE_VERSION_SHORT = '0.0.410'.replace(/^0\.0\./, '');  // '410' — SP profile upsert 리턴값 체크+재시도(웹훅 미발화 레이스 방지)
+  const CORE_VERSION_SHORT = '0.0.411'.replace(/^0\.0\./, '');  // '411' — 시작 모달에도 오소리웹 로그인 버튼
   const dbVersionString = `${wrapperVersion}-core${CORE_VERSION_SHORT}`;
 
   // -------- 0. 데이터 로드 (ereter/textage/ohSorryRating + 별값 lib) — 모듈 공유 __loadCoreData --------

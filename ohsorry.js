@@ -126,6 +126,7 @@
         <div style="background:#f8f9fa;border-radius:8px;padding:10px 12px;margin-bottom:10px;flex:none">
           <div id="__dp_prof_name" style="font-size:14px;font-weight:700;word-break:break-all">프로필 불러오는 중...</div>
           <div id="__dp_prof_rank" style="font-size:12px;color:#868e96;margin-top:2px"></div>
+          <div id="__dp_prof_login"></div>
         </div>
         <div style="font-size:11px;color:#888;margin-bottom:4px;flex:none">IIDX ID <span style="color:#1d9e75">— 다른 사람 ID = 라이벌 분석 / 여러 명은 공백·쉼표로 구분</span></div>
         <input id="__dp_iidx" type="text" inputmode="numeric" placeholder="0000-0000" disabled
@@ -184,7 +185,7 @@
       resolveChoice({ seriesList, playStyle, targetId });
     };
     // 프로필 fetch 끝나면 호출 — 헤더 채우고 IIDX input(본인 id) 채우고 시작 활성화.
-    function fillProfile(profile) {
+    function fillProfile(profile, Core) {
       const nameEl = ov.querySelector('#__dp_prof_name');
       const rankEl = ov.querySelector('#__dp_prof_rank');
       const input = ov.querySelector('#__dp_iidx');
@@ -197,6 +198,14 @@
         if (fmt(profile.dpRank)) parts.push('DP ' + profile.dpRank);
         rankEl.textContent = parts.join('   ·   ') || '단위 없음';
         input.value = profile.iidxId;
+        // 오소리웹 로그인 — 기록을 올리지 않아도 여기서 바로 갈 수 있게(비밀번호 변경이 주 용도).
+        //   **본인 프로필 ID 로만** 발급한다. 아래 IIDX 입력칸은 라이벌 ID 로 바꿀 수 있어 신뢰할 수 없다.
+        const loginBox = ov.querySelector('#__dp_prof_login');
+        if (loginBox && Core && Core.loginBtnHtml) {
+          const idNorm = String(profile.iidxId).replace(/-/g, '');
+          loginBox.innerHTML = Core.loginBtnHtml(idNorm, true, 'start');
+          if (Core.bindLoginBtns) Core.bindLoginBtns(loginBox);
+        }
       } else {
         nameEl.textContent = '프로필을 못 불러왔어요';
         rankEl.textContent = 'IIDX ID 를 직접 입력해주세요';
@@ -228,7 +237,7 @@
     let ownProfile = null;
     try { ownProfile = await Core.fetchProfile({ isRival: false }); }
     catch (e) { console.warn('[오소리] 프로필 fetch 실패:', e && e.message); }
-    ui.fillProfile(ownProfile);
+    ui.fillProfile(ownProfile, Core);
     // 데이터(별값 lib/ereter/textage/rating) 백그라운드 prefetch — 모달 보는 동안 미리 받아 compute 단축
     Core.prefetch().catch(() => {});
     // 시작 대기
