@@ -1,4 +1,4 @@
-// eagateFetch.js — eagate djdata 시리즈 페이지 fetch 모듈 (v0.0.3)
+// eagateFetch.js — eagate djdata 시리즈 페이지 fetch 모듈 (v0.0.4)
 //
 // p.eagate.573.jp 의 본인 / 라이벌 점수 데이터를 series.html 시리즈 폴더 단위로 수집.
 //   [2026-06-16] level(difficulty.html) 모드 폐기 — series 단일. 시리즈 폴더가 seriesNo 를 주므로
@@ -20,7 +20,7 @@
 (function () {
   'use strict';
 
-  const VERSION = 'v0.0.3';
+  const VERSION = 'v0.0.4';
 
   // ---- 상수 -----------------------------------------------------------
   // 사람이 페이지 넘기는 속도와 비슷하게: 0.8~1.2초 사이 랜덤 대기 (평균 1초)
@@ -84,7 +84,7 @@
   async function collectBySeries(ictx, state) {
     const list = ictx.seriesList;     // 수집할 list 값(0~32) 배열 (collectCharts 에서 정렬·검증)
     const total = list.length;
-    const seenChartKey = new Set();
+    const chartIndexByKey = new Map();
     for (let i = 0; i < total; i++) {
       const sn = list[i];             // eamuse list value (0~32)
       const sd = sn + 1;              // series_no (1~33)
@@ -130,10 +130,22 @@
       let added = 0;
       for (const ch of parsed.charts) {
         const k = ch.title + '|' + ch.diff;
-        if (seenChartKey.has(k)) continue;
-        seenChartKey.add(k);
-        state.charts.push(ch);
-        added++;
+        const previousIndex = chartIndexByKey.get(k);
+        if (previousIndex == null) {
+          chartIndexByKey.set(k, state.charts.length);
+          state.charts.push(ch);
+          added++;
+          continue;
+        }
+        const previous = state.charts[previousIndex];
+        const newEx = ch.exScore || 0;
+        const previousEx = previous.exScore || 0;
+        const newLamp = ch.lampNum || 0;
+        const previousLamp = previous.lampNum || 0;
+        // 전체 시리즈에 같은 차트가 반복될 수 있다. EX 우선, 동점이면 더 높은 램프를 보존한다.
+        if (newEx > previousEx || (newEx === previousEx && newLamp > previousLamp)) {
+          state.charts[previousIndex] = ch;
+        }
       }
       state.pageCount++;
       console.log(`[eagateFetch] 시리즈 ${sd} (${i + 1}/${total}): ${parsed.charts.length}차트 / 신규 ${added} (누적 ${state.charts.length})`);

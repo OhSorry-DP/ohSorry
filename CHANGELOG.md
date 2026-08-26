@@ -2,6 +2,11 @@
 
 ohSorry 의 변경 이력입니다. 사용방법은 [README.md](README.md) 를 참고하세요.
 
+### 2026-08-26 — eagateFetch 0.0.4: 전체 시리즈 동점 램프 보존
+
+- [modules/eagateFetch.js](modules/eagateFetch.js): 전체 시리즈 수집의 `title|diff` 중복 제거가 먼저 수집된 차트를 무조건 유지해, 뒤 시리즈의 동일 EX·더 높은 클리어 램프(HC/EXH/FC)를 버리던 문제를 수정했다. 이제 **EX 우선, EX 동점이면 lampNum 우선**으로 차트를 교체한다.
+- 단일 시리즈에서는 중복이 없어 정상이고, 전체 시리즈 선택에서만 재현되던 문제였다. DB 업로드 직전 [modules/dbConn.js](modules/dbConn.js)의 동일 PK dedup도 이미 같은 비교 규칙을 사용한다.
+
 ### 2026-08-22 — 별값 단조 래칫 (core 0.0.412 / dbConn 0.0.417)
 
 별값 계수 재fit([ohSorryRating CHANGELOG](../ohSorryRating/CHANGELOG.md)) 의 소비처 쪽 대응. 계수 교체만으로는 **미플레이 곡을 새로 클리어할 때** 별값이 내려가는 경우가 남는다 — 클리어율의 분모가 "친 곡 수"라 신규곡이 들어오면 분모도 같이 늘기 때문이고, 모델 안에서는 원리적으로 못 막는다. 저장·표시 단계에서 덮는다.

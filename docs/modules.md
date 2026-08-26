@@ -80,12 +80,13 @@
 
 ## eagateFetch.js — p.eagate.573.jp series 크롤
 
-- 등록: `window.OhsorryEagateFetch`, `VERSION: 'v0.0.3'` (`eagateFetch.js:23`, export `:183`)
+- 등록: `window.OhsorryEagateFetch`, `VERSION: 'v0.0.4'` (`eagateFetch.js:23`, export `:195`)
 - export: `VERSION`, `collectCharts(ctx)`
 - `ctx` 키: `seriesList`(eamuse list 값 0~32 배열), `series`(`'33'`), `style`(`'1'`=DP/`'0'`=SP), `isRival`, `rivalToken`, `updateProgress`
 - 반환: `{ok, charts, pageCount}`
 - **[2026-06-16] series 단일 모드** — level(difficulty.html) 크롤은 폐기. `parseSeriesDoc`: `series.html` 시리즈 폴더(곡당 5 score-cel: BEGINNER~LEGGENDARIA). `gameLevel=null`(textage 로 역추정), `seriesNo` 채움. 시리즈가 `seriesNo` 를 주므로 dbConn 의 song_id/textage_song_id/series_no 매칭 정확.
 - 차트 객체 필드: `title, diff, djLevel, exScore, lampNum(0~7), lamp, gameLevel(=null), seriesNo`. **`noteCount`·`pgreat/great/missCount` 없음** — series 페이지가 안 주므로 core 4.5 단계에서 textage 로 gameLevel 보강(noteCount 는 업로드에 안 써 미보강).
+- 전체 시리즈 수집에서 같은 `title|diff`가 반복되면 **EX 우선, EX 동점이면 높은 `lampNum` 우선**으로 하나만 유지한다. 따라서 앞 시리즈의 낮은 램프가 뒤 시리즈의 HC/EXH/FC를 가리지 않는다.
 - 라이벌: `isRival` 시 `rival_status.html`·series rival fetch(`rivalToken`). 모든 fetch `credentials:'include'` + 랜덤 딜레이.
 
 ---
