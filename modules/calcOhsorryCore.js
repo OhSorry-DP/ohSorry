@@ -5,7 +5,7 @@
 //   웹·INF 는 코어를 안 쓰고(코어-free, ohsorryRender 직접 호출), 코어는 eagate 업로더에서만 실행된다.
 //
 // 동작:
-//   1. Gist 에서 ereter / textage / ohSorryRating JSON + 별값 lib(OSR13.5+/onlyOSR/onlyOSRtoEreter) fetch
+//   1. Gist 에서 ereter / textage / ohSorryRating JSON + 별값 lib(OSR13.5+/onlyOSR/onlyOSRtoEreter/userRateStar) fetch
 //   2. eagateFetch 모듈로 series.html 시리즈 폴더 크롤 (클리어램프 + EX점수 + 차트). gameLevel 은 textage 역추정.
 //   3. 별값(★) 추정 = onlyOSRtoEreter (native onlyOSR → ereter★, OSR13.5 tier)
 //   4. status.html 로 프로필(DJ명 / IIDX ID / SP·DP 단위 / 노트레이더) 추출
@@ -183,6 +183,7 @@ var __URLS = {
   osr135:    __GIST_RAW + '/OSR13.5%2B.js',     // onlyOSRtoEreter 13.5 tier 의존
   onlyOSR:   __GIST_RAW + '/onlyOSR.js',
   onlyOSR2e: __GIST_RAW + '/onlyOSRtoEreter.js',
+  userRStar: __GIST_RAW + '/userRateStar.js',
   cpi:       __GIST_RAW + '/cpi.json',          // SP12 채보별 램프 CPI (SP 대표 실력값 산출)
   cpiStar:   __GIST_RAW + '/cpiStar.js',        // CPI → 発狂★相当 변환 커널
   spSkillCpi:__GIST_RAW + '/spSkillCpi.js',     // 유저 SP 대표 실력값(sp_cpi/sp_star) 산출 커널(cpiStar 의존)
@@ -287,6 +288,16 @@ async function __loadStarLibs() {
   return window.onlyOSRtoEreter || null;   // 별값 산출에 직접 쓰는 건 onlyOSRtoEreter (OSR13.5+/onlyOSR 은 글로벌 의존)
 }
 
+// 사용자 r★ 커널 eval — ohSorryRating/modules/userRateStar.js UMD. window.userRateStar 등록.
+async function __loadUserRateStar() {
+  if (window.userRateStar && window.userRateStar.inferUserRStar) return window.userRateStar;
+  try {
+    const { data } = await __loadWithCache(__URLS.userRStar, 'ohSorry:libUserRateStar', false);
+    (new Function(data))();
+  } catch (e) { console.warn('[데이터] userRateStar 로드 실패 — r★ 미산출(기존값 보존):', e.message); }
+  return window.userRateStar || null;
+}
+
 // SP12 CPI 데이터 (cpi.json) — 캐시 우선. 실패해도 무시(null) → SP 대표 실력값 미산출(기존값 보존).
 async function __loadCpi() {
   window.__ohsorryLibCache = window.__ohsorryLibCache || {};
@@ -321,13 +332,14 @@ async function __loadCoreData() {
     if (data && Array.isArray(data.ratings)) ohSorryRatings = data.ratings;
   } catch (e) { console.error('[데이터] ohSorryRating 로드 실패:', e.message); }
   const onlyOSR2eLib = await __loadStarLibs();   // OSR13.5+/onlyOSR 는 글로벌 등록(side-effect), 반환은 onlyOSRtoEreter
+  const userRateStarLib = await __loadUserRateStar();
   const cpiData = await __loadCpi();              // SP12 CPI (SP 모드 대표 실력값용, 실패 시 null)
   const spSkillLib = await __loadSpStarLibs();    // window.spSkillCpi (computeUserSpCpi), 실패 시 null
   return {
     ereterData: ereter ? ereter.charts : null,
     ereterPlayers: ereter ? ereter.players : null,
     textageSongs, ratingData, ohSorryRatings,
-    onlyOSR2eLib, cpiData, spSkillLib,
+    onlyOSR2eLib, userRateStarLib, cpiData, spSkillLib,
   };
 }
 
@@ -414,7 +426,7 @@ async function __fetchRivalToken(iidxId) {
 }
 
 window.OhsorryCore = {
-  VERSION: '0.0.412',
+  VERSION: '0.0.413',
   prefetch: __loadCoreData,        // 모달 떠 있는 동안 미리 호출 → compute 캐시 hit (로딩 단축)
   fetchProfile: __fetchProfile,    // wrapper 가 모달 상단 프로필 채울 때
   fetchRivalToken: __fetchRivalToken,  // IIDX ID → 라이벌 토큰 (라이벌 모드 판정)
@@ -430,7 +442,7 @@ window.OhsorryCore = {
   const isRival = mode === 'rival';
   const rivalToken = opts.rivalToken || null;
   const wrapperVersion = opts.wrapperVersion || 'unknown';
-  const CORE_VERSION_SHORT = '0.0.412'.replace(/^0\.0\./, '');  // '412' — 별값 단조 래칫(star 가 내려가지 않음)
+  const CORE_VERSION_SHORT = '0.0.413'.replace(/^0\.0\./, '');  // '413' — 사용자 r★를 크롤러에서 산출해 users.r_star 저장
   const dbVersionString = `${wrapperVersion}-core${CORE_VERSION_SHORT}`;
 
   // -------- 0. 데이터 로드 (ereter/textage/ohSorryRating + 별값 lib) — 모듈 공유 __loadCoreData --------
@@ -441,7 +453,7 @@ window.OhsorryCore = {
     __ohsorryHideSpinner();
     return;
   }
-  const { ereterData, ereterPlayers, textageSongs, ratingData, ohSorryRatings, onlyOSR2eLib, cpiData, spSkillLib } = __D;
+  const { ereterData, ereterPlayers, textageSongs, ratingData, ohSorryRatings, onlyOSR2eLib, userRateStarLib, cpiData, spSkillLib } = __D;
 
   // -------- 1. 곡명 정규화 + 인덱싱 --------
   // [중복 제거] 곡명 norm = normTitle.js 단일 정본(window.OhsorryNorm, wrapper 가 먼저 fetch+eval).
@@ -542,33 +554,37 @@ window.OhsorryCore = {
   // -------- 4.5. textage 로 gameLevel 역추정 (series 페이지엔 레벨 정보 없음) --------
   //   series.html 은 게임레벨(★)을 안 주므로 textage levels 로 채운다. style 별 키: SP=S* / DP=D*.
   //   gameLevel 용도: dbPayload lv12 카운트 + chartScoreRows.game_level + SP 점수 필터.
-  //   (noteCount 는 업로드에 안 쓰여 미보강 — 피처는 dbConn 이 자체 계산.)
+  //   noteCount 는 DP 사용자 r★ 입력에 필요하므로 같은 textage 엔트리의 notes 값으로 함께 보강한다.
   //   동명이곡(norm 충돌, 한 키에 여러 엔트리)은 해당 diff 채보가 실재(레벨≥1)하는 엔트리 우선.
   const SP_DIFF_KEY = { NORMAL: 'SN', HYPER: 'SH', ANOTHER: 'SA', LEGGENDARIA: 'SX', BEGINNER: 'SB' };
   const DP_DIFF_KEY = { NORMAL: 'DN', HYPER: 'DH', ANOTHER: 'DA', LEGGENDARIA: 'DX', BEGINNER: 'DB' };
-  let textageLevelsByNorm = null;
+  let textageChartsByNorm = null;
   if (textageSongs) {
     const stripHtml = (s) => (s || '').replace(/<[^>]*>/g, '');
-    textageLevelsByNorm = {};
+    textageChartsByNorm = {};
     for (const id in textageSongs) {
       const s = textageSongs[id];
       if (!s || !s.levels || !s.title) continue;
       const key = norm(stripHtml(s.title));
-      (textageLevelsByNorm[key] = textageLevelsByNorm[key] || []).push(s.levels);
+      (textageChartsByNorm[key] = textageChartsByNorm[key] || []).push({ levels: s.levels, notes: s.notes || {} });
     }
   }
   function fillGameLevel(charts, isSp) {
-    if (!textageLevelsByNorm) return;
+    if (!textageChartsByNorm) return;
     const KEY = isSp ? SP_DIFF_KEY : DP_DIFF_KEY;
     let filled = 0;
     for (const c of charts) {
-      if (c.gameLevel != null) continue;
-      const entries = textageLevelsByNorm[norm(c.title)];
+      const entries = textageChartsByNorm[norm(c.title)];
       if (!entries) continue;
       const tKey = KEY[c.diff];
       if (!tKey) continue;
-      const chosen = entries.find((e) => typeof e[tKey] === 'number' && e[tKey] >= 1) || entries[0];
-      if (typeof chosen[tKey] === 'number' && chosen[tKey] >= 1) { c.gameLevel = chosen[tKey]; filled++; }
+      const chosen = entries.find((e) => typeof e.levels[tKey] === 'number' && e.levels[tKey] >= 1) || entries[0];
+      if (c.gameLevel == null && typeof chosen.levels[tKey] === 'number' && chosen.levels[tKey] >= 1) {
+        c.gameLevel = chosen.levels[tKey]; filled++;
+      }
+      if (!isSp && !(c.noteCount > 0) && typeof chosen.notes[tKey] === 'number' && chosen.notes[tKey] > 0) {
+        c.noteCount = chosen.notes[tKey];
+      }
     }
     console.log(`[step2] textage gameLevel 역추정(${isSp ? 'SP' : 'DP'}): ${filled}곡`);
   }
@@ -747,15 +763,41 @@ window.OhsorryCore = {
     //      신규곡이 들어오면 분모도 같이 늘어난다). 계수/난이도축 재배포 후 재기준화는 래칫을 안 타는
     //      backfillStars.js --apply 로 한다.
     //   native_star 는 COALESCE 라 null 전송 시 자동 보존. ereter_star 는 ereter 룩업(크롤 무관)이라 그대로.
-    let preservedStar = null;
+    let preservedStar = null, previousRStar = null;
     if (window.OhsorryDb && window.OhsorryDb.fetchUserStars) {
-      try { const prev = await window.OhsorryDb.fetchUserStars(iidxIdNorm); if (prev && prev.star != null) preservedStar = prev.star; } catch {}
+      try {
+        const prev = await window.OhsorryDb.fetchUserStars(iidxIdNorm);
+        if (prev && prev.star != null) preservedStar = prev.star;
+        if (prev && prev.r_star != null && Number.isFinite(Number(prev.r_star))) previousRStar = Number(prev.r_star);
+      } catch {}
     }
     // 래칫 적용 후 최종 star. starEstimate 가 null(부분 크롤/산출 실패)이면 기존값 그대로 쓴다.
     let finalStar = starEstimate;
     if (finalStar != null && preservedStar != null && Number(preservedStar) > finalStar) {
       console.log('[step2] ★ 래칫 — 계산값 ' + finalStar.toFixed(2) + ' < 기존 ' + Number(preservedStar).toFixed(2) + ' → 기존값 유지');
       finalStar = Number(preservedStar);
+    }
+    // 사용자 r★는 기존 표시용 ★와 완전히 독립적으로 계산한다. 전체 DP 크롤에서만 산출하며,
+    // 실패/표본부족/부분 크롤이면 기존 DB r_star를 유지하고 starEstimate를 fallback으로 쓰지 않는다.
+    let finalRStar = previousRStar;
+    if (!fullCrawl) {
+      console.log('[step2] 일부 시리즈만 크롤 — r★ 계산 skip (기존 users.r_star 보존)');
+    } else if (userRateStarLib && ratingData) {
+      try {
+        const rStarResult = userRateStarLib.inferUserRStar(allCharts, ratingData, {
+          normFn: norm,
+          scale: ratingData.rateStar && ratingData.rateStar.scale ? ratingData.rateStar.scale : null,
+          prevRStar: previousRStar,
+        });
+        if (typeof rStarResult.rStar === 'number' && Number.isFinite(rStarResult.rStar)) {
+          finalRStar = rStarResult.rStar;
+          console.log(`[step2] r★ = ${finalRStar.toFixed(2)} (${rStarResult.method || rStarResult.reason || 'unknown'}, charts ${rStarResult.nCharts})`);
+        } else {
+          console.warn('[step2] userRateStar rStar 없음 — 기존 users.r_star 보존:', rStarResult.reason || 'unknown');
+        }
+      } catch (e) { console.warn('[step2] userRateStar 실패 — 기존 users.r_star 보존:', e.message); }
+    } else {
+      console.warn('[step2] userRateStar/ohSorryRating 미로드 — 기존 users.r_star 보존');
     }
     let nPlayedLv12 = 0, fcCount = 0, exhCount = 0, hcCount = 0, nClearedLv12 = 0;
     for (const c of allCharts) {
@@ -782,6 +824,7 @@ window.OhsorryCore = {
       iidx_id: iidxIdNorm,
       dj_name: profile.djName || null,
       star_estimate: finalStar != null ? Number(finalStar.toFixed(4)) : (preservedStar != null ? Number(preservedStar) : null),  // 래칫 적용값 / 부분 크롤이면 기존값 보존
+      r_star: finalRStar != null ? Number(finalRStar.toFixed(2)) : null,
       native_star: nativeStar != null ? Number(nativeStar.toFixed(4)) : null,  // v3.4.0: onlyOSR 전체곡 native (null → COALESCE 보존)
       ereter_star: eraterTrueStar != null ? Number(eraterTrueStar) : null,
       raw_s: null,                  // 현재 미산출 (컬럼 호환). native_star/star_estimate 가 별값 정본.

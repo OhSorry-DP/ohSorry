@@ -1,4 +1,5 @@
-// dbConn.js — 오소리 DB 통신 모듈 (v0.0.417)
+// dbConn.js — 오소리 DB 통신 모듈 (v0.0.418)
+// v0.0.418 — users.r_star 독립 저장. fetchUserStars 조회 + upsert_user p_r_star 전달(null은 DB COALESCE 보존).
 // v0.0.417 — recomputeAndSaveStar 에 단조 래칫 적용. onlyOSRtoEreter v0.0.4 의 opts.prevStar 로
 //            기존 star 보다 낮아지지 않게 한다. 클리어를 더했는데 별값이 내려가는 걸 막는 최종 방어선
 //            (모델 자체는 미플레이 곡 신규 클리어 케이스를 원리적으로 못 막는다 — 클리어율 분모가
@@ -368,6 +369,7 @@ window.OhsorryDb = (function () {
         p_native_star: payload.native_star != null ? Number(payload.native_star) : null,  // v3.4.0
         p_sp_cpi: payload.sp_cpi != null ? Math.round(Number(payload.sp_cpi)) : null,      // SP 대표 실력값(CPI). null → COALESCE 보존
         p_sp_star: payload.sp_star != null ? Number(payload.sp_star) : null,               // 発狂★相当. SP 크롤/INF 만 채움
+        p_r_star: payload.r_star != null ? Number(payload.r_star) : null,                  // 사용자 r★. null → COALESCE 보존
       });
       // 2. user_radars (SP / DP 각각, 있을 때만)
       const radar = payload.notes_radar;
@@ -556,27 +558,28 @@ window.OhsorryDb = (function () {
     return data;
   }
 
-  // 기존 user row 의 star / ereter_star 만 조회 (없으면 둘 다 null).
+  // 기존 user row 의 star / ereter_star / r_star 조회 (없으면 모두 null).
   //   upsert_user 는 star / ereter_star 를 EXCLUDED 로 무조건 덮어쓰는 정책(02_users.sql)이라,
   //   ★분석을 안 하는 SP 모드에서 프로필을 저장할 때 기존 값을 SELECT 해 그대로 재전송해야 보존됨.
   //   (users RLS: FOR SELECT USING(true) + anon GRANT → anon key 로 조회 가능. dbr_pw 만 제외.)
   async function fetchUserStars(iidxId) {
     const id = String(iidxId || '').trim().replace(/-/g, '');
-    if (!id) return { star: null, ereter_star: null };
+    if (!id) return { star: null, ereter_star: null, r_star: null };
     try {
       const url = SUPABASE_URL + '/rest/v1/users'
-        + `?iidx_id=eq.${encodeURIComponent(id)}&select=star,ereter_star&limit=1`;
+        + `?iidx_id=eq.${encodeURIComponent(id)}&select=star,ereter_star,r_star&limit=1`;
       const res = await fetch(url, { headers: HEADERS });
-      if (!res.ok) return { star: null, ereter_star: null };
+      if (!res.ok) return { star: null, ereter_star: null, r_star: null };
       const rows = await res.json();
       const r = Array.isArray(rows) && rows.length ? rows[0] : null;
       return {
         star: r && r.star != null ? r.star : null,
         ereter_star: r && r.ereter_star != null ? r.ereter_star : null,
+        r_star: r && r.r_star != null ? r.r_star : null,
       };
     } catch (e) {
       console.warn('[OhsorryDb] fetchUserStars 실패:', e && e.message);
-      return { star: null, ereter_star: null };
+      return { star: null, ereter_star: null, r_star: null };
     }
   }
 
@@ -988,7 +991,7 @@ window.OhsorryDb = (function () {
   }
 
   return {
-    VERSION: '0.0.416',
+    VERSION: '0.0.418',
     upsertUserProfile: upsertUserProfile,
     upsertUserChartScores: upsertUserChartScores,
     uploadResult: uploadResult,
