@@ -2,6 +2,23 @@
 
 ohSorry 의 변경 이력입니다. 사용방법은 [README.md](README.md) 를 참고하세요.
 
+### 2026-09-04 — 별값 조회 실패를 "별값 없음"으로 둔갑시키던 fail-open 차단
+
+유저 `C310967548465` 의 `users.star` 가 `null` 로 덮어써졌다. `native_star`·`r_star` 는 멀쩡했다.
+
+DB `upsert_user` 는 `star = EXCLUDED.star` 라 **null 을 그대로 덮어쓴다**(원래 의도된 설계였다). 그래서 크롤러가 "부분 크롤·계산 실패 시 기존 star 를 조회해 재전송"으로 막고 있었는데, **그 방어가 fail-open 이었다.**
+
+- 🔴 `fetchUserStars` 가 **`!res.ok` 를 로그도 없이 `{star:null,...}` 로 반환**했다. HTTP 429/5xx 한 번이면 "이 유저는 별값이 없다"와 **완전히 같은 모양**으로 호출자에게 도착한다. 사고가 나도 흔적이 안 남았다.
+- 반환에 **`ok` 를 추가**해 ①정상+행있음 ②정상+행없음(정당한 부재) ③조회 실패 셋을 구분한다. `!res.ok` 자리에 상태코드 경고를 넣었다.
+- `calcOhsorryCore.js` 의 **빈 `catch {}` 제거**(예외가 통째로 삼켜지고 있었다). DP·SP 양쪽에서 `ok:false` 면 **프로필 저장을 건너뛴다** — 값을 모르는 채로 저장하는 건 지우는 것과 같다. **점수 저장은 그대로 진행**한다.
+- `ereter_star` 도 같은 경로로 null 이 될 수 있어 `preservedEreterStar` 로 같이 보존한다.
+- `upsertUserProfile` 최후 방어 — payload 에 `star_estimate` 키가 **`undefined`** 면 RPC 를 호출하지 않는다. 신규 유저의 명시적 `null` 과 구별된다.
+- 신규 유저(조회 성공 + 값 없음)는 **그대로 진행**한다. 막으면 신규 등록이 안 된다.
+
+실측(2026-09-04): 전체 419명 중 `star IS NULL` 148명, 그중 `native_star` 가 있어 피해로 의심되는 건 **5명**. 상시 유출이 아니라 드물게 터지는 경로였다.
+
+DB 쪽 방어는 `ohSorryAdmin/sql/27_star_null_preserve.sql`(별도).
+
 ### 2026-08-26 — eagateFetch 0.0.4: 전체 시리즈 동점 램프 보존
 
 - [modules/eagateFetch.js](modules/eagateFetch.js): 전체 시리즈 수집의 `title|diff` 중복 제거가 먼저 수집된 차트를 무조건 유지해, 뒤 시리즈의 동일 EX·더 높은 클리어 램프(HC/EXH/FC)를 버리던 문제를 수정했다. 이제 **EX 우선, EX 동점이면 lampNum 우선**으로 차트를 교체한다.

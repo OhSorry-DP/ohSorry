@@ -355,6 +355,9 @@ window.OhsorryDb = (function () {
     if (!payload || !payload.iidx_id) {
       return { ok: false, error: 'iidx_id 가 없습니다' };
     }
+    if (payload.star_estimate === undefined) {
+      return { ok: false, error: 'star_estimate 값이 없어 프로필 저장을 중단합니다' };
+    }
     const statusErr = await checkUploadEnabled();
     if (statusErr) return statusErr;
     try {
@@ -564,22 +567,26 @@ window.OhsorryDb = (function () {
   //   (users RLS: FOR SELECT USING(true) + anon GRANT → anon key 로 조회 가능. dbr_pw 만 제외.)
   async function fetchUserStars(iidxId) {
     const id = String(iidxId || '').trim().replace(/-/g, '');
-    if (!id) return { star: null, ereter_star: null, r_star: null };
+    if (!id) return { ok: false, star: null, ereter_star: null, r_star: null };
     try {
       const url = SUPABASE_URL + '/rest/v1/users'
         + `?iidx_id=eq.${encodeURIComponent(id)}&select=star,ereter_star,r_star&limit=1`;
       const res = await fetch(url, { headers: HEADERS });
-      if (!res.ok) return { star: null, ereter_star: null, r_star: null };
+      if (!res.ok) {
+        console.warn('[OhsorryDb] fetchUserStars 실패: HTTP ' + res.status);
+        return { ok: false, star: null, ereter_star: null, r_star: null };
+      }
       const rows = await res.json();
       const r = Array.isArray(rows) && rows.length ? rows[0] : null;
       return {
+        ok: true,
         star: r && r.star != null ? r.star : null,
         ereter_star: r && r.ereter_star != null ? r.ereter_star : null,
         r_star: r && r.r_star != null ? r.r_star : null,
       };
     } catch (e) {
       console.warn('[OhsorryDb] fetchUserStars 실패:', e && e.message);
-      return { star: null, ereter_star: null, r_star: null };
+      return { ok: false, star: null, ereter_star: null, r_star: null };
     }
   }
 
@@ -627,6 +634,7 @@ window.OhsorryDb = (function () {
         .filter((r) => r && typeof r.diff === 'number' && DIFF_INT_TO_STR[r.diff] && r.title)
         .map((r) => ({ title: r.title, diff: DIFF_INT_TO_STR[r.diff], lampNum: typeof r.lamp === 'number' ? r.lamp : 0 }));
       if (charts.length === 0) return { ok: false, error: '재계산할 차트 없음' };
+      if (!prevStars.ok) return { ok: false, error: '기존 star/ereter_star 조회 실패' };
       //   4번째 인자 opts.prevStar = 단조 래칫(기존 star 아래로 안 내려감). ereterData 는 여기선 미사용.
       const result = window.onlyOSRtoEreter.inferEreter(charts, ratingData, null, { prevStar: prevStars.star });
       if (result.ereterStar == null) return { ok: false, error: result.reason || '별값 산출 불가(표본 부족)' };

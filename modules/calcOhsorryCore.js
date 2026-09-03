@@ -662,9 +662,17 @@ window.OhsorryCore = {
       //   기존 값을 조회해 그대로 재전송(없으면 null). dj_name/sp_rank/dp_rank/radar 는 status fetch 값으로 갱신.
       try {
         let prevStar = null, prevEreterStar = null;
+        let starsLookupOk = false;
         if (window.OhsorryDb.fetchUserStars) {
-          const prev = await window.OhsorryDb.fetchUserStars(spIidx);
-          if (prev) { prevStar = prev.star; prevEreterStar = prev.ereter_star; }
+          try {
+            const prev = await window.OhsorryDb.fetchUserStars(spIidx);
+            starsLookupOk = !!(prev && prev.ok);
+            if (starsLookupOk) { prevStar = prev.star; prevEreterStar = prev.ereter_star; }
+          } catch (e) {
+            console.warn('[SP] 기존 star/ereter_star 조회 예외:', e && e.message);
+          }
+        } else {
+          console.warn('[SP] fetchUserStars 없음 — 기존 star/ereter_star 조회 실패로 처리');
         }
         // SP 대표 실력값 — SP12 클리어(allCharts) × cpi.json.
         //   sp_cpi  = unified85 원좌표(클리어율 85% 교차 CPI). sp_star = max(unified85★, guardedGaugeAvg50)
@@ -688,6 +696,7 @@ window.OhsorryCore = {
         //   "scores 만 반영되고 리포트는 미발화" 레이스가 실제로 발생(72281972).
         //   → 리턴값을 확인하고 실패 시 1회 재시도한다. profile 이 성공하면 service-status 성공응답이
         //     캐시(5분)에 채워져 바로 뒤의 scores upsert 통과도 함께 보장된다.
+        const skipSpProfileUpsert = !starsLookupOk;
         const spProfilePayload = {
           iidx_id: spIidx,
           dj_name: profile.djName || null,
@@ -701,13 +710,18 @@ window.OhsorryCore = {
             ? { sp: hasRadarData(profile.spRadar) ? profile.spRadar : null, dp: hasRadarData(profile.dpRadar) ? profile.dpRadar : null }
             : null,
         };
-        let spProfRes = await window.OhsorryDb.upsertUserProfile(spProfilePayload);
-        if (!spProfRes || !spProfRes.ok) {
+        let spProfRes = null;
+        if (skipSpProfileUpsert) {
+          console.error('[SP profile upsert] 기존 star/ereter_star 값을 알 수 없어 프로필 저장을 건너뜁니다 (scores 저장은 계속)');
+        } else {
+          spProfRes = await window.OhsorryDb.upsertUserProfile(spProfilePayload);
+        }
+        if (!skipSpProfileUpsert && (!spProfRes || !spProfRes.ok)) {
           console.warn('[SP profile upsert] 1차 실패 — 재시도:', spProfRes && spProfRes.error);
           await new Promise((r) => setTimeout(r, 400));
           spProfRes = await window.OhsorryDb.upsertUserProfile(spProfilePayload);
         }
-        if (!spProfRes || !spProfRes.ok) {
+        if (!skipSpProfileUpsert && (!spProfRes || !spProfRes.ok)) {
           // 최종 실패 시 users 미갱신 → 웹훅/리포트 미발화. 로그로 명시(scores 는 아래에서 별도 진행).
           console.warn('[SP profile upsert] 최종 실패 — 웹훅/리포트 미발화 위험:', spProfRes && spProfRes.error);
         }
@@ -763,13 +777,24 @@ window.OhsorryCore = {
     //      신규곡이 들어오면 분모도 같이 늘어난다). 계수/난이도축 재배포 후 재기준화는 래칫을 안 타는
     //      backfillStars.js --apply 로 한다.
     //   native_star 는 COALESCE 라 null 전송 시 자동 보존. ereter_star 는 ereter 룩업(크롤 무관)이라 그대로.
-    let preservedStar = null, previousRStar = null;
+    let preservedStar = null, preservedEreterStar = null, previousRStar = null;
+    let starsLookupOk = false;
     if (window.OhsorryDb && window.OhsorryDb.fetchUserStars) {
       try {
         const prev = await window.OhsorryDb.fetchUserStars(iidxIdNorm);
-        if (prev && prev.star != null) preservedStar = prev.star;
-        if (prev && prev.r_star != null && Number.isFinite(Number(prev.r_star))) previousRStar = Number(prev.r_star);
-      } catch {}
+        starsLookupOk = !!(prev && prev.ok);
+        if (starsLookupOk && prev.star != null) preservedStar = prev.star;
+        if (starsLookupOk && prev.ereter_star != null) preservedEreterStar = prev.ereter_star;
+        if (starsLookupOk && prev.r_star != null && Number.isFinite(Number(prev.r_star))) previousRStar = Number(prev.r_star);
+      } catch (e) {
+        console.warn('[step2] 기존 star/ereter_star/r_star 조회 예외:', e && e.message);
+      }
+    } else {
+      console.warn('[step2] fetchUserStars 없음 — 기존 star/ereter_star/r_star 조회 실패로 처리');
+    }
+    const skipProfileUpsert = !starsLookupOk && (starEstimate == null || eraterTrueStar == null);
+    if (skipProfileUpsert) {
+      console.error('[step2] star/ereter_star 값을 알 수 없어 프로필 저장을 건너뜁니다 (scores 저장은 계속)');
     }
     // 래칫 적용 후 최종 star. starEstimate 가 null(부분 크롤/산출 실패)이면 기존값 그대로 쓴다.
     let finalStar = starEstimate;
@@ -826,7 +851,7 @@ window.OhsorryCore = {
       star_estimate: finalStar != null ? Number(finalStar.toFixed(4)) : (preservedStar != null ? Number(preservedStar) : null),  // 래칫 적용값 / 부분 크롤이면 기존값 보존
       r_star: finalRStar != null ? Number(finalRStar.toFixed(2)) : null,
       native_star: nativeStar != null ? Number(nativeStar.toFixed(4)) : null,  // v3.4.0: onlyOSR 전체곡 native (null → COALESCE 보존)
-      ereter_star: eraterTrueStar != null ? Number(eraterTrueStar) : null,
+      ereter_star: eraterTrueStar != null ? Number(eraterTrueStar) : (preservedEreterStar != null ? Number(preservedEreterStar) : null),
       raw_s: null,                  // 현재 미산출 (컬럼 호환). native_star/star_estimate 가 별값 정본.
       version: dbVersionString,
       sp_rank: profile.spRank || null,
@@ -846,6 +871,7 @@ window.OhsorryCore = {
         ? { sp: hasRadarData(profile.spRadar) ? profile.spRadar : null, dp: hasRadarData(profile.dpRadar) ? profile.dpRadar : null }
         : null,
     };
+    if (skipProfileUpsert) delete dbPayload.star_estimate;
     // 점수가 있거나, 한 번이라도 플레이해 램프가 붙은(FAILED 포함) 차트만 — NO PLAY 만 제외
     chartScoreRows = allCharts.filter((c) => c.exScore > 0 || c.lampNum > 0).map((c) => {
       const key = norm(c.title) + '|' + c.diff;
