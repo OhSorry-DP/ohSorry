@@ -656,6 +656,7 @@ window.OhsorryCore = {
     const spIidx = profile && profile.iidxId ? profile.iidxId.replace(/-/g, '') : null;
     const spPlayed = (allCharts || []).filter((c) => c.exScore > 0 || c.lampNum > 0);
     let spUploaded = null;
+    let spUploadFailReason = null;  // null 이면 성공(또는 spRows.length===0 인 정상 케이스). 값이 있으면 완료 박스 대신 alert.
     if (spIidx && window.OhsorryDb && window.OhsorryDb.upsertUserChartScores) {
       // 5.6b. 프로필(users + user_radars) 저장 — SP 모드는 ★분석을 안 하므로 star/ereter_star 를 새로
       //   계산하지 않는다. upsert_user 가 그 둘을 EXCLUDED 로 무조건 덮어쓰는 정책(02_users.sql)이라,
@@ -735,8 +736,20 @@ window.OhsorryCore = {
           lamp: c.lamp || null, play_style: 0, date: new Date().toISOString(),
         }));
       if (spRows.length) {
-        try { const res = await window.OhsorryDb.upsertUserChartScores(spRows); spUploaded = (res && res.ok) ? spRows.length : null; }
-        catch (e) { console.warn('[SP upload]', e && e.message); }
+        // DP 경로(6~7단계)와 동일한 패턴: ok/empty/예외를 구분해 완료 박스 오표시를 막는다.
+        //   spUploaded 자체의 의미(성공 시 건수, 아니면 null)는 유지 — 실패 사유는 별도 변수(spUploadFailReason)로.
+        try {
+          const res = await window.OhsorryDb.upsertUserChartScores(spRows);
+          const uploadOk = !!(res && res.ok && !res.empty);
+          spUploaded = uploadOk ? spRows.length : null;
+          if (!uploadOk) {
+            spUploadFailReason = '스코어: ' + (res && res.empty
+              ? '0건 (저장할 성적이 없음 — 성적 비공개/파싱 실패 의심)'
+              : ((res && res.error) || '실패'));
+          }
+        } catch (e) {
+          spUploadFailReason = '스코어: ' + ((e && e.message) || '예외');
+        }
       }
       // SP 오소리 피쳐 스코어(user_ohsorry_radars play_style=0) — 웹 SP 분석탭의 피처별 랭킹/상대평가 baseline.
       //   scores upsert **뒤에** 계산해야 방금 올린 점수가 make_grid_data 에 반영된다.
@@ -754,7 +767,18 @@ window.OhsorryCore = {
       iidxId: spIidx, spChartCount: spPlayed.length, spUploaded,
     };
     // own·rival 모두 완료 박스(대상 IIDX ID 의 카드로 이동). 여러 명이면 wrapper 가 리스트로(suppressDone).
-    if (!opts.suppressDone) __ohsorryShowDone(profile, 'SP', !isRival);
+    // spRows.length===0 (SP 성적 없는 DP 전용 유저)는 정상 — spUploadFailReason 이 안 채워진다.
+    if (spUploadFailReason) {
+      console.error('[SP] 업로드 실패 —', spUploadFailReason);
+      if (!opts.suppressDone) {
+        alert(['오소리 업로드에 실패했어요.', '']
+          .concat([spUploadFailReason])
+          .concat(['', '콘솔(F12) 로그를 확인해주세요.'])
+          .join(String.fromCharCode(10)));
+      }
+    } else if (!opts.suppressDone) {
+      __ohsorryShowDone(profile, 'SP', !isRival);
+    }
     __ohsorryHideSpinner();
     return spResult;
   }

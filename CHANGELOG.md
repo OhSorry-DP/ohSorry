@@ -2,6 +2,14 @@
 
 ohSorry 의 변경 이력입니다. 사용방법은 [README.md](README.md) 를 참고하세요.
 
+### 2026-09-15 — SP 경로도 스코어 업로드 실패를 "업로드 완료" 로 표시하던 문제
+
+DP 경로는 같은 날 위 항목에서 고쳤는데, **SP 전용 크롤 경로는 별도 코드라 그대로 남아있었다.** `upsertUserChartScores` 결과의 `res.ok` 가 false 여도 `spUploaded` 가 `null` 이 될 뿐, 그 아래에서 완료 박스는 조건 없이 그대로 떴다.
+
+- `calcOhsorryCore.js` SP 블록 — 업로드 결과를 `ok`/`empty`(0건)/예외 셋으로 구분해 `spUploadFailReason` 에 담고, 값이 있으면 완료 박스 대신 DP 와 같은 형식의 `alert`(`opts.suppressDone` 이면 생략) + `console.error` 를 낸다.
+- `spRows.length === 0`(SP 성적이 없는 DP 전용 유저)는 기존대로 정상 취급 — 실패가 아니다.
+- `spUploaded` 의 기존 의미(성공 시 건수, 아니면 null)는 바꾸지 않았다. 소비처를 확인했고 `calcOhsorryCore.js` 내부(`spResult.spUploaded`)뿐이라 외부 영향 없음.
+
 ### 2026-09-15 — 스코어 업로드 실패·0건을 "업로드 완료" 로 표시하던 문제
 
 신규 등록한 유저(`2064-9574`)의 `users` 행과 레이더는 저장됐는데 `scores` 만 0건이었다. 그런데 화면에는 **"업로드 완료" 가 그대로 떴다.**
