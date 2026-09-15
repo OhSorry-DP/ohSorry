@@ -904,8 +904,30 @@ window.OhsorryCore = {
       const up = await window.OhsorryDb.uploadResult(result);
       if (up && up.skipped) console.log(`[오소리] 업로드 skip (${up.reason})`);
       else {
-        console.log('[오소리] 업로드 완료 — https://iidx.in 에서 카드 확인.');
-        if (!opts.suppressDone) __ohsorryShowDone(profile, 'DP', !isRival);   // 여러 명이면 wrapper 가 리스트로
+        // 프로필·스코어 결과를 실제로 확인한다 — 예전엔 무조건 "완료" 를 띄워서
+        // 스코어가 통째로 안 들어가도 화면상 성공과 구분이 안 됐다.
+        // scores 가 null 인 건 chartScoreRows 자체가 없는 경우(프로필만 갱신)라 정상으로 본다.
+        const profOk = !!(up && up.profile && up.profile.ok);
+        const sc = up && up.scores;
+        const scoresOk = !sc || (sc.ok && !sc.empty);
+        if (!profOk || !scoresOk) {
+          const why = [];
+          if (!profOk) why.push('프로필: ' + ((up && up.profile && up.profile.error) || '실패'));
+          if (!scoresOk) {
+            why.push(sc.empty ? '스코어: 0건 (저장할 성적이 없음 — 성적 비공개/파싱 실패 의심)'
+                              : '스코어: ' + (sc.error || '실패'));
+          }
+          console.error('[오소리] 업로드 실패 —', why.join(' / '));
+          if (!opts.suppressDone) {
+            alert(['오소리 업로드에 실패했어요.', '']
+              .concat(why)
+              .concat(['', '콘솔(F12) 로그를 확인해주세요.'])
+              .join(String.fromCharCode(10)));
+          }
+        } else {
+          console.log('[오소리] 업로드 완료 — https://iidx.in 에서 카드 확인.');
+          if (!opts.suppressDone) __ohsorryShowDone(profile, 'DP', !isRival);   // 여러 명이면 wrapper 가 리스트로
+        }
       }
     } catch (e) {
       console.warn('[OhsorryCore] uploadResult 예외:', e && e.message);

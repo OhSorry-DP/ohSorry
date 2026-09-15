@@ -402,7 +402,9 @@ window.OhsorryDb = (function () {
   //   리턴: { ok: boolean, error?: string, unmatched?: number, inserted?: number }
   async function upsertUserChartScores(rows) {
     if (!Array.isArray(rows) || rows.length === 0) {
-      return { ok: true };
+      // 0건은 "성공" 이 아니라 "쓸 게 없었음" — 호출부가 완료로 표시하지 않도록 구분한다.
+      // (이걸 ok:true 로만 돌려주면 성적을 하나도 못 읽은 크롤이 "업로드 완료" 로 보인다)
+      return { ok: true, inserted: 0, empty: true };
     }
     const statusErr = await checkUploadEnabled();
     if (statusErr) return statusErr;
@@ -689,14 +691,22 @@ window.OhsorryDb = (function () {
     }
 
     // 4. 차트 점수 bulk upsert (upsert_scores). chartScoreRows 가 있을 때만.
+    //    scores.iidx_id 는 users(iidx_id) FK 라 프로필 upsert 가 실패했으면 어차피 전량 롤백된다.
+    //    시도해서 실패 로그를 두 번 남기느니 건너뛰고 사유를 명확히 남긴다.
     if (result.chartScoreRows) {
-      try {
-        out.scores = await upsertUserChartScores(result.chartScoreRows);
-        if (out.scores && out.scores.ok) console.log('[OhsorryDb] chart scores upsert 성공');
-        else console.warn('[OhsorryDb] chart scores upsert 실패:', out.scores && out.scores.error);
-      } catch (e) {
-        out.scores = { ok: false, error: e && e.message };
-        console.warn('[OhsorryDb] chart scores upsert 예외:', e && e.message);
+      if (!(out.profile && out.profile.ok)) {
+        out.scores = { ok: false, error: '프로필 저장 실패로 scores 건너뜀 (users FK 미충족)' };
+        console.error('[OhsorryDb] 프로필 저장 실패 — chart scores upsert 건너뜀');
+      } else {
+        try {
+          out.scores = await upsertUserChartScores(result.chartScoreRows);
+          if (out.scores && out.scores.empty) console.warn('[OhsorryDb] chart scores 0건 — 저장할 성적이 없었습니다 (성적 비공개/파싱 실패 의심)');
+          else if (out.scores && out.scores.ok) console.log('[OhsorryDb] chart scores upsert 성공');
+          else console.warn('[OhsorryDb] chart scores upsert 실패:', out.scores && out.scores.error);
+        } catch (e) {
+          out.scores = { ok: false, error: e && e.message };
+          console.warn('[OhsorryDb] chart scores upsert 예외:', e && e.message);
+        }
       }
     }
 
