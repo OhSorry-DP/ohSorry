@@ -2,6 +2,12 @@
 
 ohSorry 의 변경 이력입니다. 사용방법은 [README.md](README.md) 를 참고하세요.
 
+### 2026-09-16 — songs.series_no 자동 갱신 안 되던 버그 수정
+
+`bump_song_series` RPC(eamuse 시리즈 분류로 `songs.series_no`를 갱신)는 업로드 row에 `seriesNo`가 채워져 있어야 호출되는데, `calcOhsorryCore.js`가 DB row를 만들 때 이 필드를 계속 빠뜨려서 **이 RPC가 실질적으로 한 번도 호출된 적이 없었다.** 신곡은 `ensure_song`이 넣는 `series_no=99`에서 영구히 안 바뀌는 상태였다. textage-meta로 series_no가 미리 채워지는 기존 곡들은 영향이 없어 드러나지 않다가, 신작 초기(textage 미갱신) 34 신곡에서 처음 노출됐다.
+
+- `calcOhsorryCore.js` DP/SP 업로드 row 둘 다에 `seriesNo: c.seriesNo` 추가.
+
 ### 2026-09-16 — 시즌 탭에 34(ZINRAI) 보라 테마 적용
 
 모달의 시즌 33/34 탭·전체 강조색을 CSS 변수(`--dp-accent`/`--dp-accent-bg`)로 옮기고, 34 선택 시 게임 원작 테마인 보라(#8b3ddb)로, 33은 기존 초록(#1d9e75)으로 표시되게 했다. DP/SP 탭·"전체" 체크박스·시작 버튼·로딩 프로그레스바까지 전부 테마를 따라간다.
