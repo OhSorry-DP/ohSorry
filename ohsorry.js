@@ -145,8 +145,8 @@
           <button type="button" class="__dp_ps_tab" data-ps="SP" style="flex:1;padding:8px 0;border:0;background:#f1f3f5;color:#868e96;font-size:13px;font-weight:700;cursor:pointer">SP</button>
         </div>
         <div id="__dp_season_tabs" style="display:flex;margin-bottom:12px;border:1px solid #dee2e6;border-radius:8px;overflow:hidden;flex:none">
-          <button type="button" class="__dp_season_tab" data-season="33" style="flex:1;padding:8px 0;border:0;background:#f1f3f5;color:#868e96;font-size:13px;font-weight:700;cursor:pointer">시즌 33</button>
-          <button type="button" class="__dp_season_tab" data-season="34" style="flex:1;padding:8px 0;border:0;background:var(--dp-accent);color:#fff;font-size:13px;font-weight:700;cursor:pointer">시즌 34</button>
+          <button type="button" class="__dp_season_tab" data-season="33" style="flex:1;padding:8px 0;border:0;background:#f1f3f5;color:#868e96;font-size:13px;font-weight:700;cursor:pointer">${SERIES_NAMES[33]}</button>
+          <button type="button" class="__dp_season_tab" data-season="34" style="flex:1;padding:8px 0;border:0;background:var(--dp-accent);color:#fff;font-size:13px;font-weight:700;cursor:pointer">${SERIES_NAMES[34]}</button>
         </div>
         <div style="font-size:12px;color:#888;margin-bottom:6px;flex:none">시리즈 (기본 전체 — 전곡 약 1분, 좁으면 ←→ 스크롤). 일부만 고르면 별값 갱신은 생략.</div>
         <label style="display:flex;align-items:center;gap:7px;padding:4px 6px;margin-bottom:6px;cursor:pointer;font-size:12px;font-weight:700;color:var(--dp-accent);flex:none">
