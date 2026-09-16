@@ -347,8 +347,8 @@ async function __loadCoreData() {
 async function __fetchProfile(opts) {
   opts = opts || {};
   const statusUrl = opts.isRival
-    ? __EAGATE + '/game/2dx/33/djdata/rival/rival_status.html?rival=' + encodeURIComponent(opts.rivalToken)
-    : __EAGATE + '/game/2dx/33/djdata/status.html';
+    ? __EAGATE + '/game/2dx/34/djdata/rival/rival_status.html?rival=' + encodeURIComponent(opts.rivalToken)
+    : __EAGATE + '/game/2dx/34/djdata/status.html';
   const res = await fetch(statusUrl, { credentials: 'include' });
   if (!res.ok) { console.warn('[프로필] fetch 실패 HTTP ' + res.status); return null; }
   const doc = new DOMParser().parseFromString(await res.text(), 'text/html');
@@ -416,7 +416,7 @@ async function __fetchRivalToken(iidxId) {
   const fd = new FormData();
   fd.append('iidxid', String(iidxId).replace(/-/g, ''));
   fd.append('mode', '1');
-  const res = await fetch(__EAGATE + '/game/2dx/33/rival/rival_search.html', { method: 'POST', credentials: 'include', body: fd });
+  const res = await fetch(__EAGATE + '/game/2dx/34/rival/rival_search.html', { method: 'POST', credentials: 'include', body: fd });
   if (!res.ok) throw new Error('rival_search HTTP ' + res.status);
   const doc = new DOMParser().parseFromString(await res.text(), 'text/html');
   const link = doc.querySelector('table#result a[href*="rival_status.html?rival="]');
@@ -478,14 +478,14 @@ window.OhsorryCore = {
   // [2026-06-16] level 모드 폐기 — series.html 시리즈 폴더 단위만. 시리즈가 seriesNo 를 주므로
   //   dbConn 의 song_id / textage_song_id / series_no 매칭이 정확. gameLevel 은 textage 로 역추정(4.5).
   //   wrapper 모달이 수집할 시리즈를 고름 — opts.seriesList(eamuse list 값 0~32 배열). 생략 시 전체 33개.
-  const SERIES = '33';            // 현재 시즌 (Sparkle Shower)
+  const SERIES = String(opts.gameVersion || '33');   // 현재 시즌. opts.gameVersion 미전달 시 기존 33 유지(하위호환)
   const isSpMode = opts.playStyle === 'SP';   // SP 모드 — style=0 크롤 + ★분석 스킵(경량)
   const style = isSpMode ? '0' : '1';         // 0=SP / 1=DP
   const seriesList = (Array.isArray(opts.seriesList) && opts.seriesList.length > 0)
-    ? [...new Set(opts.seriesList.map(Number).filter((n) => n >= 0 && n <= 32))].sort((a, b) => a - b)
-    : Array.from({ length: 33 }, (_, i) => i);   // 전체 33개 (기본)
+    ? [...new Set(opts.seriesList.map(Number).filter((n) => n >= 0 && n <= Number(SERIES) - 1))].sort((a, b) => a - b)
+    : Array.from({ length: Number(SERIES) }, (_, i) => i);   // 전체 (기본, SERIES 기준)
   // 별값(★)은 전체 차트가 있어야 정확 — 일부 시리즈만 크롤하면 데이터 불완전 → 별값 계산 skip(기존 supabase 값 보존).
-  const fullCrawl = seriesList.length >= 33;
+  const fullCrawl = seriesList.length >= Number(SERIES);
 
   // 도메인 체크 — eagate(p.eagate.573.jp) 에서만 의미 있음(wrapper 가 먼저 체크하지만 직접 호출 대비).
   if (!location.hostname.endsWith('p.eagate.573.jp')) {

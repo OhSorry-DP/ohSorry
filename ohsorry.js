@@ -70,11 +70,11 @@
     16: 'EMPRESS', 17: 'SIRIUS', 18: 'Resort Anthem', 19: 'Lincle', 20: 'tricoro',
     21: 'SPADA', 22: 'PENDUAL', 23: 'copula', 24: 'SINOBUZ', 25: 'CANNON BALLERS',
     26: 'Rootage', 27: 'HEROIC VERSE', 28: 'BISTROVER', 29: 'CastHour', 30: 'RESIDENT',
-    31: 'EPOLIS', 32: 'Pinky Crush', 33: 'Sparkle Shower',
+    31: 'EPOLIS', 32: 'Pinky Crush', 33: 'Sparkle Shower', 34: 'ZINRAI',
   };
   // 10시리즈 단위 그룹 (역순 — 최신 위). 각 그룹에 전체 토글 체크박스.
   const SERIES_GROUPS = [
-    { label: '최신~30', from: 30, to: 33 },
+    { label: '최신~30', from: 30, to: 34 },
     { label: '29~20',  from: 20, to: 29 },
     { label: '19~10',  from: 10, to: 19 },
     { label: '9~1',    from: 1,  to: 9 },
@@ -135,6 +135,10 @@
           <button type="button" class="__dp_ps_tab" data-ps="DP" style="flex:1;padding:8px 0;border:0;background:#1d9e75;color:#fff;font-size:13px;font-weight:700;cursor:pointer">DP</button>
           <button type="button" class="__dp_ps_tab" data-ps="SP" style="flex:1;padding:8px 0;border:0;background:#f1f3f5;color:#868e96;font-size:13px;font-weight:700;cursor:pointer">SP</button>
         </div>
+        <div id="__dp_season_tabs" style="display:flex;margin-bottom:12px;border:1px solid #dee2e6;border-radius:8px;overflow:hidden;flex:none">
+          <button type="button" class="__dp_season_tab" data-season="33" style="flex:1;padding:8px 0;border:0;background:#f1f3f5;color:#868e96;font-size:13px;font-weight:700;cursor:pointer">시즌 33</button>
+          <button type="button" class="__dp_season_tab" data-season="34" style="flex:1;padding:8px 0;border:0;background:#1d9e75;color:#fff;font-size:13px;font-weight:700;cursor:pointer">시즌 34</button>
+        </div>
         <div style="font-size:12px;color:#888;margin-bottom:6px;flex:none">시리즈 (기본 전체 — 전곡 약 1분, 좁으면 ←→ 스크롤). 일부만 고르면 별값 갱신은 생략.</div>
         <label style="display:flex;align-items:center;gap:7px;padding:4px 6px;margin-bottom:6px;cursor:pointer;font-size:12px;font-weight:700;color:#1d9e75;flex:none">
           <input type="checkbox" id="__dp_all" checked><span>전체</span></label>
@@ -144,6 +148,7 @@
     `;
     document.body.appendChild(ov);
     let playStyle = 'DP';
+    let gameVersion = '34';
     ov.querySelectorAll('.__dp_ps_tab').forEach((b) => {
       b.onclick = () => {
         playStyle = b.dataset.ps;
@@ -152,6 +157,38 @@
           x.style.background = on ? '#1d9e75' : '#f1f3f5';
           x.style.color = on ? '#fff' : '#868e96';
         });
+      };
+    });
+    // 게임 버전 탭 (33 vs 34)
+    ov.querySelectorAll('.__dp_season_tab').forEach((b) => {
+      b.onclick = () => {
+        gameVersion = b.dataset.season;
+        ov.querySelectorAll('.__dp_season_tab').forEach((x) => {
+          const on = x.dataset.season === gameVersion;
+          x.style.background = on ? '#1d9e75' : '#f1f3f5';
+          x.style.color = on ? '#fff' : '#868e96';
+        });
+        // gameVersion이 33이면 34 체크박스 비활성화, 34이면 다시 활성화
+        const cb34 = ov.querySelector('.__dpsr[value="34"]');
+        if (cb34) {
+          if (gameVersion === '33') {
+            cb34.disabled = true;
+            cb34.checked = false;
+            const parent = cb34.parentElement;
+            if (parent) {
+              parent.style.opacity = '0.4';
+              parent.style.cursor = 'not-allowed';
+            }
+          } else {
+            cb34.disabled = false;
+            const parent = cb34.parentElement;
+            if (parent) {
+              parent.style.opacity = '1';
+              parent.style.cursor = 'pointer';
+            }
+          }
+        }
+        syncTop();
       };
     });
     const allCbs = () => [...ov.querySelectorAll('.__dpsr')];
@@ -182,7 +219,7 @@
       if (seriesList.length === 0) { alert('시리즈를 하나 이상 선택해주세요.'); return; }
       const targetId = (ov.querySelector('#__dp_iidx').value || '').trim();
       ov.remove();
-      resolveChoice({ seriesList, playStyle, targetId });
+      resolveChoice({ seriesList, playStyle, targetId, gameVersion });
     };
     // 프로필 fetch 끝나면 호출 — 헤더 채우고 IIDX input(본인 id) 채우고 시작 활성화.
     function fillProfile(profile, Core) {
@@ -241,7 +278,7 @@
     // 데이터(별값 lib/ereter/textage/rating) 백그라운드 prefetch — 모달 보는 동안 미리 받아 compute 단축
     Core.prefetch().catch(() => {});
     // 시작 대기
-    const { seriesList, playStyle, targetId } = await ui.choice;
+    const { seriesList, playStyle, targetId, gameVersion } = await ui.choice;
     const ownNorm = ((ownProfile && ownProfile.iidxId) || '').replace(/-/g, '');
     // 여러 IIDX ID 지원 — 공백·쉼표·줄바꿈으로 구분. 본인 ID 면 own, 그 외는 라이벌. 중복 제거.
     const rawIds = (targetId || '').split(/[\s,]+/).map((s) => s.replace(/-/g, '').trim()).filter(Boolean);
@@ -273,6 +310,7 @@
           rivalToken: rivalToken || undefined,
           wrapperVersion: WRAPPER_VERSION,
           seriesList,
+          gameVersion,
           playStyle,                                     // own·rival 공통 — DP 누르면 DP만, SP 누르면 SP만
           profile: isRival ? undefined : ownProfile,     // own 은 모달에서 받은 프로필 재사용(status 재fetch 안 함)
           suppressDone: true,                            // 완료 박스는 wrapper 가 아래서 리스트로 한 번에

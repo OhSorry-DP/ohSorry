@@ -180,8 +180,8 @@
 
     // 수집할 시리즈 list 값(0~32). 유효값만 + 정렬(오름차순). 생략/빈값이면 전체.
     const seriesList = (Array.isArray(c.seriesList) && c.seriesList.length > 0)
-      ? Array.from(new Set(c.seriesList.map(Number).filter((n) => n >= 0 && n <= 32))).sort((a, b) => a - b)
-      : Array.from({ length: 33 }, (_, i) => i);
+      ? Array.from(new Set(c.seriesList.map(Number).filter((n) => n >= 0 && n <= Number(SERIES) - 1))).sort((a, b) => a - b)
+      : Array.from({ length: Number(SERIES) }, (_, i) => i);
 
     const SERIES_URL = `https://p.eagate.573.jp/game/2dx/${SERIES}/djdata/music/series.html`;
     console.log(`[eagateFetch] 시리즈 ${seriesList.length}개 / ${style === '1' ? 'DP' : 'SP'}${isRival ? ' (라이벌)' : ''} 시작`);

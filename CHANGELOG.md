@@ -2,6 +2,17 @@
 
 ohSorry 의 변경 이력입니다. 사용방법은 [README.md](README.md) 를 참고하세요.
 
+### 2026-09-16 — 신작 시즌 34(ZINRAI) 대응 — 33 경로 유지 + 34 옵션 병존
+
+IIDX 신작 "ZINRAI"(시즌 34) 출시 대응. 기존 시즌 33 하드코딩을 걷어내되, eagate 34 페이지가 예상과 다르게 동작할 리스크에 대비해 **33 경로를 완전히 남겨두고 34를 병존 옵션으로 추가**했다.
+
+- `ohsorry.js` — 모달에 시즌 탭(33/34, 기본값 34) 신설. `SERIES_NAMES`/`SERIES_GROUPS`에 34(ZINRAI) 추가. 33 선택 시 34 시리즈 체크박스를 비활성화해 조용히 필터에서 걸러지는 것을 막았다.
+- `calcOhsorryCore.js` — `SERIES` 상수를 `opts.gameVersion`으로 옵션화(미전달 시 기존 33 그대로, 하위호환). seriesList 필터 상한·기본 전체 배열·`fullCrawl` 판정을 전부 `SERIES` 기준 동적 계산으로 변경.
+- `status.html`/`rival_status.html`/`rival_search.html`(프로필·라이벌 조회)은 시즌 아카이브가 없을 가능성이 높아 **33→34로 완전 전환**(옵션화하지 않음). 34 출시 직후 이 경로들이 정상 응답하는지 최우선 확인 필요.
+- `eagateFetch.js` — `collectCharts`의 seriesList 필터도 동일하게 동적화.
+- `played_version`은 `SERIES` 값을 그대로 저장하는 기존 구조라 34 선택 시 자동으로 34행으로 분기 저장된다(별도 코드 불필요).
+- 곡의 `songs.series_no`가 eamuse 34 분류로 재편입되며 33→34로 덮어써지는 것은 `bump_song_series`(무조건 최신 분류 신뢰)의 의도된 동작이라 이번 변경 범위에서 손대지 않았다.
+
 ### 2026-09-15 — SP 경로도 스코어 업로드 실패를 "업로드 완료" 로 표시하던 문제
 
 DP 경로는 같은 날 위 항목에서 고쳤는데, **SP 전용 크롤 경로는 별도 코드라 그대로 남아있었다.** `upsertUserChartScores` 결과의 `res.ok` 가 false 여도 `spUploaded` 가 `null` 이 될 뿐, 그 아래에서 완료 박스는 조건 없이 그대로 떴다.
