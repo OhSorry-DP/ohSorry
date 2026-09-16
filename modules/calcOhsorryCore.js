@@ -736,6 +736,7 @@ window.OhsorryCore = {
           played_version: SERIES, title: c.title, iidx_id: spIidx, diff: c.diff,
           game_level: c.gameLevel, ex_score: c.exScore != null ? c.exScore : null,
           lamp: c.lamp || null, play_style: 0, date: new Date().toISOString(),
+          seriesNo: c.seriesNo,   // dbConn 의 bump_song_series(songs.series_no 갱신) 트리거 — 누락 시 신곡이 series_no=99 로 영구 고정됨
         }));
       if (spRows.length) {
         // DP 경로(6~7단계)와 동일한 패턴: ok/empty/예외를 구분해 완료 박스 오표시를 막는다.
@@ -915,6 +916,7 @@ window.OhsorryCore = {
         ex_score: c.exScore != null ? c.exScore : null,
         lamp: c.lamp || null,
         date: nowIso,
+        seriesNo: c.seriesNo,   // dbConn 의 bump_song_series(songs.series_no 갱신) 트리거 — 누락 시 신곡이 series_no=99 로 영구 고정됨
       };
     });
   }
