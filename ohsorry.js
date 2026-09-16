@@ -19,6 +19,7 @@
   const DB_URL       = GIST_BASE + '/dbConn.js';
   const NORM_URL     = GIST_BASE + '/normTitle.js';
   const EAGATE_URL   = GIST_BASE + '/eagateFetch.js';
+  let __currentAccent = '#8b3ddb';   // 로딩 프로그레스바 색 — 시즌 탭 선택에 맞춰 갱신(기본 34=보라)
 
   async function loadModule(url, globalName) {
     // 매 실행 재fetch+eval — 버전 갱신 시 stale window.<globalName> 으로 옛 코드가 도는 것 방지.
@@ -45,7 +46,7 @@
         <div style="font-size:13px;font-weight:600;margin-bottom:6px;word-break:break-word;overflow-wrap:anywhere">오소리 로딩 중...</div>
         <div id="__dp_progress_text" style="font-size:12px;color:#666;word-break:break-word;overflow-wrap:anywhere">시작합니다</div>
         <div style="margin-top:8px;background:#eee;border-radius:4px;height:6px;overflow:hidden">
-          <div id="__dp_progress_bar" style="background:#1d9e75;height:100%;width:0%;transition:width .3s"></div>
+          <div id="__dp_progress_bar" style="background:${__currentAccent};height:100%;width:0%;transition:width .3s"></div>
         </div>
       `;
       document.body.appendChild(el);
@@ -79,6 +80,11 @@
     { label: '19~10',  from: 10, to: 19 },
     { label: '9~1',    from: 1,  to: 9 },
   ];
+  // 시즌별 테마 색 — 34(ZINRAI)는 보라 테마. gameVersion 변경 시 CSS 변수만 갈아끼운다.
+  const SEASON_THEMES = {
+    33: { accent: '#1d9e75', accentBg: '#e3f5ee' },
+    34: { accent: '#8b3ddb', accentBg: '#f1e6fb' },
+  };
 
   // 시리즈 + 프로필 헤더 + IIDX input 모달. 즉시 표시되고, 프로필은 fillProfile(profile) 로 나중에 채움.
   //   반환 { choice: Promise<{seriesList, playStyle, targetId}>, fillProfile }
@@ -88,6 +94,9 @@
     ov.id = '__dp_fetch_modal';
     ov.style.cssText =
       'position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif';
+    // 초기 gameVersion(34) 테마를 여기서 미리 세팅 — innerHTML 렌더 전에 CSS 변수가 있어야 첫 페인트부터 보라색.
+    ov.style.setProperty('--dp-accent', SEASON_THEMES[34].accent);
+    ov.style.setProperty('--dp-accent-bg', SEASON_THEMES[34].accentBg);
     const groupsHtml = SERIES_GROUPS.map((g) => {
       const items = [];
       for (let sn = g.to; sn >= g.from; sn--) {
@@ -112,10 +121,10 @@
         /* eagate 체크박스 렌더에 의존하지 않게 — 체크박스는 숨기고 선택된 시리즈를 색(글자+배경)으로 표시. 라벨 클릭으로 토글(동작 동일). */
         #__dp_fetch_modal input[type=checkbox]{ display:none !important; }
         #__dp_fetch_modal label input[type=checkbox] ~ span{ color:#c1c7cd !important; }                                  /* 미선택 = 흐린 회색 */
-        #__dp_fetch_modal label input[type=checkbox]:checked ~ span{ color:#1d9e75 !important; font-weight:700 !important; } /* 선택 = 초록 굵게 */
+        #__dp_fetch_modal label input[type=checkbox]:checked ~ span{ color:var(--dp-accent) !important; font-weight:700 !important; } /* 선택 = 테마색 굵게 */
         /* 배경색은 '전체'와 숫자 칸에만 — 시리즈명 글자에는 배경 없음 */
-        #__dp_fetch_modal #__dp_all:checked ~ span{ background:#e3f5ee !important; border-radius:5px; padding:1px 8px; }
-        #__dp_fetch_modal label .__dpsr:checked ~ span:first-of-type{ background:#e3f5ee !important; border-radius:5px; padding:1px 4px; }
+        #__dp_fetch_modal #__dp_all:checked ~ span{ background:var(--dp-accent-bg) !important; border-radius:5px; padding:1px 8px; }
+        #__dp_fetch_modal label .__dpsr:checked ~ span:first-of-type{ background:var(--dp-accent-bg) !important; border-radius:5px; padding:1px 4px; }
         @media (max-width:560px){
           #__dp_fetch_modal{align-items:stretch;justify-content:stretch}
           #__dp_fetch_modal .__dp_card{width:100vw;max-width:100vw;height:100vh;max-height:100vh;border-radius:0;padding:16px 16px env(safe-area-inset-bottom,16px)}
@@ -128,22 +137,22 @@
           <div id="__dp_prof_rank" style="font-size:12px;color:#868e96;margin-top:2px"></div>
           <div id="__dp_prof_login"></div>
         </div>
-        <div style="font-size:11px;color:#888;margin-bottom:4px;flex:none">IIDX ID <span style="color:#1d9e75">— 다른 사람 ID = 라이벌 분석 / 여러 명은 공백·쉼표로 구분</span></div>
+        <div style="font-size:11px;color:#888;margin-bottom:4px;flex:none">IIDX ID <span style="color:var(--dp-accent)">— 다른 사람 ID = 라이벌 분석 / 여러 명은 공백·쉼표로 구분</span></div>
         <input id="__dp_iidx" type="text" inputmode="numeric" placeholder="0000-0000" disabled
           style="width:100%;box-sizing:border-box;padding:9px 11px;border:1px solid #ced4da;border-radius:7px;font-size:14px;font-family:monospace;margin-bottom:12px;flex:none">
         <div id="__dp_ps_tabs" style="display:flex;margin-bottom:12px;border:1px solid #dee2e6;border-radius:8px;overflow:hidden;flex:none">
-          <button type="button" class="__dp_ps_tab" data-ps="DP" style="flex:1;padding:8px 0;border:0;background:#1d9e75;color:#fff;font-size:13px;font-weight:700;cursor:pointer">DP</button>
+          <button type="button" class="__dp_ps_tab" data-ps="DP" style="flex:1;padding:8px 0;border:0;background:var(--dp-accent);color:#fff;font-size:13px;font-weight:700;cursor:pointer">DP</button>
           <button type="button" class="__dp_ps_tab" data-ps="SP" style="flex:1;padding:8px 0;border:0;background:#f1f3f5;color:#868e96;font-size:13px;font-weight:700;cursor:pointer">SP</button>
         </div>
         <div id="__dp_season_tabs" style="display:flex;margin-bottom:12px;border:1px solid #dee2e6;border-radius:8px;overflow:hidden;flex:none">
           <button type="button" class="__dp_season_tab" data-season="33" style="flex:1;padding:8px 0;border:0;background:#f1f3f5;color:#868e96;font-size:13px;font-weight:700;cursor:pointer">시즌 33</button>
-          <button type="button" class="__dp_season_tab" data-season="34" style="flex:1;padding:8px 0;border:0;background:#1d9e75;color:#fff;font-size:13px;font-weight:700;cursor:pointer">시즌 34</button>
+          <button type="button" class="__dp_season_tab" data-season="34" style="flex:1;padding:8px 0;border:0;background:var(--dp-accent);color:#fff;font-size:13px;font-weight:700;cursor:pointer">시즌 34</button>
         </div>
         <div style="font-size:12px;color:#888;margin-bottom:6px;flex:none">시리즈 (기본 전체 — 전곡 약 1분, 좁으면 ←→ 스크롤). 일부만 고르면 별값 갱신은 생략.</div>
-        <label style="display:flex;align-items:center;gap:7px;padding:4px 6px;margin-bottom:6px;cursor:pointer;font-size:12px;font-weight:700;color:#1d9e75;flex:none">
+        <label style="display:flex;align-items:center;gap:7px;padding:4px 6px;margin-bottom:6px;cursor:pointer;font-size:12px;font-weight:700;color:var(--dp-accent);flex:none">
           <input type="checkbox" id="__dp_all" checked><span>전체</span></label>
         <div id="__dp_series_box" style="display:flex;flex-direction:row;gap:10px;overflow-x:auto;overflow-y:hidden;border:1px solid #e9ecef;border-radius:8px;padding:8px;margin-bottom:14px;flex:1 1 auto;min-height:0">${groupsHtml}</div>
-        <button id="__dp_fetch_ok" disabled style="width:100%;padding:11px 0;border:0;border-radius:7px;background:#1d9e75;color:#fff;font-size:13.5px;font-weight:600;cursor:pointer;flex:none;opacity:.5">불러오는 중...</button>
+        <button id="__dp_fetch_ok" disabled style="width:100%;padding:11px 0;border:0;border-radius:7px;background:var(--dp-accent);color:#fff;font-size:13.5px;font-weight:600;cursor:pointer;flex:none;opacity:.5">불러오는 중...</button>
       </div>
     `;
     document.body.appendChild(ov);
@@ -154,7 +163,7 @@
         playStyle = b.dataset.ps;
         ov.querySelectorAll('.__dp_ps_tab').forEach((x) => {
           const on = x.dataset.ps === playStyle;
-          x.style.background = on ? '#1d9e75' : '#f1f3f5';
+          x.style.background = on ? 'var(--dp-accent)' : '#f1f3f5';
           x.style.color = on ? '#fff' : '#868e96';
         });
       };
@@ -163,9 +172,13 @@
     ov.querySelectorAll('.__dp_season_tab').forEach((b) => {
       b.onclick = () => {
         gameVersion = b.dataset.season;
+        const theme = SEASON_THEMES[Number(gameVersion)] || SEASON_THEMES[33];
+        ov.style.setProperty('--dp-accent', theme.accent);
+        ov.style.setProperty('--dp-accent-bg', theme.accentBg);
+        __currentAccent = theme.accent;   // 모달 닫힌 뒤 뜨는 로딩 프로그레스바도 같은 테마 유지
         ov.querySelectorAll('.__dp_season_tab').forEach((x) => {
           const on = x.dataset.season === gameVersion;
-          x.style.background = on ? '#1d9e75' : '#f1f3f5';
+          x.style.background = on ? 'var(--dp-accent)' : '#f1f3f5';
           x.style.color = on ? '#fff' : '#868e96';
         });
         // gameVersion이 33이면 34 체크박스 비활성화, 34이면 다시 활성화
