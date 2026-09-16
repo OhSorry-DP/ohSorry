@@ -2,6 +2,14 @@
 
 ohSorry 의 변경 이력입니다. 사용방법은 [README.md](README.md) 를 참고하세요.
 
+### 2026-09-16 — 34(ZINRAI) 미플레이 신곡도 songs 마스터에 등록
+
+신작 발매 직후엔 아무도 안 쳐본 신곡이 있는데, `series.html`은 미플레이 칸도 클리어 이미지(NO PLAY)로 렌더해서 이미 `allCharts`엔 `lampNum=0/exScore=0` 차트로 들어와 있었다(파서 문제가 아니었음 — 처음엔 파서가 이 칸을 통째로 버린다고 오판했다가 실측으로 정정). 34 시리즈에서 나온 미플레이 곡 제목만 모아 `ensure_song`+`bump_song_series`로 **songs 마스터에만** 등록하고, `scores`(유저 실제 플레이 기록)엔 손대지 않는다.
+
+- `dbConn.js`에 `ensureUnplayedSongs(titles, seriesNo)` 신설. `upsert_scores` 호출 없음이 핵심 불변조건.
+- `calcOhsorryCore.js`가 크롤 직후(필터 이전) 34 시리즈의 미플레이 차트만 걸러 호출.
+- `seriesNo=34`는 **리터럴 고정**(SERIES/opts.gameVersion으로 파생시키지 않음) — 파생시키면 33 재크롤(안전망 경로) 때도 이 로직이 같이 타서, 34 재분류로 이미 series_no=34인 곡이 33 재크롤로 다시 33으로 되돌아가는 문제가 생긴다.
+
 ### 2026-09-16 — songs.series_no 자동 갱신 안 되던 버그 수정
 
 `bump_song_series` RPC(eamuse 시리즈 분류로 `songs.series_no`를 갱신)는 업로드 row에 `seriesNo`가 채워져 있어야 호출되는데, `calcOhsorryCore.js`가 DB row를 만들 때 이 필드를 계속 빠뜨려서 **이 RPC가 실질적으로 한 번도 호출된 적이 없었다.** 신곡은 `ensure_song`이 넣는 `series_no=99`에서 영구히 안 바뀌는 상태였다. textage-meta로 series_no가 미리 채워지는 기존 곡들은 영향이 없어 드러나지 않다가, 신작 초기(textage 미갱신) 34 신곡에서 처음 노출됐다.
