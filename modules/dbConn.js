@@ -546,6 +546,61 @@ window.OhsorryDb = (function () {
     }
   }
 
+  // 미플레이 신곡을 songs 마스터에만 등록 (scores 는 절대 건드리지 않는다).
+  //   34(ZINRAI) 발매 직후처럼 "eagate 에는 곡이 보이지만 아무도 안 쳐서 스코어 row 가 없는" 신곡을
+  //   그래도 songs 에 등록해 오소리웹에 곡명이 뜨게 하려는 용도. p_ac 는 series.html(AC 전용 경로) 고정 1.
+  //   seriesNo 는 호출부가 리터럴로 넘긴다 — 여기서 파생하지 않는다(사용자 확정, 2026-09-16).
+  //   RPC 실패는 개별 title 단위로 skip. upsert_scores 호출 없음 = 이 함수의 핵심 불변조건.
+  async function ensureUnplayedSongs(titles, seriesNo) {
+    if (!Array.isArray(titles) || titles.length === 0) return { ok: true, ensured: 0 };
+    const statusErr = await checkUploadEnabled();
+    if (statusErr) return statusErr;
+    try {
+      const songMap = await getSongsCache();
+      const txMap = getTextageByTitle();
+      const songIds = [];
+      let ensured = 0;
+      for (const title of titles) {
+        if (!title) continue;
+        const nk = normTitle(title);
+        if (!nk) continue;
+        await maybeAdopt(songMap, nk, songMap.get(nk));
+        const candidates = songMap.get(nk);
+        let songId = pickSongId(candidates, seriesNo);
+        if (songId == null) {
+          const txId = txMap ? (txMap.get(nk) || null) : null;
+          try {
+            const newId = await callRpc('ensure_song', {
+              p_title: title,
+              p_textage_song_id: txId,
+              p_ac: 1,       // series.html 은 AC 전용 경로 — 기존 upsertUserChartScores 의 acBit(playedVersion!==0 → 1)와 동치
+              p_legen: null, // 미플레이라 LEGGENDARIA 여부 불명 — 실플레이 시 ensure_song 재호출로 보강됨
+            });
+            songId = typeof newId === 'number' ? newId : parseInt(newId, 10);
+            if (!Number.isFinite(songId) || songId <= 0) { songId = null; continue; }
+            songMap.set(nk, [...(songMap.get(nk) || []), { song_id: songId, textage_song_id: txId || null, title, series_no: null, ac: 1, legen: 0 }]);
+            ensured++;
+          } catch (e) {
+            console.warn(`[OhsorryDb][ensureUnplayedSongs] ensure_song 실패 "${title}" (skip): ${e.message}`);
+            continue;
+          }
+        }
+        if (songId != null) songIds.push(songId);
+      }
+      if (songIds.length) {
+        try {
+          await callRpc('bump_song_series', { p_song_ids: songIds, p_series_no: seriesNo });
+        } catch (e) {
+          // ensure_song 은 신규행을 series_no=99 로 넣으므로, 여기서 실패하면 99 로 남는다 — 로그만 남기고 무시.
+          console.warn(`[OhsorryDb][ensureUnplayedSongs] bump_song_series 실패 (skip): ${e.message}`);
+        }
+      }
+      return { ok: true, ensured };
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+  }
+
   // user_profiles 조회 — RPC get_user_profile_full(p_iidx_id text)
   //   같은 iidx_id 의 다중 시즌 row 중 last_updated_at 최신 1건 반환 (RPC 가 이미 그렇게 정렬)
   //   리턴: row (jsonb) 또는 throw
@@ -1028,5 +1083,6 @@ window.OhsorryDb = (function () {
     fetchUserStars: fetchUserStars,
     fetchServiceStatus: fetchServiceStatus,
     getSongsByNorm: getSongsCache,  // Map<normKey, [{ song_id, title, ac, legen }]> — INF/AC 차트 단위 필터링용
+    ensureUnplayedSongs: ensureUnplayedSongs,  // 미플레이 신곡 songs 마스터 등록 전용 (scores 미변경)
   };
 })();

@@ -543,6 +543,19 @@ window.OhsorryCore = {
   if (!r.ok) return;  // 수집 실패 → 중단 (alert 는 eagateFetch 내부에서 이미 표시)
   allCharts = r.charts;
   pageCount = r.pageCount;
+  // 34(ZINRAI) 미플레이 신곡도 songs 마스터엔 등록 — scores 는 절대 안 건드림.
+  //   34 리터럴 고정(SERIES 파생 금지, 사용자 확정) — SERIES(opts.gameVersion) 로 파생시키면 33 재크롤(안전망
+  //   경로) 시에도 이 로직이 같이 타서, 34 재분류로 이미 series_no=34 인 곡이 33 재크롤로 다시 33으로
+  //   되돌아가는 왔다갔다 현상이 생긴다. series.html 은 미플레이 칸도 clflg0(NO PLAY)로 렌더해 이미
+  //   allCharts 에 lampNum=0/exScore=0 차트로 들어와 있다(4.6 필터 이전 시점 — 아직 전부 보임).
+  try {
+    const unplayedTitles34 = [...new Set(
+      allCharts.filter((c) => c.seriesNo === 34 && (c.lampNum || 0) === 0 && (c.exScore || 0) === 0).map((c) => c.title),
+    )];
+    if (unplayedTitles34.length && window.OhsorryDb && window.OhsorryDb.ensureUnplayedSongs) {
+      await window.OhsorryDb.ensureUnplayedSongs(unplayedTitles34, 34);
+    }
+  } catch (e) { console.warn('[오소리] 34 미플레이 신곡 등록 실패(무시):', e && e.message); }
   updateProgress(`완료! 시리즈 ${pageCount}개 ${allCharts.length}곡`, 100);
   // 잠시 후 진행 패널 제거 (점수 패널이 같은 위치에 뜨므로)
   await new Promise((rs) => setTimeout(rs, 500));
