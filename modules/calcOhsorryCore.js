@@ -58,9 +58,11 @@ function __ohsorryLoginBtnHtml(idNorm, isOwn, variant) {
     return `<button class="__ohsorry_login" data-id="${idNorm}" style="${base};flex:none;padding:6px 9px;font-size:11.5px">로그인</button>`;
   }
   if (variant === 'start') {
-    // 시작 모달은 흰 배경이라 완료 박스(어두운 배경)와 같은 회색 버튼을 쓰면 묻힌다 — 초록 아웃라인으로.
+    // 시작 모달은 흰 배경이라 완료 박스(어두운 배경)와 같은 회색 버튼을 쓰면 묻힌다 — 아웃라인으로.
+    //   모달(#__dp_fetch_modal) 안에 삽입되므로 --dp-accent 를 상속받아 시즌 테마(33=초록/34=보라)를 따라간다.
+    //   fallback(#1d9e75)은 모달 밖(변수 미정의 컨텍스트)에서 호출될 경우 대비.
     return `<button type="button" class="__ohsorry_login" data-id="${idNorm}"`
-      + ` style="cursor:pointer;border:1px solid #1d9e75;border-radius:6px;background:#fff;color:#1d9e75;`
+      + ` style="cursor:pointer;border:1px solid var(--dp-accent, #1d9e75);border-radius:6px;background:#fff;color:var(--dp-accent, #1d9e75);`
       + `font-weight:700;font-size:11.5px;padding:5px 9px;margin-top:8px;white-space:nowrap">오소리웹 로그인 / 비밀번호 변경 →</button>`;
   }
   return `<button class="__ohsorry_login" data-id="${idNorm}" style="${base};display:block;width:100%;margin-top:6px;padding:8px 0;font-size:12.5px">오소리웹 로그인 / 설정 →</button>`;
