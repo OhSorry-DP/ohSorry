@@ -2,6 +2,10 @@
 
 ohSorry 의 변경 이력입니다. 사용방법은 [README.md](README.md) 를 참고하세요.
 
+### 2026-09-16 — normTitle 사본 동기화 (v0.0.6, 큰따옴표 제거)
+
+곡명의 `"` 를 norm 단계에서 제거한다. eagate 가 `"` 를 빼고 주는 곡 9개가 기존 행에 매칭되지 못하고 `ensure_song` 으로 `series_no=99` 중복행이 되던 문제의 근본원인 수정. 마스터는 ohSorryRating `modules/normTitle.js`, 이 파일은 `syncNormTitle.js` 로 받은 사본이다.
+
 ### 2026-09-16 — 34(ZINRAI) 미플레이 신곡도 songs 마스터에 등록
 
 신작 발매 직후엔 아무도 안 쳐본 신곡이 있는데, `series.html`은 미플레이 칸도 클리어 이미지(NO PLAY)로 렌더해서 이미 `allCharts`엔 `lampNum=0/exScore=0` 차트로 들어와 있었다(파서 문제가 아니었음 — 처음엔 파서가 이 칸을 통째로 버린다고 오판했다가 실측으로 정정). 34 시리즈에서 나온 미플레이 곡 제목만 모아 `ensure_song`+`bump_song_series`로 **songs 마스터에만** 등록하고, `scores`(유저 실제 플레이 기록)엔 손대지 않는다.
