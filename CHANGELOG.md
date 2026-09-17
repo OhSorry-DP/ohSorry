@@ -2,6 +2,12 @@
 
 ohSorry 의 변경 이력입니다. 사용방법은 [README.md](README.md) 를 참고하세요.
 
+### 2026-09-17 — normTitle v0.0.7 동기화 (34 신곡 alias 3건)
+
+eagate↔textage 표기차로 매칭 실패하던 시즌 34 곡 3건을 `TITLE_ALIASES` 에 추가.
+`NOMAD (feat. らっぷびと)`(び↔ぴ) · `Shogun's Last Dawn ft.…`(ft.↔feat.) · `月下散刄`(刄↔刃).
+마스터는 `ohSorryRating/modules/normTitle.js` — 상세는 그쪽 CHANGELOG 참조. 사본 5벌 전부 동일.
+
 ### 2026-09-16 — normTitle 사본 동기화 (v0.0.6, 큰따옴표 제거)
 
 곡명의 `"` 를 norm 단계에서 제거한다. eagate 가 `"` 를 빼고 주는 곡 9개가 기존 행에 매칭되지 못하고 `ensure_song` 으로 `series_no=99` 중복행이 되던 문제의 근본원인 수정. 마스터는 ohSorryRating `modules/normTitle.js`, 이 파일은 `syncNormTitle.js` 로 받은 사본이다.
