@@ -345,72 +345,92 @@ async function __loadCoreData() {
   };
 }
 
+// eagate 불안정으로 200 응답이어도 빈 프로필이 올 수 있어 2초 → 4초 → 8초 재시도.
+const PROFILE_RETRY_DELAYS_MS = [2000, 4000, 8000];
+
 // status.html(own) / rival_status.html(rival) → 프로필 파싱 { djName, iidxId, spRank, dpRank, spRadar, dpRadar }.
 async function __fetchProfile(opts) {
   opts = opts || {};
   const statusUrl = opts.isRival
     ? __EAGATE + '/game/2dx/34/djdata/rival/rival_status.html?rival=' + encodeURIComponent(opts.rivalToken)
     : __EAGATE + '/game/2dx/34/djdata/status.html';
-  const res = await fetch(statusUrl, { credentials: 'include' });
-  if (!res.ok) { console.warn('[프로필] fetch 실패 HTTP ' + res.status); return null; }
-  const doc = new DOMParser().parseFromString(await res.text(), 'text/html');
-  const profile = {};
-  // DJ 프로필 테이블 — 업로드에 쓰는 DJ NAME / IIDX ID 만.
-  const profileTable = doc.querySelector('div.dj-profile table');
-  if (profileTable) {
-    profileTable.querySelectorAll('tr').forEach(tr => {
-      const tds = tr.querySelectorAll('td');
-      if (tds.length === 2) {
-        const key = tds[0].textContent.trim();
-        const val = tds[1].textContent.trim();
-        if (key === 'DJ NAME')      profile.djName = val;
-        else if (key === 'IIDX ID') profile.iidxId = val;
-      }
-    });
-  }
-  // 段位(단위) / ノーツレーダー
-  doc.querySelectorAll('div.dj-rank').forEach(dr => {
-    const cn = dr.querySelector('div.cat-name');
-    if (!cn) return;
-    const catName = cn.textContent.trim();
-    if (catName === '段位認定') {
-      dr.querySelectorAll('div.rank-cat').forEach(rc => {
-        const divs = rc.querySelectorAll('div');
-        if (divs.length >= 2) {
-          const style = divs[0].textContent.trim();
-          const rank = divs[1].textContent.trim();
-          if (style === 'SP') profile.spRank = rank;
-          if (style === 'DP') profile.dpRank = rank;
-        }
-      });
-    } else if (catName === 'ノーツレーダー') {
-      dr.querySelectorAll('div.rank-cat').forEach(rc => {
-        const style = rc.querySelector('span')?.textContent.trim();
-        if (style !== 'SP' && style !== 'DP') return;
-        const radar = {};
-        // 6각 레이더 이미지 (KONAMI 동적 img_radar.html — relative URL 절대화)
-        const img = rc.querySelector('img');
-        if (img) {
-          let src = img.getAttribute('src') || '';
-          if (src.startsWith('/')) src = __EAGATE + src;
-          else if (!src.startsWith('http')) src = new URL(src, statusUrl).href;
-          radar.img = src;
-        }
-        rc.querySelectorAll('ul li').forEach(li => {
-          const ps = li.querySelectorAll('p');
-          if (ps.length < 2) return;
-          const key = ps[0].textContent.trim();
-          const num = parseFloat(ps[1].textContent.trim());
-          if (isNaN(num)) return;
-          if (key === '合計レーダースコア') radar.total = num;
-          else radar[key] = num;  // NOTES / CHORD / PEAK / CHARGE / SCRATCH / SOF-LAN
+  for (let attempt = 0; attempt <= PROFILE_RETRY_DELAYS_MS.length; attempt++) {
+    let res;
+    try {
+      res = await fetch(statusUrl, { credentials: 'include' });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const doc = new DOMParser().parseFromString(await res.text(), 'text/html');
+      const profile = {};
+      // DJ 프로필 테이블 — 업로드에 쓰는 DJ NAME / IIDX ID 만.
+      const profileTable = doc.querySelector('div.dj-profile table');
+      if (profileTable) {
+        profileTable.querySelectorAll('tr').forEach(tr => {
+          const tds = tr.querySelectorAll('td');
+          if (tds.length === 2) {
+            const key = tds[0].textContent.trim();
+            const val = tds[1].textContent.trim();
+            if (key === 'DJ NAME')      profile.djName = val;
+            else if (key === 'IIDX ID') profile.iidxId = val;
+          }
         });
-        if (style === 'SP') profile.spRadar = radar;
-        else profile.dpRadar = radar;
+      }
+      // 段位(단위) / ノーツレーダー
+      doc.querySelectorAll('div.dj-rank').forEach(dr => {
+        const cn = dr.querySelector('div.cat-name');
+        if (!cn) return;
+        const catName = cn.textContent.trim();
+        if (catName === '段位認定') {
+          dr.querySelectorAll('div.rank-cat').forEach(rc => {
+            const divs = rc.querySelectorAll('div');
+            if (divs.length >= 2) {
+              const style = divs[0].textContent.trim();
+              const rank = divs[1].textContent.trim();
+              if (style === 'SP') profile.spRank = rank;
+              if (style === 'DP') profile.dpRank = rank;
+            }
+          });
+        } else if (catName === 'ノーツレーダー') {
+          dr.querySelectorAll('div.rank-cat').forEach(rc => {
+            const style = rc.querySelector('span')?.textContent.trim();
+            if (style !== 'SP' && style !== 'DP') return;
+            const radar = {};
+            // 6각 레이더 이미지 (KONAMI 동적 img_radar.html — relative URL 절대화)
+            const img = rc.querySelector('img');
+            if (img) {
+              let src = img.getAttribute('src') || '';
+              if (src.startsWith('/')) src = __EAGATE + src;
+              else if (!src.startsWith('http')) src = new URL(src, statusUrl).href;
+              radar.img = src;
+            }
+            rc.querySelectorAll('ul li').forEach(li => {
+              const ps = li.querySelectorAll('p');
+              if (ps.length < 2) return;
+              const key = ps[0].textContent.trim();
+              const num = parseFloat(ps[1].textContent.trim());
+              if (isNaN(num)) return;
+              if (key === '合計レーダースコア') radar.total = num;
+              else radar[key] = num;  // NOTES / CHORD / PEAK / CHARGE / SCRATCH / SOF-LAN
+            });
+            if (style === 'SP') profile.spRadar = radar;
+            else profile.dpRadar = radar;
+          });
+        }
       });
+      if (profile.iidxId) return profile;
+      if (attempt < PROFILE_RETRY_DELAYS_MS.length) {
+        console.warn(`[프로필] ${attempt + 1}번째 재시도 — 빈 프로필(IIDX ID 없음)`);
+        await new Promise((r) => setTimeout(r, PROFILE_RETRY_DELAYS_MS[attempt]));
+      }
+    } catch (e) {
+      if (attempt < PROFILE_RETRY_DELAYS_MS.length) {
+        console.warn(`[프로필] ${attempt + 1}번째 재시도 — HTTP 실패: ${e && e.message ? e.message : e}`);
+        await new Promise((r) => setTimeout(r, PROFILE_RETRY_DELAYS_MS[attempt]));
+      }
     }
-  });
-  return profile;
+  }
+  // 재시도를 모두 소진했다. 실패를 조용히 넘기지 않는다 — 호출부는 null 을 받는다.
+  console.warn(`[프로필] ${PROFILE_RETRY_DELAYS_MS.length + 1}회 시도 실패 — 프로필을 가져오지 못했다`);
+  return null;
 }
 
 // IIDX ID → 라이벌 토큰 (rival_search.html POST). 못 찾으면 null.
