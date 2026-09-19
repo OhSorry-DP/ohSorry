@@ -1,8 +1,10 @@
-// eagateFetch.js — eagate djdata 시리즈 페이지 fetch 모듈 (v0.0.4)
+// eagateFetch.js — eagate djdata 시리즈 페이지 fetch 모듈 (v0.0.5)
 //
 // p.eagate.573.jp 의 본인 / 라이벌 점수 데이터를 series.html 시리즈 폴더 단위로 수집.
 //   [2026-06-16] level(difficulty.html) 모드 폐기 — series 단일. 시리즈 폴더가 seriesNo 를 주므로
 //   dbConn 의 song_id / textage_song_id / series_no 매칭이 정확.
+//   [2026-09-19] 200 응답인데 0차트면 재시도(2·4·8초, 최대 3회). 소진 시 부분 수집분으로
+//   진행하지 않고 중단한다 — 시즌 34 출시 후 eagate 가 불안정해 빈 응답이 잦아졌다.
 //
 // 사용:
 //   const r = await window.OhsorryEagateFetch.collectCharts({
@@ -20,13 +22,15 @@
 (function () {
   'use strict';
 
-  const VERSION = 'v0.0.4';
+  const VERSION = 'v0.0.5';
 
   // ---- 상수 -----------------------------------------------------------
   // 사람이 페이지 넘기는 속도와 비슷하게: 0.8~1.2초 사이 랜덤 대기 (평균 1초)
   const DELAY_MIN_MS = 800;
   const DELAY_MAX_MS = 1200;
   const randomDelay = () => DELAY_MIN_MS + Math.random() * (DELAY_MAX_MS - DELAY_MIN_MS);
+  // clflg 램프는 NO PLAY에도 붙으므로, 200 응답인데 0차트면 사실상 장애 신호다.
+  const EMPTY_CHART_RETRY_DELAYS_MS = [2000, 4000, 8000];
 
   const LAMP_NAMES = {
     0: 'NO PLAY', 1: 'FAILED',  2: 'ASSIST',    3: 'EASY',
@@ -90,43 +94,61 @@
       const sd = sn + 1;              // series_no (1~33)
       ictx.updateProgress(`시리즈 ${sd} 요청 중... (${i + 1}/${total})`, (i / total) * 95);
       let parsed;
-      try {
-        const body = new URLSearchParams({
-          list: String(sn),
-          play_style: ictx.style,
-          s: '1',
-          rival: (ictx.isRival && ictx.rivalToken) ? ictx.rivalToken : '',
-        });
-        const res = await fetch(ictx.SERIES_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: body.toString(),
-          credentials: 'include',
-        });
-        if (!res.ok) {
+      for (let retry = 0; retry <= EMPTY_CHART_RETRY_DELAYS_MS.length; retry++) {
+        try {
+          const body = new URLSearchParams({
+            list: String(sn),
+            play_style: ictx.style,
+            s: '1',
+            rival: (ictx.isRival && ictx.rivalToken) ? ictx.rivalToken : '',
+          });
+          const res = await fetch(ictx.SERIES_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: body.toString(),
+            credentials: 'include',
+          });
+          if (!res.ok) {
+            if (i === 0) {
+              console.error(`[eagateFetch] 첫 시리즈 fetch 실패: HTTP ${res.status}`);
+              ictx.updateProgress(`시리즈 페이지 HTTP ${res.status} 에러`, 95);
+              ictx.alertFn(`시리즈 페이지를 가져오지 못했어요 (HTTP ${res.status}).\n로그인 상태인지 확인해주세요.`);
+              return false;
+            }
+            console.warn(`[eagateFetch] 시리즈 ${sd} HTTP ${res.status} — skip`);
+            parsed = null;
+            break;
+          }
+          const html = await res.text();
+          const doc = new DOMParser().parseFromString(html, 'text/html');
+          // eamuse list value (sn = 0~32) → series_no (sn + 1 = 1~33). ohSorryWeb series-name.json 키와 일치.
+          parsed = parseSeriesDoc(doc, sn + 1);
+          if (parsed.charts.length > 0) break;
+          if (retry < EMPTY_CHART_RETRY_DELAYS_MS.length) {
+            const waitMs = EMPTY_CHART_RETRY_DELAYS_MS[retry];
+            console.warn(`[eagateFetch] 시리즈 ${sd} 0차트 — ${retry + 1}회 재시도 전 ${waitMs / 1000}초 대기`);
+            ictx.updateProgress(`시리즈 ${sd}: 0차트, ${retry + 1}/${EMPTY_CHART_RETRY_DELAYS_MS.length}회 재시도 (${waitMs / 1000}초 대기)`, (i / total) * 95);
+            await new Promise((r) => setTimeout(r, waitMs));
+          }
+        } catch (e) {
           if (i === 0) {
-            console.error(`[eagateFetch] 첫 시리즈 fetch 실패: HTTP ${res.status}`);
-            ictx.updateProgress(`시리즈 페이지 HTTP ${res.status} 에러`, 95);
-            ictx.alertFn(`시리즈 페이지를 가져오지 못했어요 (HTTP ${res.status}).\n로그인 상태인지 확인해주세요.`);
+            console.error('[eagateFetch] 첫 시리즈 fetch 실패:', e);
+            ictx.updateProgress(`시리즈 페이지 fetch 실패: ${e.message}`, 95);
+            ictx.alertFn(`시리즈 페이지 fetch 실패: ${e.message}`);
             return false;
           }
-          console.warn(`[eagateFetch] 시리즈 ${sd} HTTP ${res.status} — skip`);
-          continue;
+          console.warn(`[eagateFetch] 시리즈 ${sd} fetch 실패: ${e.message} — skip`);
+          parsed = null;
+          break;
         }
-        const html = await res.text();
-        const doc = new DOMParser().parseFromString(html, 'text/html');
-        // eamuse list value (sn = 0~32) → series_no (sn + 1 = 1~33). ohSorryWeb series-name.json 키와 일치.
-        parsed = parseSeriesDoc(doc, sn + 1);
-      } catch (e) {
-        if (i === 0) {
-          console.error('[eagateFetch] 첫 시리즈 fetch 실패:', e);
-          ictx.updateProgress(`시리즈 페이지 fetch 실패: ${e.message}`, 95);
-          ictx.alertFn(`시리즈 페이지 fetch 실패: ${e.message}`);
-          return false;
-        }
-        console.warn(`[eagateFetch] 시리즈 ${sd} fetch 실패: ${e.message} — skip`);
-        continue;
       }
+      if (!parsed) continue;
+      if (parsed.charts.length === 0) {
+        console.warn(`[eagateFetch] 시리즈 ${sd} 0차트 — 재시도 소진, 수집 중단`);
+        ictx.alertFn(`시리즈 ${sd}에서 차트를 가져오지 못했어요 (0차트).\n잠시 후 다시 시도해 주세요.`);
+        return false;
+      }
+
       let added = 0;
       for (const ch of parsed.charts) {
         const k = ch.title + '|' + ch.diff;
