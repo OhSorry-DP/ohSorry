@@ -2,6 +2,16 @@
 
 ohSorry 의 변경 이력입니다. 사용방법은 [README.md](README.md) 를 참고하세요.
 
+### 2026-09-20 — SP 별값(sp_star)을 DB 저장 기록 전체로 계산
+
+SP 크롤의 `sp_star`/`sp_cpi` 가 **이번 크롤 세션에서 긁은 `allCharts` 만으로** 계산되고 있었다. 과거에 올린 기록이 빠지므로 부분 크롤이면 별값이 그대로 무너진다. 실측으로 DB 기록 2,217건 기준 ★21.3 이 나와야 할 8단 유저가 **★0.0** 으로 저장돼 있었다. 게다가 `0.0` 은 "표본부족 null" 이 아니라 유효값이라 `upsert_user` 의 COALESCE 보존까지 뚫고 멀쩡한 기존값을 덮어쓴다.
+
+같은 SP 경로의 피처 스코어(`upsertSpPatternScore`)는 이미 scores upsert **뒤에 `make_grid_data` 로 DB 전체를 다시 읽어** 계산하고 있었다. `sp_star` 만 그 방식이 아니었던 것이라, 동일한 방식으로 맞췄다.
+
+- `dbConn.js` v0.0.419 — `fetchSpChartsForStar(iidxId)` 신설. `make_grid_data(p_play_style=0)` 로 DB 저장 SP 기록 전체를 받아 `spSkillCpi` 입력 포맷으로 변환한다. `gameLevel` 12 고정은 `backfillSpCpi.js` 와 동일한 방식 — grid 에 레벨이 없고 cpi.json 매칭 자체가 SP12 필터 역할을 한다.
+- `calcOhsorryCore.js` — 1차 프로필 upsert 는 `sp_cpi`/`sp_star` 를 null 로 보내 기존값을 보존하고(웹훅 트리거 역할은 유지), scores upsert **뒤에** DB 전체 기록으로 계산해 2차 upsert 한다. 표본부족·조회실패·구 gist 환경(함수 부재)이면 전송하지 않고 기존값을 보존한다(fail-closed).
+- 2차 upsert 에도 `star`/`ereter_star` 를 조회값 그대로 재전송한다 — `sql/27` 미적용 DB 에서도 별값이 지워지지 않게.
+
 ### 2026-09-19 — 북마클릿 시리즈 수집 0차트 모아서 재시도
 
 HTTP 200 응답인데 0차트로 파싱된 시리즈를 1차 패스에서 모은 뒤, 3초·6초·12초·24초(이후 30초 상한) 간격으로 최대 10사이클 재요청한다. 1차 패스는 0차트여도 끝까지 수집해, 전부 0차트일 때만 로그인 실패로 판정한다. 재시도 후에도 남은 시리즈가 있으면 series_no 목록을 안내하고 부분 수집분으로 진행하지 않는다.

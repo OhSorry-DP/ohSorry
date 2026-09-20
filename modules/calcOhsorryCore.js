@@ -692,13 +692,13 @@ window.OhsorryCore = {
     const spPlayed = (allCharts || []).filter((c) => c.exScore > 0 || c.lampNum > 0);
     let spUploaded = null;
     let spUploadFailReason = null;  // null 이면 성공(또는 spRows.length===0 인 정상 케이스). 값이 있으면 완료 박스 대신 alert.
+    let prevStar = null, prevEreterStar = null;
+    let starsLookupOk = false;
     if (spIidx && window.OhsorryDb && window.OhsorryDb.upsertUserChartScores) {
       // 5.6b. 프로필(users + user_radars) 저장 — SP 모드는 ★분석을 안 하므로 star/ereter_star 를 새로
       //   계산하지 않는다. upsert_user 가 그 둘을 EXCLUDED 로 무조건 덮어쓰는 정책(02_users.sql)이라,
       //   기존 값을 조회해 그대로 재전송(없으면 null). dj_name/sp_rank/dp_rank/radar 는 status fetch 값으로 갱신.
       try {
-        let prevStar = null, prevEreterStar = null;
-        let starsLookupOk = false;
         if (window.OhsorryDb.fetchUserStars) {
           try {
             const prev = await window.OhsorryDb.fetchUserStars(spIidx);
@@ -709,20 +709,6 @@ window.OhsorryCore = {
           }
         } else {
           console.warn('[SP] fetchUserStars 없음 — 기존 star/ereter_star 조회 실패로 처리');
-        }
-        // SP 대표 실력값 — SP12 클리어(allCharts) × cpi.json.
-        //   sp_cpi  = unified85 원좌표(클리어율 85% 교차 CPI). sp_star = max(unified85★, guardedGaugeAvg50)
-        //   (게이지 편향 보정). 표본<5(SP12 클리어 5곡 미만)면 null → upsert_user COALESCE 로 기존값 보존.
-        //   computeSpStarGuarded 미배포(구 gist) 환경은 computeUserSpCpi(unified)로 graceful fallback.
-        let spCpiInt = null, spStarRounded = null;
-        if (spSkillLib && cpiData) {
-          try {
-            const sp = spSkillLib.computeSpStarGuarded
-              ? spSkillLib.computeSpStarGuarded(allCharts, cpiData, { normFn: norm })
-              : spSkillLib.computeUserSpCpi(allCharts, cpiData, { normFn: norm, mode: 'unified' });
-            spCpiInt = sp.cpiInt; spStarRounded = sp.starRounded;
-            console.log(`[SP] 대표 실력값 sp_cpi=${spCpiInt} sp_star=${spStarRounded}${sp.uniStarRounded != null ? ` (unified85 ★${sp.uniStarRounded}${sp.applied ? ', gauge보정' : ''})` : ''} (pairs ${sp.nPairs})`);
-          } catch (e) { console.warn('[SP] computeSpStarGuarded 실패:', e && e.message); }
         }
         // SP 단독 입력은 이 profile upsert(users 테이블 갱신)가 사실상 "웹훅 트리거 전용" 호출이다.
         //   users row 가 안 바뀌면 dump-trigger 웹훅이 안 떠서 리포트가 영영 안 만들어진다.
@@ -740,8 +726,8 @@ window.OhsorryCore = {
           ereter_star: prevEreterStar,   // 기존값 보존 (없으면 null)
           sp_rank: profile.spRank || null,
           dp_rank: profile.dpRank || null,
-          sp_cpi: spCpiInt,              // SP 대표 실력값(CPI). null(표본부족)이면 COALESCE 보존
-          sp_star: spStarRounded,        // 発狂★相当
+          sp_cpi: null,                  // ⬇ scores upsert 뒤 DB 전체 SP 기록으로 계산해 2차 upsert 한다(null=COALESCE 보존)
+          sp_star: null,                 // 〃 — 세션 크롤분만으로 계산하면 과거 기록이 빠져 별값이 무너진다
           notes_radar: profileHasRadar
             ? { sp: hasRadarData(profile.spRadar) ? profile.spRadar : null, dp: hasRadarData(profile.dpRadar) ? profile.dpRadar : null }
             : null,
@@ -786,6 +772,33 @@ window.OhsorryCore = {
         } catch (e) {
           spUploadFailReason = '스코어: ' + ((e && e.message) || '예외');
         }
+      }
+      // SP 대표 실력값(sp_cpi/sp_star) — scores upsert **뒤에** DB 저장 SP 기록 전체로 계산한다.
+      //   🔴 예전엔 이번 크롤 세션의 allCharts 만 썼다. 그러면 과거 기록이 통째로 빠져 별값이 무너진다
+      //      (실사고: DB 기준 ★21.3 이어야 할 유저가 0.0 으로 저장, sp_star 보유 248명 중 110명 저하).
+      //      0.0 은 "표본부족 null" 이 아니라 유효값이라 upsert_user 의 COALESCE 보존까지 뚫는다.
+      //   표본부족(null)/조회실패면 전송하지 않고 기존값을 보존한다(fail-closed).
+      //   starsLookupOk 가 false 면 기존 star/ereter_star 를 모르므로 upsert 자체를 하지 않는다.
+      if (spSkillLib && cpiData && window.OhsorryDb.fetchSpChartsForStar && starsLookupOk) {
+        try {
+          const dbSpCharts = await window.OhsorryDb.fetchSpChartsForStar(spIidx);
+          const sp = spSkillLib.computeSpStarGuarded
+            ? spSkillLib.computeSpStarGuarded(dbSpCharts, cpiData, { normFn: norm })
+            : spSkillLib.computeUserSpCpi(dbSpCharts, cpiData, { normFn: norm, mode: 'unified' });
+          if (sp && sp.cpiInt != null && sp.starRounded != null) {
+            console.log(`[SP] 대표 실력값 sp_cpi=${sp.cpiInt} sp_star=${sp.starRounded} (DB 전체 SP ${dbSpCharts.length}차트, pairs ${sp.nPairs})`);
+            const starRes = await window.OhsorryDb.upsertUserProfile({
+              iidx_id: spIidx,
+              star_estimate: prevStar,      // 기존값 그대로 재전송 (sql/27 미적용 DB 대비 명시 보존)
+              ereter_star: prevEreterStar,  // 〃
+              sp_cpi: sp.cpiInt,
+              sp_star: sp.starRounded,
+            });
+            if (!starRes || !starRes.ok) console.warn('[SP] sp_star 갱신 실패:', starRes && starRes.error);
+          } else {
+            console.warn('[SP] sp_star 미산출(표본부족) — 기존값 보존:', sp && sp.reason);
+          }
+        } catch (e) { console.warn('[SP] sp_star DB 재계산 실패 — 기존값 보존:', e && e.message); }
       }
       // SP 오소리 피쳐 스코어(user_ohsorry_radars play_style=0) — 웹 SP 분석탭의 피처별 랭킹/상대평가 baseline.
       //   scores upsert **뒤에** 계산해야 방금 올린 점수가 make_grid_data 에 반영된다.

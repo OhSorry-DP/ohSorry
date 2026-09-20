@@ -1063,8 +1063,25 @@ window.OhsorryDb = (function () {
     await callRpc('upsert_user_feature_score', payload);
   }
 
+  // SP 별값(sp_star) 계산용 — DB 에 저장된 유저의 SP 기록 전체를 spSkillCpi 입력 포맷으로 변환.
+  //   크롤 세션에서 긁은 차트만 쓰면 과거 기록이 빠져 별값이 무너진다(실사고: DB기준 ★21.3 → 0.0 저장).
+  //   gameLevel 은 12 고정 — make_grid_data 에 레벨이 없고, cpi.json 매칭 자체가 SP12 필터 역할을 한다
+  //   (ohSorryAdmin/scripts/backfillSpCpi.js 와 동일한 검증된 방식).
+  const SP_STAR_DIFF_STR = { 0: 'BEGINNER', 1: 'NORMAL', 2: 'HYPER', 3: 'ANOTHER', 4: 'LEGGENDARIA' };
+  async function fetchSpChartsForStar(iidxId) {
+    const rows = await fetchGridRows(iidxId, 0);
+    const charts = [];
+    for (const r of rows) {
+      if (!r || !r.title) continue;
+      const diff = SP_STAR_DIFF_STR[r.diff];
+      if (!diff) continue;
+      charts.push({ title: r.title, diff: diff, gameLevel: 12, lampNum: r.lamp || 0 });
+    }
+    return charts;
+  }
+
   return {
-    VERSION: '0.0.418',
+    VERSION: '0.0.419',
     upsertUserProfile: upsertUserProfile,
     upsertUserChartScores: upsertUserChartScores,
     uploadResult: uploadResult,
@@ -1079,6 +1096,8 @@ window.OhsorryDb = (function () {
       await callUpsertFeatureScore(iidxId, vec, 0);
       return vec;
     },
+    // SP 별값 재계산용 — DB 저장 SP 기록 전체를 spSkillCpi 입력 포맷으로 반환(세션 크롤분만 쓰지 않기 위함).
+    fetchSpChartsForStar: fetchSpChartsForStar,
     fetchUserProfile: fetchUserProfile,
     fetchUserStars: fetchUserStars,
     fetchServiceStatus: fetchServiceStatus,
