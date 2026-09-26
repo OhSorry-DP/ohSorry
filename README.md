@@ -1,6 +1,6 @@
 # IIDX DP ★12 실력 추정 — 수집/업로더
 
-ereter.net 의 ☆12 난이도 분석 데이터를 e-amusement 의 DP(·SP) 플레이 기록에 매칭해서 **★값을 추정**하고 **Supabase 에 업로드**합니다. 추정된 별값·추천곡·통계 등 **결과 표시는 [오소리웹](https://ohsorry.vercel.app/)** 에서 봅니다.
+e-amusement 의 DP(·SP) 플레이 기록을 크롤해서 **★값을 추정**하고 **Supabase 에 업로드**합니다. 추정된 별값·추천곡·통계 등 **결과 표시는 [오소리웹](https://ohsorry.vercel.app/)** 에서 봅니다.
 
 평소 사용은 **PC 콘솔 한 줄** 또는 **모바일 북마크렛 한 번 탭** 으로 끝.
 
@@ -50,7 +50,7 @@ javascript:fetch('https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f43
 
 1. 실행 즉시 **모달** 표시 — 시리즈 체크박스(33개, 기본 전체) + **DP / SP 탭** + **IIDX ID input**(기본=본인).
 2. 모듈 로드 후 본인 **DJ명 / SP·DP 단위 / IIDX ID** 가 모달 상단에 자동으로 채워집니다.
-3. 모달을 보는 동안 별값 lib·ereter·textage 데이터를 백그라운드 **prefetch** → 시작 후 로딩 단축.
+3. 모달을 보는 동안 별값 lib·textage 데이터를 백그라운드 **prefetch** → 시작 후 로딩 단축.
 4. 시작 → 선택한 시리즈를 크롤 → 별값(★) 추정 → **Supabase 업로드**.
 5. **완료 박스** 표시 — DJ명 · IIDX ID · 단위(SP/DP) + **[오소리웹에서 결과 보기]** 버튼. SP 모드면 SP 리센트로 딥링크.
 
@@ -62,7 +62,7 @@ javascript:fetch('https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f43
 
 별값·추천곡·배치추천·상세통계 등 **결과 표시는 전부 [오소리웹](https://ohsorry.vercel.app/)** 이 담당합니다. 본체(이 도구)는 데이터만 업로드하고, 오소리웹이 그 데이터를 읽어 보여줍니다. 주요 항목:
 
-- **프로필 카드** — qpro 이미지, DJ NAME, IIDX ID, SP/DP 단위, ★값 추정값(OhSorry) + ereter 원본 ★ 비교.
+- **프로필 카드** — qpro 이미지, DJ NAME, IIDX ID, SP/DP 단위, ★값 추정값.
 - **추천곡 (EASY / HARD / EX-HARD)** — `_clearScore` 가중합 기반 정렬 + cleanup 다양성 보정 + 8 배치(mirror × flip) 평가(배치추천).
 - **상세 통계** — CLEAR TYPE / DJ LEVEL 표, 난이도 별 클리어 램프·DJ LEVEL 분포.
 
@@ -75,12 +75,7 @@ javascript:fetch('https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f43
 
 ## ★값 추정 원리
 
-별값(★) 추정은 **이 도구가 실제로 하는 유일한 계산**입니다. core 는 별값 lib 3종(`OSR13.5+` / `onlyOSR` / `onlyOSRtoEreter`)을 gist 에서 fetch 한 뒤 `onlyOSRtoEreter.inferEreter(...)` 를 **한 번만** 호출해서:
-
-1. **onlyOSR** — 전체 곡 native 별값 (`native_star`, 절대 실력)
-2. **onlyOSRtoEreter** — onlyOSR → ereter scale 변환 (`star`, 표시용)
-
-을 산출하고, 곡 별 estimate(`ohSorryRating.json`)도 ohSorryRating 에서 빌드한 산출물을 그대로 씁니다. 일부 시리즈만 크롤하면 별값 계산은 skip 하고 기존 Supabase 값을 보존합니다.
+별값(★) 추정은 **이 도구가 실제로 하는 유일한 계산**입니다. core 는 gist 의 별값 lib 을 fetch 해 전체 곡 native 별값(`native_star`, 절대 실력)과 표시용 `star` 를 산출하고, 곡 별 estimate(`ohSorryRating.json`)도 ohSorryRating 에서 빌드한 산출물을 그대로 씁니다. 일부 시리즈만 크롤하면 별값 계산은 skip 하고 기존 Supabase 값을 보존합니다.
 
 추정 모델 / LOOCV / v3.0.x ~ v3.3.x 변경표 등 상세는 [ohSorryRating README](../ohSorryRating/README.md) 의 "OSR 추정모델 변경사항 (oldOSR)" 섹션을 참고하세요.
 
@@ -88,17 +83,14 @@ javascript:fetch('https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f43
 
 ## 트러블슈팅
 
-### "ereter 데이터가 비어있어요" / 매칭 미달
-ereter.net 페이지 구조 변경이나 신곡 미등록(곡명 차이)으로 매칭이 안 되는 경우입니다. ereter 데이터 **수집·갱신의 정본은 [ohSorryRating](../ohSorryRating/README.md)** 입니다(옛 `1-fetch-ereter.js` 는 `D:\work\dpdata\oldOhSorry` 로 아카이브됨). 신곡이 ereter 에 추가될 때까지 기다리거나 데이터 갱신이 필요합니다.
-
 ### "★값 추정: 표본 부족 (XX개)" 메시지
 12렙 곡을 30개 이상 시도해야 ★값 추정이 가능합니다. 그 미만은 통계가 부족해서 추정하지 않습니다.
 
 ### "CUTOFF 미달!" 콘솔 경고
 cleared 곡이 50 미만이면 학습 분포 밖이라 추정값 정확도가 보장되지 않습니다. 업로드는 되지만 큰 오차가 가능합니다.
 
-### 결과(추천곡·통계·ereter 비교 토글)가 안 보여요
-이 도구는 데이터를 **업로드만** 합니다. 결과 표시는 **[오소리웹](https://ohsorry.vercel.app/)** 에서 보세요(완료 박스의 버튼). ereter ↔ OhSorry 토글이 안 보이는 경우는 IIDX ID 가 `ereter-data.json` 의 `players` 매핑에 없는 것으로, ereter 데이터 갱신이 필요합니다.
+### 결과(추천곡·통계)가 안 보여요
+이 도구는 데이터를 **업로드만** 합니다. 결과 표시는 **[오소리웹](https://ohsorry.vercel.app/)** 에서 보세요(완료 박스의 버튼).
 
 ---
 
@@ -121,4 +113,4 @@ cleared 곡이 50 미만이면 학습 분포 밖이라 추정값 정확도가 �
 
 ## 면책
 
-ereter.net 의 데이터를 사용했습니다. 이레터님의 허락을 받지 않았습니다. 재미로만 이용해주세요.
+과거 버전은 ereter.net 의 데이터를 사용했습니다(이레터님의 허락은 받지 않았습니다). 현재 버전은 ereter 데이터를 쓰지 않습니다. 재미로만 이용해주세요.

@@ -2,6 +2,15 @@
 
 ohSorry 의 변경 이력입니다. 사용방법은 [README.md](README.md) 를 참고하세요.
 
+### 2026-09-26 — README 에서 ereter 현행 설명 정리 (문서만)
+
+ereter 를 쓰던 OSR 버전은 이미 쓰지 않고, 오소리웹 v3 도 ereter 표시를 하지 않는다. README 가 여전히 ereter 를 현행 입력·표시처럼 설명하고 있어 정리했다.
+
+- 소개문 · prefetch 목록 · 프로필 카드(「ereter 원본 ★ 비교」) · ★값 추정 원리(`onlyOSRtoEreter` 변환 설명)에서 ereter 언급 제거.
+- 트러블슈팅의 「ereter 데이터가 비어있어요」 항목과 「ereter ↔ OhSorry 토글」 설명 삭제.
+- 면책 문구는 「과거 버전은 ereter.net 데이터를 사용했다(현재 미사용)」로 바꿔 남겼다.
+- 코드(`calcOhsorryCore.js` 의 `ereter-data.json` 로드 · `dbConn.js` 의 `ereter_star` 과거 스냅샷)는 이번에 건드리지 않았다.
+
 ### 2026-09-20 — SP 별값(sp_star)을 DB 저장 기록 전체로 계산
 
 SP 크롤의 `sp_star`/`sp_cpi` 가 **이번 크롤 세션에서 긁은 `allCharts` 만으로** 계산되고 있었다. 과거에 올린 기록이 빠지므로 부분 크롤이면 별값이 그대로 무너진다. 실측으로 DB 기록 2,217건 기준 ★21.3 이 나와야 할 8단 유저가 **★0.0** 으로 저장돼 있었다. 게다가 `0.0` 은 "표본부족 null" 이 아니라 유효값이라 `upsert_user` 의 COALESCE 보존까지 뚫고 멀쩡한 기존값을 덮어쓴다.
