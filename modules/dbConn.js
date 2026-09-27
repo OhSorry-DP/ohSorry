@@ -509,6 +509,12 @@ window.OhsorryDb = (function () {
         }
       }
       const scoreRows = [...dedup.values()];
+      // ex_score 가 없거나 0인 행은 실제 플레이 점수가 아니므로 업로드에서 제외한다.
+      const validScoreRows = scoreRows.filter((row) => Number.isFinite(row.ex_score) && row.ex_score > 0);
+      const excludedScoreCount = scoreRows.length - validScoreRows.length;
+      if (excludedScoreCount > 0) {
+        console.log(`[OhsorryDb] ex_score 0 이하/없음 ${excludedScoreCount}건 제외`);
+      }
       if (unmatched > 0) {
         console.warn(`[OhsorryDb] song 매칭 실패 ${unmatched}건 (skip). 샘플:`, unmatchedSamples);
       }
@@ -517,11 +523,23 @@ window.OhsorryDb = (function () {
       }
       if (invalidDiff > 0) console.warn(`[OhsorryDb] diff 변환 실패 ${invalidDiff}건 (skip)`);
       if (invalidVersion > 0) console.warn(`[OhsorryDb] played_version 변환 실패 ${invalidVersion}건 (skip)`);
-      if (scoreRows.length === 0) {
-        return { ok: true, unmatched, inserted: 0, autoEnsured };
+      if (validScoreRows.length === 0) {
+        return { ok: true, inserted: 0, empty: true };
       }
-      await callRpc('upsert_scores', { p_rows: scoreRows });
-      console.log(`[OhsorryDb] scores upsert: ${scoreRows.length}건 (전체 ${rows.length}건 중, dedup 후)`);
+      const SCORE_UPSERT_CHUNK_SIZE = 1000;
+      const chunkTotal = Math.ceil(validScoreRows.length / SCORE_UPSERT_CHUNK_SIZE);
+      let inserted = 0;
+      for (let i = 0; i < chunkTotal; i++) {
+        const chunk = validScoreRows.slice(i * SCORE_UPSERT_CHUNK_SIZE, (i + 1) * SCORE_UPSERT_CHUNK_SIZE);
+        console.log(`[OhsorryDb] scores 청크 ${i + 1}/${chunkTotal} (${chunk.length}행)`);
+        try {
+          await callRpc('upsert_scores', { p_rows: chunk });
+          inserted += chunk.length;
+        } catch (e) {
+          return { ok: false, error: `scores 청크 ${i + 1}/${chunkTotal} 실패: ${e.message} (이전 성공 ${inserted}행)`, failedChunk: i + 1, totalChunks: chunkTotal, inserted };
+        }
+      }
+      console.log(`[OhsorryDb] scores upsert: ${inserted}건 (전체 ${rows.length}건 중, dedup 후)`);
       // 시리즈 폴더 fetch 모드일 때만 — songs.series_no 갱신 (eamuse 시리즈 분류 = 신뢰 출처).
       // 시리즈마다 RPC 1번 (배치). 실패해도 score upsert 자체는 성공이므로 fire-and-forget 로깅만.
       let seriesBumped = 0;
@@ -540,7 +558,7 @@ window.OhsorryDb = (function () {
       if (seriesGroups.size > 0) {
         console.log(`[OhsorryDb] songs.series_no 갱신: ${seriesBumped}건 (${seriesGroups.size}시리즈)`);
       }
-      return { ok: true, unmatched, inserted: scoreRows.length, autoEnsured };
+      return { ok: true, unmatched, inserted, autoEnsured };
     } catch (e) {
       return { ok: false, error: e.message };
     }
@@ -1081,7 +1099,7 @@ window.OhsorryDb = (function () {
   }
 
   return {
-    VERSION: '0.0.419',
+    VERSION: '0.0.420',
     upsertUserProfile: upsertUserProfile,
     upsertUserChartScores: upsertUserChartScores,
     uploadResult: uploadResult,

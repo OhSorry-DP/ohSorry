@@ -2,6 +2,15 @@
 
 ohSorry 의 변경 이력입니다. 사용방법은 [README.md](README.md) 를 참고하세요.
 
+### 2026-09-27 — scores 업로드 statement timeout(57014) 대응 · 시리즈 페이지 딜레이 단축
+
+시즌 34 전환 뒤 시리즈 폴더가 34개로 늘면서 한 번의 크롤이 수천 차트(실측 5,922)를 만들었고, `upsertUserChartScores` 가 이를 **청크 없이 `upsert_scores` 한 번**으로 보내 Supabase `statement timeout`(HTTP 500, code 57014)으로 스코어만 저장되지 않았다(프로필·피처 스코어는 성공).
+
+- `dbConn.js` v0.0.420 — dedup 뒤 `ex_score` 가 0 이하이거나 없는 행(미플레이 차트)을 업로드에서 제외하고 제외 건수를 로그로 남긴다.
+- `dbConn.js` — 남은 행을 1000행 단위로 나눠 `upsert_scores` 를 순차 호출한다. 한 청크라도 실패하면 즉시 중단하고 몇 번째 청크에서 실패했는지와 그 전까지 성공한 행 수를 오류에 담는다.
+- `dbConn.js` — 필터 뒤 0건이면 `empty: true` 로 돌려 "쓸 게 없었음" 경로를 탄다.
+- `eagateFetch.js` v0.0.7 — 시리즈 페이지 간 대기를 0.8~1.2초에서 0.3~0.8초로 줄였다. 0차트 재시도 사이클 대기는 그대로다.
+
 ### 2026-09-26 — README 에서 ereter 현행 설명 정리 (문서만)
 
 ereter 를 쓰던 OSR 버전은 이미 쓰지 않고, 오소리웹 v3 도 ereter 표시를 하지 않는다. README 가 여전히 ereter 를 현행 입력·표시처럼 설명하고 있어 정리했다.

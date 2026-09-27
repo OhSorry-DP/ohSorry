@@ -22,12 +22,12 @@
 (function () {
   'use strict';
 
-  const VERSION = 'v0.0.6';
+  const VERSION = 'v0.0.7';
 
   // ---- 상수 -----------------------------------------------------------
-  // 사람이 페이지 넘기는 속도와 비슷하게: 0.8~1.2초 사이 랜덤 대기 (평균 1초)
-  const DELAY_MIN_MS = 800;
-  const DELAY_MAX_MS = 1200;
+  // 시리즈 페이지 간 0.3~0.8초 사이 랜덤 대기 (평균 0.55초)
+  const DELAY_MIN_MS = 300;
+  const DELAY_MAX_MS = 800;
   const randomDelay = () => DELAY_MIN_MS + Math.random() * (DELAY_MAX_MS - DELAY_MIN_MS);
   // clflg 램프는 NO PLAY에도 붙으므로, 200 응답인데 0차트면 사실상 장애 신호다.
   const EMPTY_CHART_RETRY_CYCLE_DELAYS_MS = [3000, 6000, 12000, 24000];
