@@ -448,7 +448,7 @@ async function __fetchRivalToken(iidxId) {
 }
 
 window.OhsorryCore = {
-  VERSION: '0.0.413',
+  VERSION: '0.0.414',
   prefetch: __loadCoreData,        // 모달 떠 있는 동안 미리 호출 → compute 캐시 hit (로딩 단축)
   fetchProfile: __fetchProfile,    // wrapper 가 모달 상단 프로필 채울 때
   fetchRivalToken: __fetchRivalToken,  // IIDX ID → 라이벌 토큰 (라이벌 모드 판정)
@@ -464,7 +464,7 @@ window.OhsorryCore = {
   const isRival = mode === 'rival';
   const rivalToken = opts.rivalToken || null;
   const wrapperVersion = opts.wrapperVersion || 'unknown';
-  const CORE_VERSION_SHORT = '0.0.413'.replace(/^0\.0\./, '');  // '413' — 사용자 r★를 크롤러에서 산출해 users.r_star 저장
+  const CORE_VERSION_SHORT = '0.0.414'.replace(/^0\.0\./, '');  // '414' — SP 1~12 업로드(413: 사용자 r★를 크롤러에서 산출해 users.r_star 저장)
   const dbVersionString = `${wrapperVersion}-core${CORE_VERSION_SHORT}`;
 
   // -------- 0. 데이터 로드 (ereter/textage/ohSorryRating + 별값 lib) — 모듈 공유 __loadCoreData --------
@@ -686,7 +686,7 @@ window.OhsorryCore = {
   const profileHasRadar = !!profile && (hasRadarData(profile.spRadar) || hasRadarData(profile.dpRadar));
 
   // ===== SP 모드 (경량) — ★추정/추천 전부 스킵. 점수 크롤 + DJ명/단위 + 오소리웹 이동 패널. =====
-  //   own·rival 모두 SP10~12 자동 업로드(play_style:0) + 완료 박스. (대상 IIDX ID 의 프로필/점수를 갱신.)
+  //   own·rival 모두 SP1~12(BEGINNER 제외) 자동 업로드(play_style:0) + 완료 박스. (대상 IIDX ID 의 프로필/점수를 갱신.)
   if (isSpMode) {
     const spIidx = profile && profile.iidxId ? profile.iidxId.replace(/-/g, '') : null;
     const spPlayed = (allCharts || []).filter((c) => c.exScore > 0 || c.lampNum > 0);
@@ -750,7 +750,8 @@ window.OhsorryCore = {
       } catch (e) { console.warn('[SP profile upsert]', e && e.message); }
 
       const spRows = spPlayed
-        .filter((c) => c.gameLevel >= 10 && c.gameLevel <= 12)
+        // SP 1~12 전부(2026-09-28 사용자 결정 — 종전 10~12). BEGINNER 는 DP 처럼 제외한다.
+        .filter((c) => c.gameLevel >= 1 && c.gameLevel <= 12 && c.diff !== 'BEGINNER')
         .map((c) => ({
           played_version: SERIES, title: c.title, iidx_id: spIidx, diff: c.diff,
           game_level: c.gameLevel, ex_score: c.exScore != null ? c.exScore : null,
