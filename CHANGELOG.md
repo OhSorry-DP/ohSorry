@@ -2,6 +2,11 @@
 
 ohSorry 의 변경 이력입니다. 사용방법은 [README.md](README.md) 를 참고하세요.
 
+### 2026-10-03 — 문서를 현행 코드에 맞춤 (코드 변경 없음)
+
+- README·docs/README·algorithms·architecture·modules·data-pipeline·sp 의 현재형 서술을 코어 v0.0.414 기준으로 갱신 — SP 1~12 업로드, core 로드 lib 6종(OSR13.5+·onlyOSR·onlyOSRtoEreter·userRateStar·cpiStar·spSkillCpi), Gist+R2 이중 게시, 줄 번호.
+- 계약 문서 `service-status-schema.md` 는 그대로 둔다 — `uploadEnabled=false` 인데 피쳐 RPC 에 가드가 없는 점과 `shelfEnabled` 소비 의미는 별도 판단 대기.
+
 ### 2026-09-28 — SP 성적을 레벨 1~12 전부 올린다 (calcOhsorryCore v0.0.414)
 
 - 크롤러는 원래 시리즈 페이지째로 전 레벨을 긁지만, SP 업로드 직전에 레벨 10~12 만 남기고 버리고 있었다. 이제 **SP 1~12 전부**를 올린다(BEGINNER 는 DP 처럼 제외).
