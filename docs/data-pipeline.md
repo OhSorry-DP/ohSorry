@@ -34,13 +34,13 @@ zasa.sakura.ne.jp 콘솔. 가드 `zasa.sakura.ne.jp`(`:17`). 대상 `/dp/run.php
 
 ## 2. gist 배포 흐름
 
-- 단일 secret gist `OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e` 에 모든 파일이 **flat**(경로 없이 파일명만)으로 호스팅.
-- 클라이언트/관리자 모두 `gist.githubusercontent.com/.../raw/<파일명>?t=Date.now()` 로 fetch(캐시 우회).
-- **코드 모듈 배포**: 로컬 `modules/*.js` → `gh gist edit ... --filename calcOhsorryCore.js modules/calcOhsorryCore.js` 처럼 `--filename` 으로 로컬 path 를 flat 파일명에 매핑. 배포 master 는 `modules/` 아래 파일.
-- **런타임 데이터 갱신**: 수집 스크립트로 ereter/zasa 콘솔 실행 → 클립보드 JSON 을 gist 웹 UI 에서 `ereter-data.json`/`zasa-data.json` 편집·붙여넣기·Save(README 는 웹 UI 편집 위주로 문서화).
-- 세 클라이언트(본체·웹·INF)가 같은 gist 코어를 fetch+eval 하므로 gist 1회 갱신으로 동시 업데이트.
+- 본체 wrapper/core/dbConn 은 gist raw URL 을 사용합니다. 코드·일반 런타임 데이터의 core gist 는 OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e 에 flat 파일명으로 호스팅되며, service-status.json 은 별도 gist 30c3ba6f87df9847291c42ea216a8d2a 입니다. 현행 publishAsset 는 기본적으로 gist 와 R2 양쪽에 배포하도록 구성됩니다.
+- 본체 wrapper/core 의 데이터 로더는 gist raw URL 에 ?t=Date.now() 를 붙입니다. dbConn 의 recomputeAndSaveStar용 lib 로더는 cache:default 로 별도 fetch 합니다. 모든 클라이언트·관리자 호출이 동일한 캐시 우회 규칙인 것은 아닙니다.
+- **코드 모듈 배포**: npm run push:gist-modules → ../ohSorryAdmin/scripts/publishAsset.js modules/calcOhsorryCore.js modules/dbConn.js modules/normTitle.js modules/eagateFetch.js. 기본은 flat 파일명 gist PATCH + R2 lib/<파일명>. **북마클릿**: npm run push:bookmarklet → ohsorry.js(gist 전용). 이 문서는 구성 설명이며 배포 실행·라이브 일치를 보장하지 않습니다.
+- **런타임 데이터 갱신**: 위 §1의 ereter/zasa 콘솔 수집→gist 웹 UI 절차는 아카이브된 수집 방식입니다. 현재 배포 유틸리티 publishAsset 는 로컬 JSON을 flat 파일명 gist PATCH + R2 data/<파일명> 으로 배포하도록 구성됩니다.
+- 본체는 gist core 를 fetch+eval 합니다. 웹·INF 는 core-free 로 필요한 lib/렌더/데이터를 직접 로드하는 별도 소비처이므로, core 1회 갱신이 세 클라이언트의 동일 동작 갱신을 의미하지 않습니다.
 
-> 외부 ★추정 lib(oldOSR.js / osr.js / OSR13.5+.js / adopt.js / onlyOSR.js / onlyOSRtoEreter.js)도 같은 gist 에 `.js` 로 올라가며, core 가 `loadWithCache` 로 fetch+eval 합니다([architecture.md](architecture.md#외부-데이터lib-fetch--캐시-loadwithcache)).
+> core 가 로드하는 JS lib 은 OSR13.5+.js / onlyOSR.js / onlyOSRtoEreter.js / userRateStar.js / cpiStar.js / spSkillCpi.js 입니다. oldOSR.js / osr.js / adopt.js 는 현재 core 로더 목록에 없습니다([architecture.md](architecture.md)).
 
 ---
 
@@ -51,7 +51,7 @@ zasa.sakura.ne.jp 콘솔. 가드 `zasa.sakura.ne.jp`(`:17`). 대상 `/dp/run.php
 
 | 파일 | top-level | 엔트리 | core 용도 |
 |------|-----------|--------|-----------|
-> **[2026-06-16]** "core 용도" 열은 구조개편 2C 이후 기준. core 가 실제 fetch 하는 건 **ereter-data / textage-meta / ohSorryRating + 별값 lib 3종**뿐. `patterns-*`·`rate-reference`·`series-name` 은 추천/약점이 이관돼 **core 미사용**(오소리웹·오소리레이팅이 fetch). `feature-scores-slim`·`service-status` 는 **dbConn** 이 사용. zasa-data 도 core 미fetch.
+> **현재 core 로드 목록**: ereter-data.json / textage-meta.json / ohSorryRating.json / cpi.json + JS lib 6종(OSR13.5+/onlyOSR/onlyOSRtoEreter/userRateStar/cpiStar/spSkillCpi). patterns-*·rate-reference·series-name·zasa-data 는 core 미사용. dbConn 은 DP feature-scores-slim.json / SP sp-feature-scores-slim.json 및 별도 gist service-status.json 을 사용합니다.
 
 | 파일 | top-level | 엔트리 | 용도 |
 |------|-----------|--------|-----------|
@@ -65,10 +65,10 @@ zasa.sakura.ne.jp 콘솔. 가드 `zasa.sakura.ne.jp`(`:17`). 대상 `/dp/run.php
 | `rate-reference-slim.json` (gist) | `{ec/hc/exh:{"bucket":{mean,n}}}` | stage×0.5 bucket 평균 EX rate | calcWeakness 잔차 reference — **레이팅 전용**(core 미사용) |
 | `series-name.json` (gist 30c3ba6) | `{series_no: name}` | — | 추천 해시태그 시리즈명 — **core 미사용** |
 
-매칭 키는 모두 `norm(title) + '|' + diff` (`window.OhsorryNorm.norm` = normTitle 단일 정본, `calcOhsorryCore.js:318,365-383`).
+매칭 키는 norm(title) + '|' + diff 입니다(window.OhsorryNorm.norm; calcOhsorryCore.js:483-496). r★ 호출에도 normFn 으로 전달합니다(:886-890).
 
 ### 3.2 키 매핑 메모
-- diff(eagate) ↔ textage levels(gameLevel 역추정): SP `{NORMAL:'SN',HYPER:'SH',ANOTHER:'SA',LEGGENDARIA:'SX',BEGINNER:'SB'}` / DP `{…:'DN/DH/DA/DX/DB'}` (`calcOhsorryCore.js:416-417`).
+- diff(eagate) ↔ textage levels(gameLevel 역추정): SP `{NORMAL:'SN',HYPER:'SH',ANOTHER:'SA',LEGGENDARIA:'SX',BEGINNER:'SB'}` / DP `{…:'DN/DH/DA/DX/DB'}` (`calcOhsorryCore.js:594-595`).
 - INF 수록 비트(dbConn `getSongsByNorm`): `ac`/`legen` 컬럼의 bit 2(INF), bit 1(AC). LEGGENDARIA 는 legen, 그 외 ac.
 
 ### 3.3 학습/내부 데이터 (배포 안 함 — 레포에서 아카이브, `dpdata/oldOhSorry/`)
@@ -80,12 +80,12 @@ zasa.sakura.ne.jp 콘솔. 가드 `zasa.sakura.ne.jp`(`:17`). 대상 `/dp/run.php
 
 ### 3.4 package.json
 - `name: ohsorry`, `version: 1.0.0`, `main: ohsorry.js`, `type: commonjs`.
-- dependencies: `iconv-lite ^0.7.2` 하나(eagate EUC-JP 디코딩 추정 — 확인 필요). scripts 는 placeholder `test` 뿐(빌드/배포 스크립트 없음, 배포는 `gh gist edit` 수동).
+- dependencies: iconv-lite ^0.7.2. scripts 는 placeholder test 외에 push:gist-modules / push:bookmarklet 이 있고, 둘 다 ohSorryAdmin/scripts/publishAsset.js 를 호출합니다(모듈은 gist+R2, ohsorry.js 는 gist 전용).
 
 ---
 
 ## 확인 필요 / 주의
 
-- README.md 본문의 charts 수치(예 684/729)는 실제 파일(ereter count=731, zasa count=2045)과 어긋남 — README 미갱신.
-- ★추정 lib(oldOSR/osr/OSR135/adopt/onlyOSR/onlyOSRtoEreter) 소스는 이 repo 에 없고 gist 전용 → 내부 계수/수식은 lib 측 확인 필요.
+- 과거 README charts 수치와 과거 데이터 스냅샷 count 의 차이는 현행 README 문제로 취급하지 않습니다. 현재 README 에 해당 684/729 수치는 없으며, 라이브 gist 데이터 개수는 이번 읽기 전용 감사에서 검증하지 않았습니다.
+- 현재 core 의 별값·SP 커널 소스는 ohSorryRating/modules/ 에 있으며 gist 로 로드합니다. 내부 계수/수식은 해당 정본을 확인하고, 라이브 gist 와의 일치는 별도 검증해야 합니다.
 - 외부 노출(gist push / supabase 운영 데이터)을 바꾸는 작업은 이 문서 범위가 아니며, 실제 배포 명령은 README 와 ohSorryAdmin 을 정본으로 따르세요.
