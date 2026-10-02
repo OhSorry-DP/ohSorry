@@ -48,7 +48,7 @@ javascript:fetch('https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f43
 
 ## 실행하면 일어나는 일
 
-1. 실행 즉시 **모달** 표시 — 시리즈 체크박스(33개, 기본 전체) + **DP / SP 탭** + **IIDX ID input**(기본=본인).
+1. 실행 즉시 **모달** 표시 — **시즌 탭**(33 Sparkle Shower / 34 ZINRAI, 기본 34) + 시리즈 체크박스(34개, 기본 전체; 시즌 33 선택 시 34 비활성화) + **DP / SP 탭** + **IIDX ID input**(기본=본인).
 2. 모듈 로드 후 본인 **DJ명 / SP·DP 단위 / IIDX ID** 가 모달 상단에 자동으로 채워집니다.
 3. 모달을 보는 동안 별값 lib·textage 데이터를 백그라운드 **prefetch** → 시작 후 로딩 단축.
 4. 시작 → 선택한 시리즈를 크롤 → 별값(★) 추정 → **Supabase 업로드**.
@@ -75,7 +75,7 @@ javascript:fetch('https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f43
 
 ## ★값 추정 원리
 
-별값(★) 추정은 **이 도구가 실제로 하는 유일한 계산**입니다. core 는 gist 의 별값 lib 을 fetch 해 전체 곡 native 별값(`native_star`, 절대 실력)과 표시용 `star` 를 산출하고, 곡 별 estimate(`ohSorryRating.json`)도 ohSorryRating 에서 빌드한 산출물을 그대로 씁니다. 일부 시리즈만 크롤하면 별값 계산은 skip 하고 기존 Supabase 값을 보존합니다.
+core 는 gist 의 별값 lib 을 fetch 해 DP 전체 곡 native 별값(`native_star`, 절대 실력), 표시용 `star`, 사용자 `r_star` 를 산출합니다. 곡 별 estimate(`ohSorryRating.json`)는 ohSorryRating 빌드 산출물을 사용합니다. 일부 시리즈만 크롤하면 DP 별값 계산을 skip 하고 기존 Supabase 값을 보존합니다. SP 는 점수 저장 뒤 DB 전체 SP 기록과 CPI로 `sp_cpi`/`sp_star` 를 산출하며, dbConn 은 DP·SP 36차 피쳐 점수도 계산·저장합니다.
 
 추정 모델 / LOOCV / v3.0.x ~ v3.3.x 변경표 등 상세는 [ohSorryRating README](../ohSorryRating/README.md) 의 "OSR 추정모델 변경사항 (oldOSR)" 섹션을 참고하세요.
 
@@ -83,11 +83,11 @@ javascript:fetch('https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f43
 
 ## 트러블슈팅
 
-### "★값 추정: 표본 부족 (XX개)" 메시지
-12렙 곡을 30개 이상 시도해야 ★값 추정이 가능합니다. 그 미만은 통계가 부족해서 추정하지 않습니다.
+### 별값 표본 부족 / 미산출
+현행 onlyOSR 는 매칭된 학습 입력이 30개 미만이면 `few_plays` 를 반환합니다. 전체곡 native 추정에는 유효 클리어 단계 조건도 있으며, onlyOSRtoEreter 는 lv12 입력이 부족하면 lv11 클리어 기반 fallback 을 사용합니다. 따라서 12렙 30곡 미만이라고 항상 미추정인 것은 아닙니다.
 
-### "CUTOFF 미달!" 콘솔 경고
-cleared 곡이 50 미만이면 학습 분포 밖이라 추정값 정확도가 보장되지 않습니다. 업로드는 되지만 큰 오차가 가능합니다.
+### 별값 lib 로드 실패 / 기존 별값 조회 실패
+lib 로드·산출 실패 시 core 는 경고를 남기고 기존 별값 보존을 시도합니다. 기존 `star`/`ereter_star` 조회까지 실패해 값을 안전하게 보존할 수 없으면 프로필 저장을 건너뜁니다. DP 의 `uploadResult` 는 프로필 저장 실패 시 scores 업로드도 건너뛰며, SP 경로는 scores 저장을 별도로 계속 시도합니다.
 
 ### 결과(추천곡·통계)가 안 보여요
 이 도구는 데이터를 **업로드만** 합니다. 결과 표시는 **[오소리웹](https://ohsorry.vercel.app/)** 에서 보세요(완료 박스의 버튼).
@@ -99,7 +99,7 @@ cleared 곡이 50 미만이면 학습 분포 밖이라 추정값 정확도가 �
 파일 구조 · 모듈 구조 · 별값/추천 알고리즘 · 데이터 갱신 절차 등 상세는 [docs/](docs/README.md) 참고:
 - [architecture.md](docs/architecture.md) — wrapper→core 로딩 구조(모달·프로필·prefetch) · `compute()` 실행 흐름
 - [modules.md](docs/modules.md) — 모듈별 책임 · API (이관된 render/recommend 는 "이관됨" 표기)
-- [algorithms.md](docs/algorithms.md) — core 가 실제 하는 별값 추정 + 28차 피쳐 점수
+- [algorithms.md](docs/algorithms.md) — core 가 실제 하는 별값 추정 + 36차 피쳐 점수
 - [data-pipeline.md](docs/data-pipeline.md) — (아카이브된) 수집 스크립트 · gist 배포 · 데이터 형식
 - [sp.md](docs/sp.md) — SP(싱글) 모드 경량 업로드
 
@@ -113,4 +113,4 @@ cleared 곡이 50 미만이면 학습 분포 밖이라 추정값 정확도가 �
 
 ## 면책
 
-과거 버전은 ereter.net 의 데이터를 사용했습니다(이레터님의 허락은 받지 않았습니다). 현재 버전은 ereter 데이터를 쓰지 않습니다. 재미로만 이용해주세요.
+과거 버전은 ereter.net 의 데이터를 사용했습니다(이레터님의 허락은 받지 않았습니다). 현재 core 도 gist 의 `ereter-data.json` 을 로드해 차트 매칭·별값 추정 입력·`ereter_star` 룩업에 사용합니다. 재미로만 이용해주세요.
