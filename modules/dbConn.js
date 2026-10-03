@@ -1032,11 +1032,13 @@ window.OhsorryDb = (function () {
   }
 
   // 오소리 피쳐 스코어 upsert — user_ohsorry_radars.
-  // RPC 시그니처: migration_ohsorry_36feat.sql 의 37 인자 (text + 36 numeric) + 12_sp_feature_score.sql 의 p_play_style.
+  // RPC 시그니처: migration_ohsorry_36feat.sql 의 37 인자 (text + 36 numeric) + 12_sp_feature_score.sql 의 p_play_style
+  //   + 13_hands_feature.sql 의 p_os_hands(DP 전용 11번째 대표 피처, DEFAULT NULL) → 총 37 numeric + p_play_style.
   //   기존 28 dim 뒤에 신규 8 dim(겹계단/계마/양손계단) append. 신규 인자는 DEFAULT NULL 라 28키 gist 에선 0/null 전송.
   //   ⚠️ playStyle 은 0(SP) 일 때만 전송한다. DP(기본)는 인자를 안 실어 보내 구 37-arg RPC 와도 그대로 매칭 —
   //      12_sp_feature_score.sql 미적용 상태에서 이 파일이 먼저 배포돼도 DP 업로드는 무손상, SP 만 조용히 실패한다.
   //   SP vec 은 10 키만 있어 나머지 26 인자는 numOrNull 이 null 로 보낸다(RPC 의 COALESCE 로 컬럼 NULL 유지).
+  //   p_os_hands 는 SP(playStyle===0) 일 때 항상 null — SP vec 에 HANDS 키 자체가 없다.
   async function callUpsertFeatureScore(iidxId, vec, playStyle) {
     const numOrNull = (v) => typeof v === 'number' && isFinite(v) ? v : null;
     // payload 직전 신규 8값 로그 (검증용 — window.__OHSORRY_DEBUG_FEAT 켜면 출력)
@@ -1076,6 +1078,8 @@ window.OhsorryDb = (function () {
       p_os_keima_l: numOrNull(vec.KEIMA_L), p_os_keima_r: numOrNull(vec.KEIMA_R),
       p_os_hstair_onehand: numOrNull(vec.HSTAIR_ONEHAND), p_os_hstair_sync: numOrNull(vec.HSTAIR_SYNC),
       p_os_hstair_sameshape: numOrNull(vec.HSTAIR_SAMESHAPE), p_os_hstair_diffshape: numOrNull(vec.HSTAIR_DIFFSHAPE),
+      // 11번째 대표피처(양손 상호작용) — DP 전용. SP(play_style=0) 는 항상 null.
+      p_os_hands: playStyle === 0 ? null : numOrNull(vec.HANDS),
     };
     if (playStyle === 0) payload.p_play_style = 0;
     await callRpc('upsert_user_feature_score', payload);

@@ -2,6 +2,11 @@
 
 ohSorry 의 변경 이력입니다. 사용방법은 [README.md](README.md) 를 참고하세요.
 
+### 2026-10-03 — 피처 점수 업로드에 HANDS 전송 (미배포)
+
+- `callUpsertFeatureScore` 가 `p_os_hands` 를 보내지 않아 DP 11번째 대표 피처 HANDS 가 업로드로 갱신되지 않았다(RPC 는 `COALESCE` 라 기존값 유지 — 수동 백필 이후 정지, 신규 유저는 NULL). DP 는 `vec.HANDS`, SP 는 항상 null 로 보낸다.
+- 반영은 gist 배포 필요. 운영 DB 의 RPC 에 `p_os_hands` 인자가 있어야 한다(sql/13_hands_feature.sql 통합분).
+
 ### 2026-10-03 — 크롤 딜레이 조정 (eagateFetch v0.0.9)
 
 - `eagateFetch.js` v0.0.9 — 시리즈 페이지 간 대기를 0.6~0.9초에서 0.8~1.5초(평균 1.15초)로 늘렸다. 첫 크롤과 0차트 재시도 루프가 같은 값을 쓴다.
