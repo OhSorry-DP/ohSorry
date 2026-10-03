@@ -22,17 +22,17 @@
 (function () {
   'use strict';
 
-  const VERSION = 'v0.0.8';
+  const VERSION = 'v0.0.9';
 
   // ---- 상수 -----------------------------------------------------------
-  // 시리즈 페이지 간 0.6~0.9초 사이 랜덤 대기 (평균 0.75초)
-  const DELAY_MIN_MS = 600;
-  const DELAY_MAX_MS = 900;
+  // 시리즈 페이지 간 0.8~1.5초 사이 랜덤 대기 (평균 1.15초)
+  const DELAY_MIN_MS = 800;
+  const DELAY_MAX_MS = 1500;
   const randomDelay = () => DELAY_MIN_MS + Math.random() * (DELAY_MAX_MS - DELAY_MIN_MS);
   // clflg 램프는 NO PLAY에도 붙으므로, 200 응답인데 0차트면 사실상 장애 신호다.
-  // 0차트 재시도 사이클 대기는 매번 2초로 고정한다.
-  const EMPTY_CHART_RETRY_CYCLE_DELAYS_MS = [2000];
-  const EMPTY_CHART_RETRY_CYCLE_DELAY_MAX_MS = 2000;
+  // 0차트 재시도 사이클 대기는 2→4→8초로 늘리고, 4사이클부터는 8초로 유지한다.
+  const EMPTY_CHART_RETRY_CYCLE_DELAYS_MS = [2000, 4000, 8000];
+  const EMPTY_CHART_RETRY_CYCLE_DELAY_MAX_MS = 8000;
   const EMPTY_CHART_RETRY_MAX_CYCLES = 10;
 
   const LAMP_NAMES = {

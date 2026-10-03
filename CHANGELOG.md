@@ -2,6 +2,11 @@
 
 ohSorry 의 변경 이력입니다. 사용방법은 [README.md](README.md) 를 참고하세요.
 
+### 2026-10-03 — 크롤 딜레이 조정 (eagateFetch v0.0.9)
+
+- `eagateFetch.js` v0.0.9 — 시리즈 페이지 간 대기를 0.6~0.9초에서 0.8~1.5초(평균 1.15초)로 늘렸다. 첫 크롤과 0차트 재시도 루프가 같은 값을 쓴다.
+- `eagateFetch.js` — 0차트 재시도 사이클 대기를 매 사이클 2초 고정에서 2→4→8초 증가형(4사이클부터 8초 유지)으로 바꿨다. 최대 사이클 수(10)는 그대로다.
+
 ### 2026-10-03 — 문서를 현행 코드에 맞춤 (코드 변경 없음)
 
 - README·docs/README·algorithms·architecture·modules·data-pipeline·sp 의 현재형 서술을 코어 v0.0.414 기준으로 갱신 — SP 1~12 업로드, core 로드 lib 6종(OSR13.5+·onlyOSR·onlyOSRtoEreter·userRateStar·cpiStar·spSkillCpi), Gist+R2 이중 게시, 줄 번호.
