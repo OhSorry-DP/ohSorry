@@ -791,8 +791,7 @@ window.OhsorryDb = (function () {
       try {
         const vec = await computePatternScoreVec(iidxId);
         if (vec) {
-          await callUpsertFeatureScore(iidxId, vec);
-          console.log('[OhsorryDb] feature score upsert 성공 (NOTES=' + vec.NOTES.toFixed(1) + ' charts=' + vec.__count + ')');
+          if (await callUpsertFeatureScore(iidxId, vec)) console.log('[OhsorryDb] feature score upsert 성공 (NOTES=' + vec.NOTES.toFixed(1) + ' charts=' + vec.__count + ')');
         } else {
           console.warn('[OhsorryDb] pattern 점수 계산 skip (feature-scores fetch 실패 또는 plays 차트 부족)');
         }
@@ -804,8 +803,7 @@ window.OhsorryDb = (function () {
       try {
         const spVec = await computeSpPatternScoreVec(iidxId);
         if (spVec) {
-          await callUpsertFeatureScore(iidxId, spVec, 0);
-          console.log('[OhsorryDb] SP feature score upsert 성공 (NOTES=' + spVec.NOTES.toFixed(1) + ' charts=' + spVec.__count + ')');
+          if (await callUpsertFeatureScore(iidxId, spVec, 0)) console.log('[OhsorryDb] SP feature score upsert 성공 (NOTES=' + spVec.NOTES.toFixed(1) + ' charts=' + spVec.__count + ')');
         }
       } catch (e) {
         console.warn('[OhsorryDb] SP pattern 점수 계산/upsert 예외:', e && e.message);
@@ -1082,7 +1080,15 @@ window.OhsorryDb = (function () {
       p_os_hands: playStyle === 0 ? null : numOrNull(vec.HANDS),
     };
     if (playStyle === 0) payload.p_play_style = 0;
+    // uploadEnabled=false 면 피처 점수 RPC 도 막는다 — service-status 계약은 「모든 upload skip」.
+    //   프로필·scores 는 각 진입부에서 막지만 이 RPC 는 그 뒤에 따로 불려 kill-switch 를 빠져나갔다.
+    const statusErr = await checkUploadEnabled();
+    if (statusErr) {
+      console.warn('[OhsorryDb] feature score upsert skip —', statusErr.error);
+      return false;
+    }
     await callRpc('upsert_user_feature_score', payload);
+    return true;
   }
 
   // SP 별값(sp_star) 계산용 — DB 에 저장된 유저의 SP 기록 전체를 spSkillCpi 입력 포맷으로 변환.
@@ -1103,7 +1109,7 @@ window.OhsorryDb = (function () {
   }
 
   return {
-    VERSION: '0.0.420',
+    VERSION: '0.0.421',
     upsertUserProfile: upsertUserProfile,
     upsertUserChartScores: upsertUserChartScores,
     uploadResult: uploadResult,
@@ -1115,8 +1121,7 @@ window.OhsorryDb = (function () {
     upsertSpPatternScore: async function (iidxId) {
       const vec = await computeSpPatternScoreVec(iidxId);
       if (!vec) return null;
-      await callUpsertFeatureScore(iidxId, vec, 0);
-      return vec;
+      return (await callUpsertFeatureScore(iidxId, vec, 0)) ? vec : null;
     },
     // SP 별값 재계산용 — DB 저장 SP 기록 전체를 spSkillCpi 입력 포맷으로 반환(세션 크롤분만 쓰지 않기 위함).
     fetchSpChartsForStar: fetchSpChartsForStar,

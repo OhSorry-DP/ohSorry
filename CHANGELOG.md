@@ -2,6 +2,12 @@
 
 ohSorry 의 변경 이력입니다. 사용방법은 [README.md](README.md) 를 참고하세요.
 
+### 2026-10-03 — uploadEnabled=false 일 때 피처 점수 RPC 도 차단 (dbConn v0.0.421, 미배포)
+
+- 업로드 kill-switch 가 프로필·scores 만 막고 `upsert_user_feature_score` 는 그 뒤에 따로 불려 빠져나갔다. `callUpsertFeatureScore` 진입에서 `checkUploadEnabled` 를 확인해 차단되면 skip(false 반환) — `uploadResult` DP·SP 와 `upsertSpPatternScore` 모두 적용. 성공 로그는 실제 업로드 때만.
+- v0.0.421 은 바로 아래 HANDS 전송 변경을 함께 담는다(둘 다 gist 배포 전).
+- `service-status-schema.md`: `shelfEnabled` 소비 repo 에서 본체를 뺐다 — 본체 서열표 탭 제거 뒤 읽는 코드가 없다.
+
 ### 2026-10-03 — 피처 점수 업로드에 HANDS 전송 (미배포)
 
 - `callUpsertFeatureScore` 가 `p_os_hands` 를 보내지 않아 DP 11번째 대표 피처 HANDS 가 업로드로 갱신되지 않았다(RPC 는 `COALESCE` 라 기존값 유지 — 수동 백필 이후 정지, 신규 유저는 NULL). DP 는 `vec.HANDS`, SP 는 항상 null 로 보낸다.

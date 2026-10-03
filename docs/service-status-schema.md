@@ -17,7 +17,7 @@
 | 필드 | 타입 | 누락 시 기본값 | 의미 | 소비 repo |
 |------|------|----------------|------|-----------|
 | `uploadEnabled` | `boolean` | `false`(falsy→차단) | supabase 업로드 허용 토글. false 면 모든 upload skip. | 본체, 웹, INF |
-| `shelfEnabled` | `boolean` | `false`(falsy→skip) | 게스트 페이지 grid(서열표) 탭 활성. | 본체, 웹, INF(필드만) |
+| `shelfEnabled` | `boolean` | `false`(falsy→skip) | 게스트 페이지 grid(서열표) 탭 활성. | 웹, INF(필드만). 본체는 미사용(dbConn 의 JSDoc·조회 실패 기본값에만 남음 — 본체 서열표 탭 제거 뒤) |
 | `message` | `string?` | (없음) | 차단/점검 시 사용자에게 보일 안내 문구. | 본체, 웹, INF |
 | `updatedAt` | `string?` | (없음) | 갱신 시각(운영 메모용, 로직 비사용). | INF(인터페이스), 웹/본체 무시 |
 | `notInAC` | `Chart[]?` | `[]` | **AC** 미수록 채보 — 웹 서열표(universe/charts/SP)에서 제외. `diff` 는 콤마 다중 허용(`"DPA,SPA"`). | 웹 |

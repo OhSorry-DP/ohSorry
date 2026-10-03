@@ -105,7 +105,7 @@ eagate 의 lampNum(0~7)을 lamp 문자열로 변환합니다. dbPayload 카운�
 
 업로드 판정은 `dbConn.uploadResult(result)` 로 일원화. core 의 step 7 에서 호출:
 - `calcOhsorryCore.js:974-1013` : DP 경로 끝에서 `OhsorryDb.uploadResult({dbPayload, chartScoreRows})`.
-- 내부에서 payload 확인 → upsertUserProfile → 프로필 성공 시 upsertUserChartScores → DP·SP 패턴 점수 계산·upsert_user_feature_score. uploadEnabled 는 프로필·scores 진입부에서 fail-closed 체크합니다. 피쳐 RPC의 차단 범위는 [service-status-schema.md](service-status-schema.md) 계약과 대조해 판단이 필요합니다.
+- 내부에서 payload 확인 → upsertUserProfile → 프로필 성공 시 upsertUserChartScores → DP·SP 패턴 점수 계산·upsert_user_feature_score. uploadEnabled 는 프로필·scores 진입부와 피쳐 RPC(`callUpsertFeatureScore`, v0.0.421)에서 fail-closed 체크합니다 — [service-status-schema.md](service-status-schema.md) 의 「모든 upload skip」 계약.
 - SP 경로(`:690-834`)는 upsertUserProfile/upsertUserChartScores 를 직접 호출하고, scores 저장 뒤 fetchSpChartsForStar 로 DB 전체 SP 기록을 읽어 실력값 2차 프로필 저장 및 upsertSpPatternScore 를 수행합니다.
 
 자세한 RPC/페이로드는 [modules.md](modules.md#dbconnjs--supabase-통신) 참고.

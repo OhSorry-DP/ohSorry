@@ -28,6 +28,6 @@
 - **wrapper(진입점)**: [`ohsorry.js`](../ohsorry.js) (`v3.5.2`) — gist `2-calc-score.js`·`rivalOhsorry.js`(둘 다 redirect) 가 이 파일로 redirect
 - **series 크롤**: [`modules/eagateFetch.js`](../modules/eagateFetch.js) (`v0.0.8`)
 - **gist 호스팅**: `OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e` (code 모듈 + 별값 lib + 런타임 데이터 flat 호스팅)
-- **Supabase**: `cvxpeecxiawddmrzbdvn` ([`modules/dbConn.js`](../modules/dbConn.js), VERSION `0.0.420`)
+- **Supabase**: `cvxpeecxiawddmrzbdvn` ([`modules/dbConn.js`](../modules/dbConn.js), VERSION `0.0.421`)
 
 > 주의: 모듈에 옛 버전 주석이 남아 있는 경우가 있습니다(예: dbConn 소스 중간의 주석 처리된 `// VERSION: '0.0.401'`). **런타임 정본은 export 객체의 `VERSION`/`version` 값** 입니다.

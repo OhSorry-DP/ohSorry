@@ -46,7 +46,7 @@ const style = isSpMode ? '0' : '1';          // eagate 크롤 style: 0=SP, 1=DP
 
 ## 3. dbConn — `play_style` PK 분리
 
-[../modules/dbConn.js](../modules/dbConn.js) (v0.0.420, `upsertUserChartScores`)
+[../modules/dbConn.js](../modules/dbConn.js) (v0.0.421, `upsertUserChartScores`)
 
 SP/DP 가 **같은 곡·같은 채보·같은 버전**이어도 공존하도록, `play_style` 을 upsert row 와 dedup PK 에 포함했다.
 
@@ -85,6 +85,6 @@ const pk = `${songId}|${r.iidx_id}|${diffInt}|${playedVersion}|${playStyle}`;  /
 | 완료 박스 | own·rival 공통 — DJ명·SP단위 + SP 리센트 카드 버튼 |
 | 적재 | scores play_style:0(gameLevel 1~12, BEGINNER 제외), users 프로필·실력값, user_radars, user_ohsorry_radars SP 36차 피쳐 |
 | dedup PK | `song_id\|iidx_id\|diff\|played_version\|play_style` |
-| 핵심 파일 | ohsorry.js(탭/파싱), calcOhsorryCore.js(0.0.414), dbConn.js(0.0.420) |
+| 핵심 파일 | ohsorry.js(탭/파싱), calcOhsorryCore.js(0.0.414), dbConn.js(0.0.421) |
 
 > **상태: 구현됨 · 데이터 생산** — SP 점수·프로필·CPI 실력값·36차 피쳐 점수까지 저장합니다. 서열표·추천·분석·배치 표시는 오소리웹 담당([../../ohSorryWeb/docs/sp.md](../../ohSorryWeb/docs/sp.md)).

@@ -40,7 +40,7 @@
 
 ## dbConn.js — Supabase 통신
 
-- 등록: `window.OhsorryDb`, `VERSION: '0.0.420'` (`dbConn.js:1102`). 헤더 주석은 v0.0.418, 주석 처리된 옛 VERSION 도 남아 있으므로 export 객체값을 정본으로 봅니다.
+- 등록: `window.OhsorryDb`, `VERSION: '0.0.421'` (`dbConn.js:1112`). 헤더 주석은 v0.0.418, 주석 처리된 옛 VERSION 도 남아 있으므로 export 객체값을 정본으로 봅니다.
 - export(`:1101-1124`): upsertUserProfile, upsertUserChartScores, uploadResult, recomputeAndSaveStar, upsertSpPatternScore, fetchSpChartsForStar, fetchUserProfile, fetchUserStars, fetchServiceStatus, getSongsByNorm(=getSongsCache), ensureUnplayedSongs
 - 연결: SUPABASE_URL='https://cvxpeecxiawddmrzbdvn.supabase.co', legacy JWT anon key SUPABASE_KEY. RPC wrapper callRpc(name, body) → POST /rest/v1/rpc/{name} (`:316-328`). 키 값은 문서에 복제하지 않습니다.
 
