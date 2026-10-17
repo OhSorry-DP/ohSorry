@@ -282,9 +282,11 @@ async function __loadStarLibs() {
     const { data } = await __loadWithCache(__URLS.osr135, 'ohSorry:libOSR135', false);
     (new Function(data))();
   } catch (e) { console.error('[데이터] OSR13.5+ 로드 실패:', e.message); }
+  let onlyOSRReady = !!(window.onlyOSR && typeof window.onlyOSR.inferOhsorryStar === 'function');
   try {
     const { data: oo } = await __loadWithCache(__URLS.onlyOSR, 'ohSorry:libOnlyOSR', false);
     (new Function(oo))();
+    onlyOSRReady = !!(window.onlyOSR && typeof window.onlyOSR.inferOhsorryStar === 'function');
     const { data: o2e } = await __loadWithCache(__URLS.onlyOSR2e, 'ohSorry:libOnlyOSR2e', false);
     (new Function(o2e))();
   } catch (e) { console.warn('[데이터] onlyOSR/onlyOSRtoEreter 로드 실패 — ★ 미산출:', e.message); }
@@ -335,7 +337,8 @@ async function __loadSpStarLibs() {
     const { data: ss } = await __loadWithCache(__URLS.spSkillCpi, 'ohSorry:libSpSkillCpi', false);
     (new Function(ss))();
   } catch (e) { console.warn('[데이터] cpiStar/spSkillCpi 로드 실패 — SP 대표 실력값 skip:', e.message); }
-  return window.spSkillCpi || null;
+  return window.onlyOSR && typeof window.onlyOSR.inferOhsorryStar === 'function' && window.spSkillCpi && typeof window.spSkillCpi.computeSpStarGuarded === 'function'
+    ? window.spSkillCpi : null;
 }
 
 // 전체 데이터 로드 (compute + prefetch 공유). 모달 떠 있는 동안 미리 호출하면 compute 가 캐시 hit.
@@ -800,21 +803,22 @@ window.OhsorryCore = {
       if (spSkillLib && cpiData && window.OhsorryDb.fetchSpChartsForStar && starsLookupOk) {
         try {
           const dbSpCharts = await window.OhsorryDb.fetchSpChartsForStar(spIidx);
-          const sp = spSkillLib.computeSpStarGuarded
-            ? spSkillLib.computeSpStarGuarded(dbSpCharts, cpiData, { normFn: norm })
-            : spSkillLib.computeUserSpCpi(dbSpCharts, cpiData, { normFn: norm, mode: 'unified' });
-          if (sp && sp.cpiInt != null && sp.starRounded != null) {
-            console.log(`[SP] 대표 실력값 sp_cpi=${sp.cpiInt} sp_star=${sp.starRounded} (DB 전체 SP ${dbSpCharts.length}차트, pairs ${sp.nPairs})`);
+          if (!spSkillLib || typeof spSkillLib.computeSpStarGuarded !== 'function') throw new Error('SP guarded star kernel unavailable');
+          const sp = spSkillLib.computeSpStarGuarded(dbSpCharts, cpiData, { normFn: norm });
+          const hasCpi = sp && Number.isFinite(sp.cpiInt);
+          const hasStar = sp && Number.isFinite(sp.starRounded);
+          if (hasCpi || hasStar) {
+            console.log(`[SP] 대표 실력값 sp_cpi=${hasCpi ? sp.cpiInt : '미산출'} sp_star=${hasStar ? sp.starRounded : '미산출'} (method ${sp.method || 'unknown'}, reason ${sp.reason || 'none'}, DB 전체 SP ${dbSpCharts.length}차트, pairs ${sp.nPairs})`);
             const starRes = await window.OhsorryDb.upsertUserProfile({
               iidx_id: spIidx,
               star_estimate: prevStar,      // 기존값 그대로 재전송 (sql/27 미적용 DB 대비 명시 보존)
               ereter_star: prevEreterStar,  // 〃
-              sp_cpi: sp.cpiInt,
-              sp_star: sp.starRounded,
+              ...(hasCpi ? { sp_cpi: sp.cpiInt } : {}),
+              ...(hasStar ? { sp_star: sp.starRounded } : {}),
             });
             if (!starRes || !starRes.ok) console.warn('[SP] sp_star 갱신 실패:', starRes && starRes.error);
           } else {
-            console.warn('[SP] sp_star 미산출(표본부족) — 기존값 보존:', sp && sp.reason);
+            console.warn(`[SP] 대표값 미산출 — CPI=${sp && sp.cpiInt} ★=${sp && sp.starRounded}; 기존값 보존 (method ${sp && sp.method}, reason ${sp && sp.reason})`);
           }
         } catch (e) { console.warn('[SP] sp_star DB 재계산 실패 — 기존값 보존:', e && e.message); }
       }

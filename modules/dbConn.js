@@ -1114,8 +1114,7 @@ window.OhsorryDb = (function () {
 
   // SP 별값(sp_star) 계산용 — DB 에 저장된 유저의 SP 기록 전체를 spSkillCpi 입력 포맷으로 변환.
   //   크롤 세션에서 긁은 차트만 쓰면 과거 기록이 빠져 별값이 무너진다(실사고: DB기준 ★21.3 → 0.0 저장).
-  //   gameLevel 은 12 고정 — make_grid_data 에 레벨이 없고, cpi.json 매칭 자체가 SP12 필터 역할을 한다
-  //   (ohSorryAdmin/scripts/backfillSpCpi.js 와 동일한 검증된 방식).
+  //   identity 와 제공된 레벨을 보존해 정본 자산의 key/textage/variant 및 SP12 membership 으로 판정한다.
   const SP_STAR_DIFF_STR = { 0: 'BEGINNER', 1: 'NORMAL', 2: 'HYPER', 3: 'ANOTHER', 4: 'LEGGENDARIA' };
   async function fetchSpChartsForStar(iidxId) {
     const rows = await fetchGridRows(iidxId, 0);
@@ -1124,7 +1123,14 @@ window.OhsorryDb = (function () {
       if (!r || !r.title) continue;
       const diff = SP_STAR_DIFF_STR[r.diff];
       if (!diff) continue;
-      charts.push({ title: r.title, diff: diff, gameLevel: 12, lampNum: r.lamp || 0 });
+      const chart = { title: r.title, diff: diff, lampNum: r.lamp || 0 };
+      if (r.textage_song_id != null) chart.textageId = String(r.textage_song_id);
+      if (r.variant != null) chart.variant = r.variant;
+      if (r.key != null) chart.key = r.key;
+      const level = r.game_level != null ? r.game_level : r.gameLevel;
+      chart.gameLevel = level != null && Number.isFinite(Number(level)) ? Number(level) : 12; // make_grid_data 는 레벨이 없다 — CPI 경로(computeUserSpCpi)의 SP12 전제 유지, ★ 는 master membership 으로 재판정
+      if (r.source != null) chart.source = r.source;
+      charts.push(chart);
     }
     return charts;
   }

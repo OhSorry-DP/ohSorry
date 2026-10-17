@@ -10,6 +10,10 @@ ohSorry 의 변경 이력입니다. 사용방법은 [README.md](README.md) 를 �
 - 테스트 `tests/sp-rate-star-db.test.js`·`tests/sp-rate-star-core.test.js`(Rating 경로는 형제 레포 `ohSorryRating` 또는 `OHSORRY_RATING_ROOT`). 변이 주입 4종 검출.
 - 🔴 배포 전제: ohSorryAdmin `sql/33` 적용, R2 `lib/spUserRateStar.js` 게시가 먼저다. 시드 `spRateStar` 게시 전에는 SP r★ 만 건너뛴다.
 
+### 2026-10-17 — SP 곡★ 커널 계약 연결 (미배포)
+
+- SP CPI 와 곡★를 독립적으로 저장하고, 전체 DB 기록의 identity 를 보존해 정본 자산의 SP12 membership 으로 곡★ 대상을 판정한다.
+
 ### 2026-10-03 — uploadEnabled=false 일 때 피처 점수 RPC 도 차단 (dbConn v0.0.421, 미배포)
 
 - 업로드 kill-switch 가 프로필·scores 만 막고 `upsert_user_feature_score` 는 그 뒤에 따로 불려 빠져나갔다. `callUpsertFeatureScore` 진입에서 `checkUploadEnabled` 를 확인해 차단되면 skip(false 반환) — `uploadResult` DP·SP 와 `upsertSpPatternScore` 모두 적용. 성공 로그는 실제 업로드 때만.
