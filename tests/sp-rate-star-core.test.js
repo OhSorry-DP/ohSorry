@@ -44,7 +44,11 @@ function createHarness(options = {}) {
   const db = {
     async fetchUserStars() {
       calls.fetch.push('previous');
-      if (options.previousError && calls.fetch.filter((x) => x === 'previous').length >= 1) throw new Error('previous lookup failed');
+      if (options.previousThrow && calls.fetch.filter((x) => x === 'previous').length >= 2) throw new Error('previous lookup failed');
+      if (options.previousError && calls.fetch.filter((x) => x === 'previous').length >= 2) {
+        return { ok: false, star: null, ereter_star: null, r_star: null, sp_r_star: null,
+          sp_r_star_model_id: null, sp_r_star_formula_version: null };
+      }
       return { ok: true, star: 6, ereter_star: 7, r_star: 8,
         sp_r_star: options.prevRStar ?? 4.5,
         sp_r_star_model_id: options.prevModelId || MODEL_A,
