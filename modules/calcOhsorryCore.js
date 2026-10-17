@@ -186,6 +186,7 @@ var __URLS = {
   onlyOSR:   __GIST_RAW + '/onlyOSR.js',
   onlyOSR2e: __GIST_RAW + '/onlyOSRtoEreter.js',
   userRStar: __GIST_RAW + '/userRateStar.js',
+  spUserRStar:'https://data.iidx.in/lib/spUserRateStar.js',
   cpi:       __GIST_RAW + '/cpi.json',          // SP12 채보별 램프 CPI (SP 대표 실력값 산출)
   cpiStar:   __GIST_RAW + '/cpiStar.js',        // CPI → 発狂★相当 변환 커널
   spSkillCpi:__GIST_RAW + '/spSkillCpi.js',     // 유저 SP 대표 실력값(sp_cpi/sp_star) 산출 커널(cpiStar 의존)
@@ -300,6 +301,20 @@ async function __loadUserRateStar() {
   return window.userRateStar || null;
 }
 
+// SP r★ 모듈 로드 — DP r★ 커널은 __loadUserRateStar 에서 먼저 로드한 것을 재사용한다.
+async function __loadSpUserRateStar() {
+  if (window.spUserRateStar && window.spUserRateStar.inferSpUserRStar) return window.spUserRateStar;
+  try {
+    if (!window.userRateStar) {
+      const { data } = await __loadWithCache(__URLS.userRStar, 'ohSorry:libUserRateStar', false);
+      (new Function(data))();
+    }
+    const { data: spData } = await __loadWithCache(__URLS.spUserRStar, 'ohSorry:libSpUserRateStar', false);
+    (new Function(spData))();
+  } catch (e) { console.warn('[데이터] spUserRateStar 로드 실패:', e.message); }
+  return window.spUserRateStar && window.spUserRateStar.inferSpUserRStar ? window.spUserRateStar : null;
+}
+
 // SP12 CPI 데이터 (cpi.json) — 캐시 우선. 실패해도 무시(null) → SP 대표 실력값 미산출(기존값 보존).
 async function __loadCpi() {
   window.__ohsorryLibCache = window.__ohsorryLibCache || {};
@@ -327,21 +342,23 @@ async function __loadSpStarLibs() {
 async function __loadCoreData() {
   const ereter = await __loadEreter();
   const textageSongs = await __loadTextage();
-  let ratingData = null, ohSorryRatings = [];
+  let ratingData = null, ohSorryRatings = [], spRateStar = null;
   try {
     const { data } = await __loadWithCache(__URLS.rating, 'ohSorry:ratingData', true);
     ratingData = data;
     if (data && Array.isArray(data.ratings)) ohSorryRatings = data.ratings;
+    if (data && data.spRateStar && typeof data.spRateStar === 'object') spRateStar = data.spRateStar;
   } catch (e) { console.error('[데이터] ohSorryRating 로드 실패:', e.message); }
   const onlyOSR2eLib = await __loadStarLibs();   // OSR13.5+/onlyOSR 는 글로벌 등록(side-effect), 반환은 onlyOSRtoEreter
   const userRateStarLib = await __loadUserRateStar();
+  const spUserRateStarLib = await __loadSpUserRateStar();
   const cpiData = await __loadCpi();              // SP12 CPI (SP 모드 대표 실력값용, 실패 시 null)
   const spSkillLib = await __loadSpStarLibs();    // window.spSkillCpi (computeUserSpCpi), 실패 시 null
   return {
     ereterData: ereter ? ereter.charts : null,
     ereterPlayers: ereter ? ereter.players : null,
-    textageSongs, ratingData, ohSorryRatings,
-    onlyOSR2eLib, userRateStarLib, cpiData, spSkillLib,
+    textageSongs, ratingData, ohSorryRatings, spRateStar,
+    onlyOSR2eLib, userRateStarLib, spUserRateStarLib, cpiData, spSkillLib,
   };
 }
 
@@ -448,7 +465,7 @@ async function __fetchRivalToken(iidxId) {
 }
 
 window.OhsorryCore = {
-  VERSION: '0.0.414',
+  VERSION: '0.0.415',
   prefetch: __loadCoreData,        // 모달 떠 있는 동안 미리 호출 → compute 캐시 hit (로딩 단축)
   fetchProfile: __fetchProfile,    // wrapper 가 모달 상단 프로필 채울 때
   fetchRivalToken: __fetchRivalToken,  // IIDX ID → 라이벌 토큰 (라이벌 모드 판정)
@@ -464,7 +481,7 @@ window.OhsorryCore = {
   const isRival = mode === 'rival';
   const rivalToken = opts.rivalToken || null;
   const wrapperVersion = opts.wrapperVersion || 'unknown';
-  const CORE_VERSION_SHORT = '0.0.414'.replace(/^0\.0\./, '');  // '414' — SP 1~12 업로드(413: 사용자 r★를 크롤러에서 산출해 users.r_star 저장)
+  const CORE_VERSION_SHORT = '0.0.415'.replace(/^0\.0\./, '');  // 415: SP r★ 를 크롤러에서 산출해 users.sp_r_star 저장 — '414' — SP 1~12 업로드(413: 사용자 r★를 크롤러에서 산출해 users.r_star 저장)
   const dbVersionString = `${wrapperVersion}-core${CORE_VERSION_SHORT}`;
 
   // -------- 0. 데이터 로드 (ereter/textage/ohSorryRating + 별값 lib) — 모듈 공유 __loadCoreData --------
@@ -475,7 +492,7 @@ window.OhsorryCore = {
     __ohsorryHideSpinner();
     return;
   }
-  const { ereterData, ereterPlayers, textageSongs, ratingData, ohSorryRatings, onlyOSR2eLib, userRateStarLib, cpiData, spSkillLib } = __D;
+  const { ereterData, ereterPlayers, textageSongs, ratingData, ohSorryRatings, spRateStar, onlyOSR2eLib, userRateStarLib, spUserRateStarLib, cpiData, spSkillLib } = __D;
 
   // -------- 1. 곡명 정규화 + 인덱싱 --------
   // [중복 제거] 곡명 norm = normTitle.js 단일 정본(window.OhsorryNorm, wrapper 가 먼저 fetch+eval).
@@ -800,6 +817,29 @@ window.OhsorryCore = {
             console.warn('[SP] sp_star 미산출(표본부족) — 기존값 보존:', sp && sp.reason);
           }
         } catch (e) { console.warn('[SP] sp_star DB 재계산 실패 — 기존값 보존:', e && e.message); }
+      }
+      // SP r★(스코어 별값) — scores upsert 뒤 make_sp_rate_star_rows 로 DB 전체 SP 이력을 받아 spUserRateStar(U1)로 계산
+      // 같은 modelId·formulaVersion 일 때만 래칫, 표본부족이면 새 모델 tuple 에 null 저장
+      // 조회·계산 실패면 저장하지 않아 기존 3열을 보존
+      if (spUploadFailReason == null && window.OhsorryDb && window.OhsorryDb.fetchSpRateStarRows && starsLookupOk &&
+          spUserRateStarLib && spRateStar && textageSongs) {
+        try {
+          const rows = await window.OhsorryDb.fetchSpRateStarRows(spIidx);
+          const prev = await window.OhsorryDb.fetchUserStars(spIidx);
+          if (!prev || !prev.ok) throw new Error('previous SP profile lookup failed');
+          const result = spUserRateStarLib.inferSpUserRStar(rows, spRateStar, {
+            textageSongs, normFn: norm, kernel: userRateStarLib,
+            prev: { rStar: prev.sp_r_star, modelId: prev.sp_r_star_model_id, formulaVersion: prev.sp_r_star_formula_version },
+          });
+          if (result && (result.status === 'ok' || result.status === 'few_plays')) {
+            const saved = await window.OhsorryDb.upsertUserProfile({
+              iidx_id: spIidx, star_estimate: prevStar, ereter_star: prevEreterStar,
+              sp_r_star: result.status === 'ok' && Number.isFinite(result.rStar) ? result.rStar : null,
+              sp_r_star_model_id: result.modelId, sp_r_star_formula_version: result.formulaVersion,
+            });
+            if (!saved || !saved.ok) console.warn('[SP] r★ 저장 실패:', saved && saved.error);
+          }
+        } catch (e) { console.warn('[SP] r★ 계산/저장 실패 — 기존값 보존:', e && e.message); }
       }
       // SP 오소리 피쳐 스코어(user_ohsorry_radars play_style=0) — 웹 SP 분석탭의 피처별 랭킹/상대평가 baseline.
       //   scores upsert **뒤에** 계산해야 방금 올린 점수가 make_grid_data 에 반영된다.
