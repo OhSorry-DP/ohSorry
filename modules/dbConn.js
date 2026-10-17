@@ -5,6 +5,7 @@
 //            (모델 자체는 미플레이 곡 신규 클리어 케이스를 원리적으로 못 막는다 — 클리어율 분모가
 //            "친 곡 수"라 신규곡이 들어오면 같이 늘기 때문). 계수/난이도축 재배포 후 재기준화는
 //            래칫을 안 타는 backfillStars.js --apply 로 한다.
+// v0.0.422 — upsertUserProfile 의 SP r★ tuple 검증 실패를 throw 대신 { ok: false, error } 로 반환.
 // v0.0.416 — recomputeAndSaveStar(iidxId) 신설. onlyOSR/onlyOSRtoEreter(gist UMD 모듈)로 코어 없이
 //            ★값(star_estimate/native_star) 재계산 + upsert_user 저장. users.date 갱신 → 웹훅이
 //            dump-user 를 깨워 R2 재덤프 + 페르소나 재생성까지 자동 이어짐. CSV Upload 탭 후속 호출용.
@@ -358,11 +359,22 @@ window.OhsorryDb = (function () {
     if (payload.star_estimate === undefined) {
       return { ok: false, error: 'star_estimate 값이 없어 프로필 저장을 중단합니다' };
     }
+    const hasSpRStarModel = Object.prototype.hasOwnProperty.call(payload, 'sp_r_star_model_id');
+    const hasSpRStarFormula = Object.prototype.hasOwnProperty.call(payload, 'sp_r_star_formula_version');
+    const hasSpRStar = Object.prototype.hasOwnProperty.call(payload, 'sp_r_star');
+    if (hasSpRStarModel || hasSpRStarFormula || hasSpRStar) {
+      if (!hasSpRStarModel || !hasSpRStarFormula || !payload.sp_r_star_model_id || !payload.sp_r_star_formula_version) {
+        return { ok: false, error: 'SP r★ 값에 모델 ID·계산식 버전이 없어 프로필 저장을 중단합니다' };
+      }
+      if (payload.sp_r_star != null && (typeof payload.sp_r_star !== 'number' || !Number.isFinite(payload.sp_r_star))) {
+        return { ok: false, error: 'SP r★ 값이 유한한 숫자가 아니어서 프로필 저장을 중단합니다' };
+      }
+    }
     const statusErr = await checkUploadEnabled();
     if (statusErr) return statusErr;
     try {
       // 1. users 테이블 (FK 부모) 먼저
-      await callRpc('upsert_user', {
+      const userRpcPayload = {
         p_iidx_id: payload.iidx_id,
         p_dj_name: payload.dj_name || null,
         p_star: payload.star_estimate != null ? Number(payload.star_estimate) : null,
@@ -373,7 +385,13 @@ window.OhsorryDb = (function () {
         p_sp_cpi: payload.sp_cpi != null ? Math.round(Number(payload.sp_cpi)) : null,      // SP 대표 실력값(CPI). null → COALESCE 보존
         p_sp_star: payload.sp_star != null ? Number(payload.sp_star) : null,               // 発狂★相当. SP 크롤/INF 만 채움
         p_r_star: payload.r_star != null ? Number(payload.r_star) : null,                  // 사용자 r★. null → COALESCE 보존
-      });
+      };
+      if (hasSpRStarModel) {
+        userRpcPayload.p_sp_r_star = payload.sp_r_star;
+        userRpcPayload.p_sp_r_star_model_id = payload.sp_r_star_model_id;
+        userRpcPayload.p_sp_r_star_formula_version = payload.sp_r_star_formula_version;
+      }
+      await callRpc('upsert_user', userRpcPayload);
       // 2. user_radars (SP / DP 각각, 있을 때만)
       const radar = payload.notes_radar;
       if (radar && typeof radar === 'object') {
@@ -642,14 +660,14 @@ window.OhsorryDb = (function () {
   //   (users RLS: FOR SELECT USING(true) + anon GRANT → anon key 로 조회 가능. dbr_pw 만 제외.)
   async function fetchUserStars(iidxId) {
     const id = String(iidxId || '').trim().replace(/-/g, '');
-    if (!id) return { ok: false, star: null, ereter_star: null, r_star: null };
+    if (!id) return { ok: false, star: null, ereter_star: null, r_star: null, sp_r_star: null, sp_r_star_model_id: null, sp_r_star_formula_version: null };
     try {
       const url = SUPABASE_URL + '/rest/v1/users'
-        + `?iidx_id=eq.${encodeURIComponent(id)}&select=star,ereter_star,r_star&limit=1`;
+        + `?iidx_id=eq.${encodeURIComponent(id)}&select=star,ereter_star,r_star,sp_r_star,sp_r_star_model_id,sp_r_star_formula_version&limit=1`;
       const res = await fetch(url, { headers: HEADERS });
       if (!res.ok) {
         console.warn('[OhsorryDb] fetchUserStars 실패: HTTP ' + res.status);
-        return { ok: false, star: null, ereter_star: null, r_star: null };
+        return { ok: false, star: null, ereter_star: null, r_star: null, sp_r_star: null, sp_r_star_model_id: null, sp_r_star_formula_version: null };
       }
       const rows = await res.json();
       const r = Array.isArray(rows) && rows.length ? rows[0] : null;
@@ -658,10 +676,13 @@ window.OhsorryDb = (function () {
         star: r && r.star != null ? r.star : null,
         ereter_star: r && r.ereter_star != null ? r.ereter_star : null,
         r_star: r && r.r_star != null ? r.r_star : null,
+        sp_r_star: r && r.sp_r_star != null ? r.sp_r_star : null,
+        sp_r_star_model_id: r && r.sp_r_star_model_id != null ? r.sp_r_star_model_id : null,
+        sp_r_star_formula_version: r && r.sp_r_star_formula_version != null ? r.sp_r_star_formula_version : null,
       };
     } catch (e) {
       console.warn('[OhsorryDb] fetchUserStars 실패:', e && e.message);
-      return { ok: false, star: null, ereter_star: null, r_star: null };
+      return { ok: false, star: null, ereter_star: null, r_star: null, sp_r_star: null, sp_r_star_model_id: null, sp_r_star_formula_version: null };
     }
   }
 
@@ -1108,8 +1129,28 @@ window.OhsorryDb = (function () {
     return charts;
   }
 
+  async function fetchSpRateStarRows(iidxId) {
+    const pageSize = 1000;
+    const rows = [];
+    let offset = 0;
+    for (;;) {
+      const res = await fetch(
+        SUPABASE_URL + `/rest/v1/rpc/make_sp_rate_star_rows?limit=${pageSize}&offset=${offset}&order=score_id.asc`,
+        { method: 'POST', headers: HEADERS, body: JSON.stringify({ p_iidx_id: iidxId }) },
+      );
+      if (!res.ok) throw new Error('make_sp_rate_star_rows HTTP ' + res.status);
+      const page = await res.json();
+      if (!Array.isArray(page)) throw new Error('make_sp_rate_star_rows returned non-array');
+      if (page.length === 0) break;
+      rows.push(...page);
+      if (page.length < pageSize) break;
+      offset += pageSize;
+    }
+    return rows;
+  }
+
   return {
-    VERSION: '0.0.421',
+    VERSION: '0.0.422',
     upsertUserProfile: upsertUserProfile,
     upsertUserChartScores: upsertUserChartScores,
     uploadResult: uploadResult,
@@ -1125,6 +1166,7 @@ window.OhsorryDb = (function () {
     },
     // SP 별값 재계산용 — DB 저장 SP 기록 전체를 spSkillCpi 입력 포맷으로 반환(세션 크롤분만 쓰지 않기 위함).
     fetchSpChartsForStar: fetchSpChartsForStar,
+    fetchSpRateStarRows: fetchSpRateStarRows,
     fetchUserProfile: fetchUserProfile,
     fetchUserStars: fetchUserStars,
     fetchServiceStatus: fetchServiceStatus,
