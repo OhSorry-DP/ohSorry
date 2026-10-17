@@ -2,6 +2,14 @@
 
 ohSorry 의 변경 이력입니다. 사용방법은 [README.md](README.md) 를 참고하세요.
 
+### 2026-10-17 — SP r★ 를 크롤러에서 산출해 users.sp_r_star 저장 (calcOhsorryCore v0.0.415 · dbConn v0.0.422, 미배포)
+
+- SP 업로드가 끝나면 `make_sp_rate_star_rows` 로 DB 전체 SP 이력을 받아, `spUserRateStar`(R2 `lib/spUserRateStar.js`)와 시드 `spRateStar` 로 SP r★ 를 계산한다. 결과는 `upsert_user` 로 `sp_r_star`·`sp_r_star_model_id`·`sp_r_star_formula_version` 3열에 원자 저장한다. DP r★·`sp_cpi/sp_star` 경로는 불변이다.
+- 조회·계산이 실패하거나 모듈·시드가 없으면 저장하지 않아 기존 3열을 보존한다. 표본이 부족하면 새 모델 tuple 에 null 을 저장한다. 구 호출은 새 RPC 키를 보내지 않는다.
+- `dbConn`: `fetchSpRateStarRows`(1000행 페이지) 추가, `fetchUserStars` 가 SP 3열을 함께 반환한다. tuple 검사에 실패하면 `{ok:false}` 를 돌려준다.
+- 테스트 `tests/sp-rate-star-db.test.js`·`tests/sp-rate-star-core.test.js`(Rating 경로는 형제 레포 `ohSorryRating` 또는 `OHSORRY_RATING_ROOT`). 변이 주입 4종 검출.
+- 🔴 배포 전제: ohSorryAdmin `sql/33` 적용, R2 `lib/spUserRateStar.js` 게시가 먼저다. 시드 `spRateStar` 게시 전에는 SP r★ 만 건너뛴다.
+
 ### 2026-10-03 — uploadEnabled=false 일 때 피처 점수 RPC 도 차단 (dbConn v0.0.421, 미배포)
 
 - 업로드 kill-switch 가 프로필·scores 만 막고 `upsert_user_feature_score` 는 그 뒤에 따로 불려 빠져나갔다. `callUpsertFeatureScore` 진입에서 `checkUploadEnabled` 를 확인해 차단되면 skip(false 반환) — `uploadResult` DP·SP 와 `upsertSpPatternScore` 모두 적용. 성공 로그는 실제 업로드 때만.
