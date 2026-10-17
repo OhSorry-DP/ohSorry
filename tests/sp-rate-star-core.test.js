@@ -7,8 +7,15 @@ const path = require('node:path');
 const { test } = require('node:test');
 
 const CORE_PATH = path.join(__dirname, '..', 'modules', 'calcOhsorryCore.js');
-const USER_STAR_PATH = path.join(__dirname, '..', '..', 'rating-sp-rate-star', 'modules', 'userRateStar.js');
-const SP_STAR_PATH = path.join(__dirname, '..', '..', 'rating-sp-rate-star', 'modules', 'spUserRateStar.js');
+// Rating 공용 모듈 — 형제 레포 ohSorryRating(또는 OHSORRY_RATING_ROOT). worktree 에서는 환경변수로 지정한다.
+const RATING_ROOT = process.env.OHSORRY_RATING_ROOT || path.join(__dirname, '..', '..', 'ohSorryRating');
+const USER_STAR_PATH = path.join(RATING_ROOT, 'modules', 'userRateStar.js');
+const SP_STAR_PATH = path.join(RATING_ROOT, 'modules', 'spUserRateStar.js');
+for (const ratingPath of [USER_STAR_PATH, SP_STAR_PATH]) {
+  if (!fs.existsSync(ratingPath)) {
+    throw new Error(`Rating 모듈을 찾을 수 없습니다: ${ratingPath} — OHSORRY_RATING_ROOT 를 지정하세요`);
+  }
+}
 const SOURCE_VERSION = 'onlyosr-v1';
 const MODEL_A = 'sp-grade-irt-v1:' + 'a'.repeat(64);
 const MODEL_B = 'sp-grade-irt-v1:' + 'b'.repeat(64);
