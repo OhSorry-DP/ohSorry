@@ -40,7 +40,7 @@ function scoreRows(count = 8) {
 }
 
 function createHarness(options = {}) {
-  const calls = { fetch: [], loads: [], infer: [], profile: [], scoreUploads: [], cpiReads: 0, cpiWrites: [], spPattern: 0 };
+  const calls = { fetch: [], loads: [], infer: [], profile: [], initialProfile: [], warns: [], scoreUploads: [], cpiReads: 0, cpiWrites: [], spPattern: 0 };
   const db = {
     async fetchUserStars() {
       calls.fetch.push('previous');
@@ -56,6 +56,12 @@ function createHarness(options = {}) {
     },
     async upsertUserProfile(payload) {
       calls.profile.push(payload);
+      return { ok: true };
+    },
+    async upsertInitialUserProfile(payload) {
+      calls.initialProfile.push(payload);
+      if (options.initialProfileThrow) throw new Error('initial profile failed');
+      if (options.initialProfileFail) return { ok: false, error: 'initial profile failed' };
       return { ok: true };
     },
     async upsertUserChartScores(rows) {
@@ -102,7 +108,7 @@ function createHarness(options = {}) {
       return { ok: true, async json() { return String(url).includes('ohSorryRating') ? { ratings: [], spRateStar: ratingSeed } : []; }, async text() { return ''; } };
     },
     localStorage: { getItem() { return null; }, setItem() {} },
-    console: { log() {}, warn() {}, error() {} },
+    console: { log() {}, warn(...args) { calls.warns.push(args); }, error() {} },
     document: {
       getElementById() { return null; }, createElement() { return { style: {}, remove() {}, appendChild() {} }; },
       body: { appendChild() {} }, head: { appendChild() {} },
@@ -209,4 +215,60 @@ test('SP CPI update remains independent from r-star failures and DP still uses t
   h.context.window.OhsorryDb.uploadResult = async () => ({ ok: true });
   await h.core.compute({ playStyle: 'DP', mode: 'own', gameVersion: '1', seriesList: [0], profile: { iidxId: '12345678' }, suppressDone: true });
   assert.ok(h.calls.fetch.includes('previous'));
+});
+
+test('initial profile saves only the exact basic fields and normalized valid ID', async () => {
+  const h = createHarness();
+  const profile = { djName: 'Tester', iidxId: '12-345678', spRank: '七段', dpRank: '六段', spRadar: { NOTES: 123 },
+    spStar: 9, dpStar: 8, star: 7, version: 'x', plays: 99, sp_r_star: 6 };
+  await h.core.saveInitialProfile(profile);
+  assert.deepEqual(Object.keys(h.calls.initialProfile[0]).sort(), ['dj_name', 'dp_rank', 'iidx_id', 'notes_radar', 'sp_rank']);
+  assert.equal(h.calls.initialProfile[0].iidx_id, '12345678');
+  assert.deepEqual(JSON.parse(JSON.stringify(h.calls.initialProfile[0].notes_radar)), { sp: profile.spRadar });
+  for (const key of ['star_estimate', 'r_star', 'native_star', 'ereter_star', 'raw_s', 'version', 'plays', 'sp_star', 'dp_star', 'sp_r_star']) {
+    assert.equal(Object.hasOwn(h.calls.initialProfile[0], key), false);
+  }
+});
+
+test('initial profile radar keeps only valid SP and DP objects, including an empty parent when both are invalid', async () => {
+  const h = createHarness();
+  const cases = [
+    [{ NOTES: 1 }, {}, { sp: { NOTES: 1 } }],
+    [{}, { total: 2 }, { dp: { total: 2 } }],
+    [{ CHORD: 3 }, { SCRATCH: 4 }, { sp: { CHORD: 3 }, dp: { SCRATCH: 4 } }],
+    [{ img: 'x' }, { NOTES: '5' }, {}],
+  ];
+  for (const [spRadar, dpRadar, expected] of cases) {
+    await h.core.saveInitialProfile({ iidxId: '12345678', spRadar, dpRadar });
+  }
+  assert.deepEqual(JSON.parse(JSON.stringify(h.calls.initialProfile.map((p) => p.notes_radar))), cases.map((c) => c[2]));
+});
+
+test('initial profile skips rivals and invalid IDs without database calls', async () => {
+  const h = createHarness();
+  await h.core.saveInitialProfile({ iidxId: '12345678' }, { isRival: true });
+  await h.core.saveInitialProfile({ iidxId: '12-34567x' });
+  await h.core.saveInitialProfile({ djName: 'No ID' });
+  assert.equal(h.calls.initialProfile.length, 0);
+});
+
+test('initial profile DB failures warn safely and do not block compute score upload', async () => {
+  for (const options of [{ initialProfileThrow: true }, { initialProfileFail: true }, { noInitialProfileMethod: true }]) {
+    const h = createHarness(options);
+    if (options.noInitialProfileMethod) delete h.context.window.OhsorryDb.upsertInitialUserProfile;
+    const saved = await h.core.saveInitialProfile({ iidxId: '12345678' });
+    assert.equal(saved.ok, false);
+    assert.equal(h.calls.warns.length, 1);
+
+    h.core.prefetch = async () => ({
+      ereterData: [{ title: 'Song 0', diff: 'ANOTHER', level: 12 }], ereterPlayers: {}, textageSongs: {},
+      ratingData: { ratings: [] }, ohSorryRatings: [], spRateStar: ratingSeed, onlyOSR2eLib: null,
+      userRateStarLib: require(USER_STAR_PATH), spUserRateStarLib: null, cpiData: null, spSkillLib: null,
+    });
+    h.context.window.OhsorryEagateFetch.collectCharts = async () => ({ ok: true, charts: [{ title: 'Song 0', diff: 'ANOTHER', gameLevel: 12, exScore: 250, lampNum: 5, noteCount: 100 }], pageCount: 1 });
+    h.context.window.OhsorryDb.uploadResult = async () => ({ ok: true });
+    await h.core.compute({ playStyle: 'DP', mode: 'own', gameVersion: '1', seriesList: [0], profile: { iidxId: '12345678' }, suppressDone: true });
+    assert.equal(h.calls.scoreUploads.length, 0); // DP uploadResult owns score persistence.
+    assert.ok(h.calls.fetch.includes('previous'));
+  }
 });

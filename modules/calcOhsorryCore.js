@@ -368,6 +368,40 @@ async function __loadCoreData() {
 // eagate 불안정으로 200 응답이어도 빈 프로필이 올 수 있어 2초 → 4초 → 8초 재시도.
 const PROFILE_RETRY_DELAYS_MS = [2000, 4000, 8000];
 
+const RADAR_CATS = ['NOTES', 'CHORD', 'PEAK', 'CHARGE', 'SCRATCH', 'SOF-LAN'];
+const hasRadarData = (r) =>
+  !!r && typeof r === 'object' &&
+  (RADAR_CATS.some((c) => typeof r[c] === 'number') || typeof r.total === 'number');
+
+async function __saveInitialProfile(profile, { isRival = false } = {}) {
+  const idNorm = profile && typeof profile.iidxId === 'string' ? profile.iidxId.replace(/-/g, '') : '';
+  if (isRival || !/^\d{8}$/.test(idNorm)) return { ok: false, skipped: true };
+  const notesRadar = {};
+  if (hasRadarData(profile.spRadar)) notesRadar.sp = profile.spRadar;
+  if (hasRadarData(profile.dpRadar)) notesRadar.dp = profile.dpRadar;
+  const payload = {
+    iidx_id: idNorm,
+    dj_name: profile.djName || null,
+    sp_rank: profile.spRank || null,
+    dp_rank: profile.dpRank || null,
+    notes_radar: notesRadar,
+  };
+  try {
+    if (!window.OhsorryDb || typeof window.OhsorryDb.upsertInitialUserProfile !== 'function') {
+      throw new Error('OhsorryDb.upsertInitialUserProfile 없음');
+    }
+    const result = await window.OhsorryDb.upsertInitialUserProfile(payload);
+    if (result && result.ok === false) {
+      console.warn('[오소리] 초기 프로필 저장 실패:', result.error);
+      return { ok: false, error: result.error || null };
+    }
+    return result || { ok: true };
+  } catch (e) {
+    console.warn('[오소리] 초기 프로필 저장 실패:', e && e.message ? e.message : e);
+    return { ok: false, error: e && e.message ? e.message : String(e) };
+  }
+}
+
 // status.html(own) / rival_status.html(rival) → 프로필 파싱 { djName, iidxId, spRank, dpRank, spRadar, dpRadar }.
 async function __fetchProfile(opts) {
   opts = opts || {};
@@ -468,9 +502,10 @@ async function __fetchRivalToken(iidxId) {
 }
 
 window.OhsorryCore = {
-  VERSION: '0.0.415',
+  VERSION: '0.0.416',
   prefetch: __loadCoreData,        // 모달 떠 있는 동안 미리 호출 → compute 캐시 hit (로딩 단축)
   fetchProfile: __fetchProfile,    // wrapper 가 모달 상단 프로필 채울 때
+  saveInitialProfile: __saveInitialProfile,
   fetchRivalToken: __fetchRivalToken,  // IIDX ID → 라이벌 토큰 (라이벌 모드 판정)
   showDoneList: __ohsorryShowDoneList, // wrapper 가 여러 명 결과를 한 번에 리스트로 표시
   // 로그인 버튼 — 완료 박스뿐 아니라 **시작 모달**(부트로더)에서도 쓴다. 기록을 올리지 않고
@@ -484,7 +519,7 @@ window.OhsorryCore = {
   const isRival = mode === 'rival';
   const rivalToken = opts.rivalToken || null;
   const wrapperVersion = opts.wrapperVersion || 'unknown';
-  const CORE_VERSION_SHORT = '0.0.415'.replace(/^0\.0\./, '');  // 415: SP r★ 를 크롤러에서 산출해 users.sp_r_star 저장 — '414' — SP 1~12 업로드(413: 사용자 r★를 크롤러에서 산출해 users.r_star 저장)
+  const CORE_VERSION_SHORT = '0.0.416'.replace(/^0\.0\./, '');  // 416: 로딩 시 본인 users 행·레이더 초기 저장(saveInitialProfile) — 415: SP r★ 를 크롤러에서 산출해 users.sp_r_star 저장 — '414' — SP 1~12 업로드(413: 사용자 r★를 크롤러에서 산출해 users.r_star 저장)
   const dbVersionString = `${wrapperVersion}-core${CORE_VERSION_SHORT}`;
 
   // -------- 0. 데이터 로드 (ereter/textage/ohSorryRating + 별값 lib) — 모듈 공유 __loadCoreData --------
@@ -699,10 +734,6 @@ window.OhsorryCore = {
 
   // 레이더 데이터 유효성 — 객체이고 6개 카테고리 중 하나라도 숫자값이 있어야 함.
   // (null / undefined / 빈 객체 {} 면 레이더 영역 자체를 만들지 않음)
-  const RADAR_CATS = ['NOTES', 'CHORD', 'PEAK', 'CHARGE', 'SCRATCH', 'SOF-LAN'];
-  const hasRadarData = (r) =>
-    !!r && typeof r === 'object' &&
-    (RADAR_CATS.some((c) => typeof r[c] === 'number') || typeof r.total === 'number');
   const profileHasRadar = !!profile && (hasRadarData(profile.spRadar) || hasRadarData(profile.dpRadar));
 
   // ===== SP 모드 (경량) — ★추정/추천 전부 스킵. 점수 크롤 + DJ명/단위 + 오소리웹 이동 패널. =====
