@@ -72,6 +72,119 @@ test('legacy upsert payload omits SP r-star RPC keys', async () => {
   assert.equal(Object.hasOwn(body, 'p_sp_r_star_formula_version'), false);
 });
 
+test('initial profile creates user then valid SP and DP radars with only six user keys', async () => {
+  const calls = [];
+  const db = loadDb(withUploadEnabled(async (url, options) => {
+    calls.push({ url, options });
+    return response({});
+  }));
+  const result = await db.upsertInitialUserProfile({
+    iidx_id: '12-345678', dj_name: 'DJ', sp_rank: '---', dp_rank: '---',
+    notes_radar: { sp: { NOTES: 1 }, dp: { PEAK: 2 } }, star_estimate: 99, p_star: 100,
+  });
+  assert.equal(result.ok, true);
+  const rpc = calls.filter(({ url }) => url.includes('/rpc/'));
+  assert.deepEqual(rpc.map(({ url }) => url.split('/rpc/')[1]), ['upsert_user', 'upsert_user_radar', 'upsert_user_radar']);
+  const userBody = JSON.parse(rpc[0].options.body);
+  assert.deepEqual(Object.keys(userBody).sort(), ['p_iidx_id', 'p_dj_name', 'p_star', 'p_ereter_star', 'p_sp_rank', 'p_dp_rank'].sort());
+  assert.deepEqual(userBody, { p_iidx_id: '12345678', p_dj_name: 'DJ', p_star: null, p_ereter_star: null, p_sp_rank: null, p_dp_rank: null });
+  assert.deepEqual(rpc.slice(1).map(({ options }) => JSON.parse(options.body).p_play_style), [0, 1]);
+});
+
+test('initial profile omits optional users values and preserves SQL-defined values contract', async () => {
+  const calls = [];
+  const db = loadDb(withUploadEnabled(async (url, options) => { calls.push({ url, options }); return response({}); }));
+  const result = await db.upsertInitialUserProfile({
+    iidx_id: '12345678', dj_name: 'DJ', sp_rank: '---', dp_rank: '---', notes_radar: {},
+    star_estimate: 6, ereter_star: 7, native_star: 8, sp_cpi: 1900, sp_star: 9, r_star: 10,
+    plays: [1], sp_r_star: 11, sp_r_star_model_id: 'model', sp_r_star_formula_version: 'formula',
+  });
+  assert.equal(result.ok, true);
+  const body = JSON.parse(rpcCalls(calls, 'upsert_user')[0].options.body);
+  assert.deepEqual(Object.keys(body).sort(), ['p_iidx_id', 'p_dj_name', 'p_star', 'p_ereter_star', 'p_sp_rank', 'p_dp_rank'].sort());
+  assert.equal(body.p_star, null);
+  assert.equal(body.p_ereter_star, null);
+  for (const key of ['p_native_star', 'p_sp_cpi', 'p_sp_star', 'p_r_star', 'p_plays', 'p_sp_r_star', 'p_sp_r_star_model_id', 'p_sp_r_star_formula_version']) assert.equal(Object.hasOwn(body, key), false);
+  const sqlPath = path.join(__dirname, '..', '..', 'ohSorryAdmin', 'sql', '33_add_sp_r_star.sql');
+  assert.equal(fs.existsSync(sqlPath), true, `Required SQL source is missing: ${sqlPath}`);
+  const sql = fs.readFileSync(sqlPath, 'utf8');
+  for (const column of ['star', 'ereter_star', 'dj_name', 'sp_rank', 'dp_rank']) {
+    const escaped = column.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    assert.match(sql, new RegExp(`\\b${escaped}\\s*=\\s*COALESCE\\(EXCLUDED\\.${escaped},\\s*users\\.${escaped}\\)`, 'i'),
+      `${column} must preserve the existing value with COALESCE(EXCLUDED.${column}, users.${column})`);
+  }
+  assert.match(sql, /p_sp_r_star\s+IS\s+NULL[\s\S]*?p_sp_r_star_model_id\s+IS\s+NULL[\s\S]*?p_sp_r_star_formula_version\s+IS\s+NULL[\s\S]*?users\.sp_r_star/i,
+    'all-null SP r-star tuple must preserve users.sp_r_star');
+});
+
+test('initial profile attempts users once and only radars with numeric mapped data', async (t) => {
+  const cases = [
+    { radar: {}, styles: [] }, { radar: null, styles: [] }, { radar: undefined, styles: [] },
+    { radar: { sp: { NOTES: 1 } }, styles: [0] }, { radar: { dp: { PEAK: 1 } }, styles: [1] },
+  ];
+  for (const { radar, styles } of cases) {
+    await t.test(String(radar), async () => {
+      const calls = [];
+      const db = loadDb(withUploadEnabled(async (url, options) => { calls.push({ url, options }); return response({}); }));
+      assert.equal((await db.upsertInitialUserProfile({ iidx_id: '12345678', notes_radar: radar })).ok, true);
+      assert.equal(calls.filter(({ url }) => /\/rpc\/upsert_user$/.test(url)).length, 1);
+      assert.deepEqual(rpcCalls(calls, 'upsert_user_radar').map(({ options }) => JSON.parse(options.body).p_play_style), styles);
+    });
+  }
+});
+
+test('initial profile continues DP after SP HTTP failure and reports failure', async () => {
+  const styles = [];
+  const db = loadDb(withUploadEnabled(async (url, options) => {
+    if (url.includes('/rpc/upsert_user_radar')) {
+      const style = JSON.parse(options.body).p_play_style;
+      styles.push(style);
+      return style === 0 ? response({}, { ok: false, status: 503 }) : response({});
+    }
+    return response({});
+  }));
+  const result = await db.upsertInitialUserProfile({ iidx_id: '12345678', notes_radar: { sp: { NOTES: 1 }, dp: { PEAK: 2 } } });
+  assert.equal(result.ok, false);
+  assert.match(result.error, /HTTP 503/);
+  assert.deepEqual(styles, [0, 1]);
+});
+
+test('initial profile fails closed for upload disabled and invalid IDs; parent failure skips radars', async () => {
+  let writes = 0;
+  const db = loadDb(async (url) => {
+    if (url.includes('service-status.json')) return response({ uploadEnabled: false });
+    writes++;
+    return response({});
+  });
+  assert.equal((await db.upsertInitialUserProfile({ iidx_id: '12345678' })).ok, false);
+  assert.equal((await db.upsertInitialUserProfile({})).ok, false);
+  assert.equal((await db.upsertInitialUserProfile({ iidx_id: '1234-abcd' })).ok, false);
+  assert.equal(writes, 0);
+
+  const calls = [];
+  const failing = loadDb(withUploadEnabled(async (url, options) => {
+    calls.push({ url, options });
+    return url.includes('/rpc/upsert_user') ? response({}, { ok: false, status: 500 }) : response({});
+  }));
+  const result = await failing.upsertInitialUserProfile({ iidx_id: '12345678', notes_radar: { sp: { NOTES: 1 }, dp: { PEAK: 2 } } });
+  assert.equal(result.ok, false);
+  assert.equal(rpcCalls(calls, 'upsert_user_radar').length, 0);
+});
+
+test('initial users throw returns ok false; final profile still requires star_estimate', async () => {
+  const calls = [];
+  const db = loadDb(withUploadEnabled(async (url, options) => {
+    calls.push({ url, options });
+    if (url.includes('/rpc/upsert_user')) throw new Error('users unavailable');
+    return response({});
+  }));
+  const result = await db.upsertInitialUserProfile({ iidx_id: '12345678', notes_radar: { sp: { NOTES: 1 } } });
+  assert.equal(result.ok, false);
+  assert.match(result.error, /users unavailable/);
+  assert.equal(rpcCalls(calls, 'upsert_user_radar').length, 0);
+  assert.equal((await db.upsertUserProfile({ iidx_id: '12345678' })).ok, false);
+});
+
 test('upsert sends finite and null SP tuples intact', async () => {
   const payloads = [];
   const db = loadDb(withUploadEnabled(async (url, options) => {

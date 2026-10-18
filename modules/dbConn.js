@@ -6,6 +6,7 @@
 //            "친 곡 수"라 신규곡이 들어오면 같이 늘기 때문). 계수/난이도축 재배포 후 재기준화는
 //            래칫을 안 타는 backfillStars.js --apply 로 한다.
 // v0.0.422 — upsertUserProfile 의 SP r★ tuple 검증 실패를 throw 대신 { ok: false, error } 로 반환.
+// v0.0.423 — 초기 users 저장 API 추가 (레이더 전용 입력, 상위 payload 키 allowlist).
 // v0.0.416 — recomputeAndSaveStar(iidxId) 신설. onlyOSR/onlyOSRtoEreter(gist UMD 모듈)로 코어 없이
 //            ★값(star_estimate/native_star) 재계산 + upsert_user 저장. users.date 갱신 → 웹훅이
 //            dump-user 를 깨워 R2 재덤프 + 페르소나 재생성까지 자동 이어짐. CSV Upload 탭 후속 호출용.
@@ -406,6 +407,40 @@ window.OhsorryDb = (function () {
     } catch (e) {
       return { ok: false, error: e.message };
     }
+  }
+
+  // 초기 화면/프로필 단계: users 기본 행을 먼저 만들고, 유효 레이더만 이어서 저장한다.
+  async function upsertInitialUserProfile(payload) {
+    const allowed = new Set(['iidx_id', 'dj_name', 'sp_rank', 'dp_rank', 'notes_radar']);
+    if (!payload || typeof payload !== 'object') return { ok: false, error: 'payload 가 올바르지 않습니다' };
+    const id = typeof payload.iidx_id === 'string' ? payload.iidx_id.replace(/-/g, '') : '';
+    if (!/^\d{8}$/.test(id)) return { ok: false, error: 'iidx_id 형식이 올바르지 않습니다' };
+    const safe = {};
+    for (const key of allowed) if (Object.prototype.hasOwnProperty.call(payload, key)) safe[key] = payload[key];
+    const statusErr = await checkUploadEnabled();
+    if (statusErr) return statusErr;
+    try {
+      await callRpc('upsert_user', {
+        p_iidx_id: id,
+        p_dj_name: safe.dj_name || null,
+        p_star: null,
+        p_ereter_star: null,
+        p_sp_rank: rankToInt(safe.sp_rank),
+        p_dp_rank: rankToInt(safe.dp_rank),
+      });
+    } catch (e) {
+      return { ok: false, error: e && e.message ? e.message : String(e) };
+    }
+    const hasRadarData = (radar) => !!(radar && typeof radar === 'object' &&
+      Object.keys(RADAR_KEY_MAP).some((key) => typeof radar[key] === 'number'));
+    const radar = safe.notes_radar;
+    const errors = [];
+    for (const [style, data] of [[0, radar && radar.sp], [1, radar && radar.dp]]) {
+      if (!hasRadarData(data)) continue;
+      try { await callUpsertRadar(id, style, data); }
+      catch (e) { errors.push(e && e.message ? e.message : String(e)); }
+    }
+    return errors.length ? { ok: false, error: errors.join('; ') } : { ok: true };
   }
 
   // scores bulk upsert — 새 디비 (scores 테이블)
@@ -1156,8 +1191,9 @@ window.OhsorryDb = (function () {
   }
 
   return {
-    VERSION: '0.0.422',
+    VERSION: '0.0.423',
     upsertUserProfile: upsertUserProfile,
+    upsertInitialUserProfile: upsertInitialUserProfile,
     upsertUserChartScores: upsertUserChartScores,
     uploadResult: uploadResult,
     // ★값 재계산 + 저장(onlyOSR/onlyOSRtoEreter) — CSV Upload 등 코어 없이 점수만 바뀐 경우용.
