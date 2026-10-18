@@ -2,6 +2,13 @@
 
 ohSorry 의 변경 이력입니다. 사용방법은 [README.md](README.md) 를 참고하세요.
 
+### 2026-10-18 — 크롤러 로딩 직후 본인 users 행·노트레이더 초기 저장 (calcOhsorryCore v0.0.416 · dbConn v0.0.423 · wrapper v3.5.3, 미배포)
+
+- `ohsorry.js`: 본인 `status.html` 프로필을 받은 즉시 `Core.saveInitialProfile` 을 부른다(결과를 기다리지 않음). 성적 크롤을 시작하지 않고 모달만 띄워도 신규·기존 유저 모두 users 행과 SP/DP 노트레이더가 저장된다. 공식 CSV 에는 레이더 열이 없어 CSV 업로드만 하는 유저는 크롤러를 한 번 띄우면 레이더가 갱신된다(웹 설정 화면 안내와 짝).
+- `dbConn.upsertInitialUserProfile`: `upsert_user` 에 ID·DJ명·단위만 보내고 필수 `p_star`·`p_ereter_star` 는 null — `sql/33` 의 `COALESCE` 로 기존 star·ereter_star·sp_star·sp_r_star 등이 보존된다(테스트가 Admin SQL 원문을 읽어 계약을 확인). 레이더는 `hasRadarData` 통과 스타일만 저장. 라이벌·ID 없음은 skip, 실패는 warn 만 남기고 크롤은 계속.
+- 기존 끝 단계 저장은 그대로다. 초기·끝 저장이 둘 다 users.date 를 갱신해 dump-user 웹훅이 한 번 더 뜰 수 있다(유저별 cancel-in-progress). 스코어 없는 신규 유저도 단위가 있으면 DP 랭킹에 별값 `-` 로 보인다(기존 필터 의미).
+- 테스트: core·db 31/31, 실제 `ohsorry.js` 를 VM 으로 실행하는 하니스로 훅 no-op 변이 검출.
+
 ### 2026-10-17 — SP r★ 를 크롤러에서 산출해 users.sp_r_star 저장 (calcOhsorryCore v0.0.415 · dbConn v0.0.422, 미배포)
 
 - SP 업로드가 끝나면 `make_sp_rate_star_rows` 로 DB 전체 SP 이력을 받아, `spUserRateStar`(R2 `lib/spUserRateStar.js`)와 시드 `spRateStar` 로 SP r★ 를 계산한다. 결과는 `upsert_user` 로 `sp_r_star`·`sp_r_star_model_id`·`sp_r_star_formula_version` 3열에 원자 저장한다. DP r★·`sp_cpi/sp_star` 경로는 불변이다.

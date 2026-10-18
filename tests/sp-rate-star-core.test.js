@@ -122,6 +122,107 @@ function createHarness(options = {}) {
   return { core: context.window.OhsorryCore, calls, context };
 }
 
+// Execute the checked-in wrapper with mocked module loading and a controllable modal.
+function createWrapperHarness(source = fs.readFileSync(path.join(__dirname, '..', 'ohsorry.js'), 'utf8'), options = {}) {
+  let resolveChoice;
+  const choice = new Promise((resolve) => { resolveChoice = resolve; });
+  const calls = { saves: [], computes: [], fetchProfile: 0, warns: [] };
+  const profile = { iidxId: '12-345678', djName: 'Wrapper DJ', spRadar: { NOTES: 1 } };
+  const core = {
+    async fetchProfile(opts) { calls.fetchProfile++; assert.deepEqual(JSON.parse(JSON.stringify(opts)), { isRival: false }); return profile; },
+    saveInitialProfile: options.noSaveMethod ? undefined : (...args) => {
+      calls.saves.push(args);
+      if (options.savePromise) return options.savePromise;
+      if (options.rejectSave) return Promise.reject(new Error('save rejected'));
+      if (options.failSave) { calls.warns.push(['Core initial save failed']); return Promise.resolve({ ok: false }); }
+      return Promise.resolve({ ok: true });
+    },
+    prefetch: async () => ({}),
+    async compute(args) { calls.computes.push(args); return { profile }; },
+    fetchRivalToken: async () => 'rival-token', showDoneList() {},
+  };
+  const doc = { createElement() { return { style: {}, appendChild() {}, addEventListener() {}, setAttribute() {}, remove() {}, value: '', checked: false, disabled: false }; },
+    getElementById() { return null; }, body: { appendChild() {} }, head: { appendChild() {} } };
+  const window = { OhsorryNorm: {}, OhsorryDb: {}, OhsorryCore: core, OhsorryEagateFetch: {} };
+  const context = { window, document: doc, location: { hostname: 'p.eagate.573.jp' }, URL, Date, Promise, console: { log() {}, warn(...a) { calls.warns.push(a); }, error() {} },
+    fetch: async () => ({ ok: true, text: async () => '' }), alert() {}, confirm: () => false, setTimeout(fn) { if (fn) fn(); }, clearTimeout() {} };
+  // Replace modal construction with a stable test seam while retaining the production run path.
+  const instrumented = source.replace('const ui = askFetchOptions();', 'const ui = { choice: __choice, fillProfile() {} };');
+  const safeSource = instrumented;
+  context.__choice = choice;
+  // loadModule remains the real wrapper function; mocked fetch supplies a fresh script that
+  // registers the already prepared module objects in the VM global.
+  context.fetch = async () => ({ ok: true, text: async () => "window.OhsorryNorm={};window.OhsorryDb={};window.OhsorryCore=window.__core;window.OhsorryEagateFetch={};" });
+  window.__core = core;
+  vm.runInNewContext(safeSource, context, { filename: 'ohsorry.js' });
+  const running = Promise.resolve();
+  return { calls, core, resolveChoice, profile, run: window.__dp_run, running };
+}
+
+async function assertWrapperInitialSave(h, id = '12345678') {
+  for (let i = 0; i < 12 && h.calls.fetchProfile === 0; i++) await new Promise((resolve) => setImmediate(resolve));
+  for (let i = 0; i < 12 && h.calls.saves.length === 0 && h.calls.fetchProfile > 0; i++) await new Promise((resolve) => setImmediate(resolve));
+  await Promise.resolve(); await Promise.resolve();
+  assert.equal(h.calls.saves.length, 1);
+  assert.equal(h.calls.computes.length, 0);
+  assert.equal(h.calls.fetchProfile, 1);
+  assert.equal(h.calls.saves[0][0], h.profile);
+  assert.deepEqual(JSON.parse(JSON.stringify(h.calls.saves[0][1])), { isRival: false });
+}
+
+test('actual wrapper starts initial own profile save before choice for new and existing IDs', async () => {
+  for (const targetId of ['12-345678', '12 345678']) {
+    const h = createWrapperHarness();
+    await assertWrapperInitialSave(h);
+    assert.ok(h.calls.saves[0][0].iidxId.replace(/-/g, '') === '12345678');
+    h.resolveChoice({ seriesList: [], playStyle: 'SP', targetId, gameVersion: '2' });
+    await new Promise((r) => setImmediate(r));
+  }
+});
+
+test('wrapper proceeds after initial save rejection, failure, missing hook, and rival choice', async () => {
+  for (const options of [{ rejectSave: true }, { failSave: true }, { noSaveMethod: true }]) {
+    const h = createWrapperHarness(undefined, options);
+    if (options.noSaveMethod) {
+      for (let i = 0; i < 12 && h.calls.fetchProfile === 0; i++) await new Promise((resolve) => setImmediate(resolve));
+      assert.equal(h.calls.saves.length, 0);
+      assert.equal(h.calls.fetchProfile, 1);
+      assert.ok(h.calls.warns.length > 0);
+    } else await assertWrapperInitialSave(h);
+    h.resolveChoice({ seriesList: [], playStyle: 'SP', targetId: '12345678', gameVersion: '2' });
+    await new Promise((r) => setImmediate(r));
+    assert.equal(h.calls.computes.length, 1);
+    if (options.rejectSave || options.noSaveMethod) assert.ok(h.calls.warns.length > 0);
+    else assert.ok(h.calls.warns.length > 0);
+  }
+  const rival = createWrapperHarness();
+  await assertWrapperInitialSave(rival);
+  rival.resolveChoice({ seriesList: [], playStyle: 'SP', targetId: '87654321', gameVersion: '2' });
+  await new Promise((r) => setImmediate(r));
+  assert.equal(rival.calls.saves.length, 1);
+  assert.equal(rival.calls.computes.length, 1);
+});
+
+test('wrapper compute starts while initial save remains unresolved', async () => {
+  let resolveSave;
+  const savePromise = new Promise((resolve) => { resolveSave = resolve; });
+  const h = createWrapperHarness(undefined, { savePromise });
+  await assertWrapperInitialSave(h);
+  h.resolveChoice({ seriesList: [], playStyle: 'SP', targetId: '12345678', gameVersion: '2' });
+  await new Promise((r) => setImmediate(r));
+  assert.equal(h.calls.computes.length, 1);
+  resolveSave({ ok: true });
+});
+
+test('wrapper test assertion detects a no-op initial save mutation', async () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'ohsorry.js'), 'utf8');
+  const original = createWrapperHarness(source);
+  await assertWrapperInitialSave(original);
+  const mutated = source.replace(/Core\.saveInitialProfile\(ownProfile, \{ isRival: false \}\)/, 'undefined');
+  const changed = createWrapperHarness(mutated);
+  await assert.rejects(assertWrapperInitialSave(changed), assert.AssertionError);
+});
+
 async function runSp(options = {}) {
   const h = createHarness(options);
   h.context.window.OhsorryCore.prefetch = async () => ({

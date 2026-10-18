@@ -13,7 +13,7 @@
 // ============================================================
 
 (async function () {
-  const WRAPPER_VERSION = 'v3.5.2';   // 라이벌도 SP/DP 토글 그대로 + IIDX 여러 명 입력 → 완료 리스트
+  const WRAPPER_VERSION = 'v3.5.3';   // 로딩 직후 본인 users 행·레이더 초기 저장 (v3.5.2: 라이벌도 SP/DP 토글 그대로 + IIDX 여러 명 입력 → 완료 리스트)
   const GIST_BASE = 'https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw';
   const CORE_URL     = GIST_BASE + '/calcOhsorryCore.js';
   const DB_URL       = GIST_BASE + '/dbConn.js';
@@ -287,6 +287,14 @@
     let ownProfile = null;
     try { ownProfile = await Core.fetchProfile({ isRival: false }); }
     catch (e) { console.warn('[오소리] 프로필 fetch 실패:', e && e.message); }
+    if (ownProfile) {
+      try {
+        const initialSave = Core.saveInitialProfile(ownProfile, { isRival: false });
+        Promise.resolve(initialSave).catch((e) => console.warn('[오소리] 초기 프로필 저장 실패:', e && e.message ? e.message : e));
+      } catch (e) {
+        console.warn('[오소리] 초기 프로필 저장 실패:', e && e.message ? e.message : e);
+      }
+    }
     ui.fillProfile(ownProfile, Core);
     // 데이터(별값 lib/ereter/textage/rating) 백그라운드 prefetch — 모달 보는 동안 미리 받아 compute 단축
     Core.prefetch().catch(() => {});
