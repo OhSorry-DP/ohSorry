@@ -844,6 +844,7 @@ window.OhsorryCore = {
   let chartScoreRows = null;
   if (profile && profile.iidxId) {
     const iidxIdNorm = profile.iidxId.replace(/-/g, '');
+    const eraterTrueStar = ereterPlayers ? ereterPlayers[iidxIdNorm] : null;
     const nowIso = new Date().toISOString();
     let nPlayedLv12 = 0, fcCount = 0, exhCount = 0, hcCount = 0, nClearedLv12 = 0;
     for (const c of allCharts) {
@@ -869,6 +870,7 @@ window.OhsorryCore = {
     dbPayload = {
       iidx_id: iidxIdNorm,
       dj_name: profile.djName || null,
+      ereter_star: eraterTrueStar != null ? Number(eraterTrueStar) : null,
       sp_rank: profile.spRank || null,
       dp_rank: profile.dpRank || null,
       notes_radar: profileHasRadar

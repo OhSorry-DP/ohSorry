@@ -408,11 +408,15 @@ test('초기 own 프로필 지연·실패에도 compute를 진행하고 rival은
 test('DP는 공식 payload와 이전 scores 조회 없이 C04 완료 신호에 맡긴다', async () => {
   const h = createHarness();
   let uploaded;
-  h.core.prefetch = async () => ({ ereterData: [], ereterPlayers: {}, textageSongs: {}, ratingData: { ratings: [] }, ohSorryRatings: [], spRateStar: ratingSeed, onlyOSR2eLib: null, userRateStarLib: require(USER_STAR_PATH), spUserRateStarLib: null, cpiData: null, spSkillLib: null });
+  h.context.window.__ohsorryEreterCache.players['12345678'] = 12.75;
   h.context.window.OhsorryEagateFetch.collectCharts = async () => ({ ok: true, charts: [{ title: 'Session only', diff: 'ANOTHER', gameLevel: 12, exScore: 250, lampNum: 5 }], pageCount: 1 });
   h.context.window.OhsorryDb.uploadResult = async (result) => { uploaded = result; return { profile: { ok: true }, scores: { ok: true, inserted: 1 }, dump: { ok: true } }; };
   await h.core.compute({ playStyle: 'DP', mode: 'own', gameVersion: '33', seriesList: [0], profile: { iidxId: '12345678', djName: 'Tester', spRank: '七段', spRadar: { NOTES: 1 } }, suppressDone: true });
-  assert.deepEqual(Object.keys(uploaded.dbPayload).sort(), ['dj_name', 'dp_rank', 'iidx_id', 'notes_radar', 'sp_rank']);
+  assert.equal(uploaded.dbPayload.ereter_star, 12.75);
+  assert.equal(Object.hasOwn(uploaded.dbPayload, 'star_estimate'), false);
+  assert.equal(Object.hasOwn(uploaded.dbPayload, 'native_star'), false);
+  assert.equal(Object.hasOwn(uploaded.dbPayload, 'r_star'), false);
+  assert.deepEqual(Object.keys(uploaded.dbPayload).sort(), ['dj_name', 'dp_rank', 'ereter_star', 'iidx_id', 'notes_radar', 'sp_rank']);
   assert.equal(h.calls.fetch.length, 0);
   assert.equal(h.calls.notify || 0, 0);
 });
