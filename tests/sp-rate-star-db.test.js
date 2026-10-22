@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -15,21 +15,148 @@ function response(body, { ok = true, status = 200 } = {}) {
 
 function loadDb(handler, uploadEnabled = true) {
   const calls = [];
+  const warnings = [];
+  const logs = [];
   const context = {
     window: { OhsorryNorm: { norm: (value) => String(value).toLowerCase() } },
     fetch: async (url, options = {}) => {
       calls.push({ url, options });
       if (url.includes('service-status.json')) return response({ uploadEnabled });
-      return handler(url, options);
+      if (typeof handler !== 'function') throw new Error(`unhandled fetch URL: ${url}`);
+      const result = await handler(url, options);
+      if (result === undefined) throw new Error(`unhandled fetch URL: ${url}`);
+      return result;
     },
-    console: { log() {}, warn() {}, error() {} }, Date, Map, Set, Promise, Number, String,
-    Object, Array, Math, JSON, isFinite, encodeURIComponent,
+    console: { log(...args) { logs.push(args); }, warn(...args) { warnings.push(args); }, error(...args) { warnings.push(args); } },
+    Date, Map, Set, Promise, Number, String, BigInt, TypeError, Error,
+    Object, Array, Math, JSON, isFinite, encodeURIComponent, URL, setTimeout, clearTimeout,
   };
   vm.runInNewContext(fs.readFileSync(DB_CONN, 'utf8'), context, { filename: DB_CONN });
-  return { db: context.window.OhsorryDb, calls };
+  return { db: context.window.OhsorryDb, calls, warnings, logs };
 }
 
 function rpc(calls, name) { return calls.filter(({ url }) => url.endsWith('/rpc/' + name)); }
+
+function scoreRow(overrides = {}) {
+  return { iidx_id: '89388691', title: 'Filter Song', diff: 'ANOTHER', lamp: 5, ex_score: 2100,
+    played_version: 33, play_style: 1, date: '2026-10-23T01:02:03.123457+00:00', date_kst: '2026-10-23',
+    bp: 0, note_count: 1500, ...overrides };
+}
+
+const HIST_ROW = [100, 3, 5, 2000, 33, '2026-10-22T01:02:03.123456+00:00', '2026-10-22', 1, null, 1500];
+function capturedScoreBodies(calls) { return rpc(calls, 'upsert_scores').map(({ options }) => JSON.parse(options.body)); }
+function validBulkRow(i) { return scoreRow({ title: `Song ${i}`, ex_score: 100 }); }
+
+test('hist snapshot is shared per user within an upload and refreshed on the next call', async () => {
+  const reads = new Map();
+  let currentHist = [HIST_ROW];
+  const { db, calls } = loadDb(async (url) => {
+    if (url.includes('/rest/v1/songs')) return response([{ song_id: 100, title: 'Filter Song', ac: 1 }, { song_id: 101, title: 'Other Song', ac: 1 }]);
+    if (url.startsWith('https://data.iidx.in/hist/')) {
+      const id = url.split('/').pop().replace('.json', ''); reads.set(id, (reads.get(id) || 0) + 1);
+      return id === '89388691' ? response(currentHist) : response(null, { ok: false, status: 404 });
+    }
+    return response(null);
+  });
+  const result = await db.upsertUserChartScores([scoreRow(), scoreRow({ title: 'Other Song', ex_score: 100 }), scoreRow({ title: 'Other Song', ex_score: 110 })]);
+  assert.equal(result.inserted, 2);
+  assert.deepEqual(capturedScoreBodies(calls).map((x) => x.p_rows.length), [2]);
+  assert.equal(reads.get('89388691'), 1);
+  currentHist = [...currentHist, [100, 3, 5, 2100, 33, '2026-10-23T01:02:03.123457+00:00', '2026-10-23', 1, 0, 1500]];
+  const next = await db.upsertUserChartScores([scoreRow()]);
+  assert.equal(next.ok, true, JSON.stringify(next)); assert.equal(next.unchanged, true);
+  assert.equal(reads.get('89388691'), 2);
+  assert.equal(rpc(calls, 'upsert_scores').length, 1);
+});
+
+test('hist transport, JSON, schema, and date failures warn and send all rows', async () => {
+  const cases = [
+    ['500', response(null, { ok: false, status: 500 }), /HTTP 500/], ['network', null, /offline/], ['json', null, /bad JSON/],
+    ['schema', response({ scores: [], history: [] }), /array/],
+    ['date', response([[100, 3, 5, 2000, 33, 'bad-date', '2026-10-22', 1, null, 1500]]), /date/],
+  ];
+  for (const [kind, hist, reason] of cases) {
+    const payloads = [];
+    const { db, warnings } = loadDb(async (url, options) => {
+      if (url.includes('/rest/v1/songs')) return response([{ song_id: 100, title: 'Filter Song', ac: 1 }]);
+      if (url.startsWith('https://data.iidx.in/hist/')) {
+        if (kind === 'network') throw new Error('offline');
+        if (kind === 'json') return { ok: true, status: 200, async json() { throw new Error('bad JSON'); } };
+        return hist;
+      }
+      if (url.endsWith('/rpc/upsert_scores')) { payloads.push(JSON.parse(options.body)); return response(null); }
+      return response(null);
+    });
+    const result = await db.upsertUserChartScores([scoreRow()]);
+    assert.equal(result.inserted, 1, kind);
+    assert.equal(payloads[0].p_rows.length, 1, kind);
+    assert.ok(warnings.some((args) => reason.test(args.join(' '))), kind);
+  }
+});
+
+test('late 33 uploads, NULL note_count, bp zero, and source timestamp survive in RPC payload', async () => {
+  const bodies = [];
+  const { db } = loadDb(async (url, options) => {
+    if (url.includes('/rest/v1/songs')) return response([{ song_id: 100, title: 'Filter Song', ac: 1 }]);
+    if (url.startsWith('https://data.iidx.in/hist/')) return response([[100, 3, 5, 2100, 34, '2026-10-22T01:02:03.123456+00:00', '2026-10-22', 1, null, 1500]]);
+    if (url.endsWith('/rpc/upsert_scores')) { bodies.push(JSON.parse(options.body)); return response(null); }
+    return response(null);
+  });
+  const row = scoreRow({ ex_score: 2100, bp: 0, note_count: null });
+  assert.equal((await db.upsertUserChartScores([row])).inserted, 1);
+  assert.deepEqual([bodies[0].p_rows[0].played_version, bodies[0].p_rows[0].bp, bodies[0].p_rows[0].note_count, bodies[0].p_rows[0].date], [33, 0, null, row.date]);
+});
+
+test('unchanged differs from empty and completion is sent only after inserted rows', async () => {
+  const { db, calls } = loadDb(async (url) => {
+    if (url.includes('/rest/v1/songs')) return response([{ song_id: 100, title: 'Filter Song', ac: 1 }]);
+    if (url.startsWith('https://data.iidx.in/hist/')) return response([HIST_ROW]);
+    return response(null);
+  });
+  let result = await db.uploadResult({ dbPayload: { iidx_id: '89388691', dj_name: 'DJ' }, chartScoreRows: [scoreRow({
+    ex_score: 2000, date: HIST_ROW[5], date_kst: HIST_ROW[6], bp: null, note_count: HIST_ROW[9],
+  })] });
+  assert.equal(result.profile.ok, true); assert.equal(result.scores.ok, true); assert.equal(result.scores.unchanged, true);
+  assert.equal(result.scores.inserted, 0); assert.equal(result.dump, null); assert.equal(rpc(calls, 'upsert_scores').length, 0);
+  result = await db.uploadResult({ dbPayload: { iidx_id: '89388691' }, chartScoreRows: [] });
+  assert.equal(result.scores.empty, true); assert.equal(result.dump, null); assert.equal(rpc(calls, 'upsert_scores').length, 0);
+  assert.equal(rpc(calls, 'upsert_user').length, 2); assert.equal(rpc(calls, 'upsert_user_radar').length, 0);
+  const sending = loadDb(async (url) => url.startsWith('https://data.iidx.in/hist/') ? response([]) : url.includes('/rest/v1/songs') ? response([{ song_id: 100, title: 'Filter Song', ac: 1 }]) : response(null));
+  result = await sending.db.uploadResult({ dbPayload: { iidx_id: '89388691' }, chartScoreRows: [scoreRow()] });
+  assert.equal(result.scores.inserted, 1); assert.equal(result.dump.ok, true);
+});
+
+test('filtered 1001 rows preserve two chunk failure accounting', async () => {
+  const bodies = []; let scoreCalls = 0;
+  const { db } = loadDb(async (url, options) => {
+    if (url.includes('/rest/v1/songs')) {
+      const offset = Number(new URL(url).searchParams.get('offset'));
+      return response(Array.from({ length: Math.min(1000, 1001 - offset) }, (_, i) => ({ song_id: offset + i + 1, title: `Song ${offset + i}`, ac: 1 })));
+    }
+    if (url.startsWith('https://data.iidx.in/hist/')) return response([]);
+    if (url.endsWith('/rpc/upsert_scores')) { bodies.push(JSON.parse(options.body)); return ++scoreCalls === 1 ? response(null) : response(null, { ok: false, status: 500 }); }
+    return response(null);
+  });
+  const result = await db.upsertUserChartScores(Array.from({ length: 1001 }, (_, i) => validBulkRow(i)));
+  assert.equal(result.ok, false); assert.equal(result.inserted, 1000); assert.equal(result.failedChunk, 2); assert.equal(result.totalChunks, 2);
+  assert.deepEqual(bodies.map((x) => x.p_rows.length), [1000, 1]);
+});
+
+test('ac and legen bit supplementation checks ensure_song ID and preserves series grouping', async () => {
+  const ensure = [];
+  const { db, calls, warnings } = loadDb(async (url, options) => {
+    if (url.includes('/rest/v1/songs')) return response([{ song_id: 100, title: 'Filter Song', ac: 0, legen: 0 }, { song_id: 101, title: 'Leg Song', ac: 0, legen: 0 }]);
+    if (url.startsWith('https://data.iidx.in/hist/')) return response([HIST_ROW, [101, 4, 5, 2000, 33, HIST_ROW[5], HIST_ROW[6], 1, null, 1500]]);
+    if (url.endsWith('/rpc/ensure_song')) { ensure.push(JSON.parse(options.body)); return response(999); }
+    return response(null);
+  });
+  const result = await db.upsertUserChartScores([scoreRow({ title: 'Leg Song', diff: 'LEGGENDARIA', ex_score: 2000, bp: null, seriesNo: 7 })]);
+  assert.equal(result.ok, true, JSON.stringify(result)); assert.equal(result.unchanged, true); assert.equal(ensure.length, 1);
+  assert.ok(warnings.some((args) => args.join(' ').includes('ID mismatch')));
+  const bump = rpc(calls, 'bump_song_series'); assert.equal(bump.length, 1);
+  assert.deepEqual(JSON.parse(bump[0].options.body).p_song_ids, [101]);
+  assert.equal(rpc(calls, 'upsert_scores').length, 0); assert.equal(calls.some(({ url }) => url.includes('/rest/v1/scores')), false);
+});
 
 test('공식값이 섞인 프로필도 공식 인자 없이 저장하고 비공식 plays와 원본 radar를 보낸다', async () => {
   const { db, calls } = loadDb(async () => response(null));
