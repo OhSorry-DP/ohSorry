@@ -559,6 +559,7 @@ window.OhsorryDb = (function () {
       const scoreRows = [...dedup.values()];
       // ex_score 가 없거나 0인 행은 실제 플레이 점수가 아니므로 업로드에서 제외한다.
       const validScoreRows = scoreRows.filter((row) => Number.isFinite(row.ex_score) && row.ex_score > 0);
+      const validInputCount = validScoreRows.length;
       const excludedScoreCount = scoreRows.length - validScoreRows.length;
       if (excludedScoreCount > 0) {
         console.log(`[OhsorryDb] ex_score 0 이하/없음 ${excludedScoreCount}건 제외`);
@@ -703,6 +704,39 @@ window.OhsorryDb = (function () {
         }
       }
       const filteredScoreRows = validScoreRows.filter((row) => kept.has(row));
+      const supplementation = new Map();
+      for (const row of validScoreRows) {
+        if (kept.has(row)) continue;
+        let matched = null;
+        for (const candidates of songMap.values()) {
+          matched = candidates.find((candidate) => candidate.song_id === row.song_id);
+          if (matched) break;
+        }
+        if (!matched || !matched.title) {
+          console.warn(`[OhsorryDb] excluded score bit supplement skipped song_id=${row.song_id}: song cache title unavailable`);
+          continue;
+        }
+        const bit = row.played_version === 0 ? 2 : 1;
+        const isLeg = row.diff === 4;
+        const field = isLeg ? 'legen' : 'ac';
+        if (((matched[field] || 0) & bit) === bit) continue;
+        const key = `${row.song_id}|${field}`;
+        const pending = supplementation.get(key);
+        if (pending) pending.bit |= bit;
+        else supplementation.set(key, { songId: row.song_id, title: matched.title, matched, field, bit });
+      }
+      for (const { songId, title, matched, field, bit } of supplementation.values()) {
+        try {
+          const value = await callRpc('ensure_song', { p_title: title, p_textage_song_id: null,
+            p_ac: field === 'ac' ? bit : null, p_legen: field === 'legen' ? bit : null });
+          const id = typeof value === 'number' ? value : parseInt(value, 10);
+          if (id !== songId) throw new Error(`ensure_song ID mismatch (${id} != ${songId})`);
+          matched[field] = (matched[field] || 0) | bit;
+        } catch (error) {
+          console.warn(`[OhsorryDb] excluded score bit supplement failed song_id=${songId}: ${error.message}`);
+        }
+      }
+      console.log(`[OhsorryDb] score rows original=${rows.length} dedup=${scoreRows.length} valid=${validInputCount} excluded=${excludedScoreCount} sent=${filteredScoreRows.length}`);
       const SCORE_UPSERT_CHUNK_SIZE = 1000;
       const chunkTotal = Math.ceil(filteredScoreRows.length / SCORE_UPSERT_CHUNK_SIZE);
       let inserted = 0;
@@ -735,7 +769,9 @@ window.OhsorryDb = (function () {
       if (seriesGroups.size > 0) {
         console.log(`[OhsorryDb] songs.series_no 갱신: ${seriesBumped}건 (${seriesGroups.size}시리즈)`);
       }
-      return { ok: true, unmatched, inserted, autoEnsured };
+      return filteredScoreRows.length === 0
+        ? { ok: true, unmatched, inserted, autoEnsured, unchanged: true }
+        : { ok: true, unmatched, inserted, autoEnsured };
     } catch (e) {
       return { ok: false, error: e.message };
     }
@@ -921,6 +957,7 @@ window.OhsorryDb = (function () {
         try {
           out.scores = await upsertUserChartScores(result.chartScoreRows);
           if (out.scores && out.scores.empty) console.warn('[OhsorryDb] chart scores 0건 — 저장할 성적이 없었습니다 (성적 비공개/파싱 실패 의심)');
+          else if (out.scores && out.scores.unchanged) console.log('[OhsorryDb] chart scores unchanged (hist filter removed all valid rows)');
           else if (out.scores && out.scores.ok) console.log('[OhsorryDb] chart scores upsert 성공');
           else console.warn('[OhsorryDb] chart scores upsert 실패:', out.scores && out.scores.error);
         } catch (e) {
