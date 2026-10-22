@@ -1,6 +1,12 @@
-﻿# 짭레터넷 (ohSorry) 변경 이력
+# 짭레터넷 (ohSorry) 변경 이력
 
 ohSorry 의 변경 이력입니다. 사용방법은 [README.md](README.md) 를 참고하세요.
+
+### 2026-10-23 — 버퍼화 4단계: R2 hist 기준 업로드 필터 (미배포)
+
+- dbConn 에 정본 `score-history.mjs` `filterScoreHistoryRows` 의 동기 사본을 반영해 크롤러·웹 CSV 가 공유한다. NULL 보충·당일 교체·버전 비교·33 늦은 업로드를 유지한다. 빈 hist·404·조회 실패 시 전체 전송하고 업로더 별칭 미적용, 0행이어도 프로필·비트·series 후처리를 유지한다. 열린 구 gist 세션의 전환도 확인한다.
+- 🔴 기존 3단계 배포 안내 대신 [data-serving.md](../docs/data-serving.md)의 「4단계 결과」를 따른다. 빈 별칭표 선게시 → data(누적 OFF) → gist → Web → Admin → INF → 구 업로더 비중 확인·SQL 03 → 01 → 누적 ON·운영 읽기 전용 대조 → 다음 daily snapshot 직후 89388691 시범 삭제 순이다. compact cron 중단으로 DB 가 증가한다. 운영 배포·삭제는 대기.
+- 랭킹·1위 R2 집계(R01~R10)·전 유저 삭제 확대·필터 O(n²) 최적화(3천 행 1.9초)·삭제 후 재유입 행 수 측정은 후속이다. 버전 bump 없음.
 
 ### 2026-10-22 — Supabase scores 버퍼화 3단계: 업로드 직후 공식 계산 제거 (미배포)
 
