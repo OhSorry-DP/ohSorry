@@ -357,20 +357,6 @@ window.OhsorryDb = (function () {
     if (!payload || !payload.iidx_id) {
       return { ok: false, error: 'iidx_id 가 없습니다' };
     }
-    if (payload.star_estimate === undefined) {
-      return { ok: false, error: 'star_estimate 값이 없어 프로필 저장을 중단합니다' };
-    }
-    const hasSpRStarModel = Object.prototype.hasOwnProperty.call(payload, 'sp_r_star_model_id');
-    const hasSpRStarFormula = Object.prototype.hasOwnProperty.call(payload, 'sp_r_star_formula_version');
-    const hasSpRStar = Object.prototype.hasOwnProperty.call(payload, 'sp_r_star');
-    if (hasSpRStarModel || hasSpRStarFormula || hasSpRStar) {
-      if (!hasSpRStarModel || !hasSpRStarFormula || !payload.sp_r_star_model_id || !payload.sp_r_star_formula_version) {
-        return { ok: false, error: 'SP r★ 값에 모델 ID·계산식 버전이 없어 프로필 저장을 중단합니다' };
-      }
-      if (payload.sp_r_star != null && (typeof payload.sp_r_star !== 'number' || !Number.isFinite(payload.sp_r_star))) {
-        return { ok: false, error: 'SP r★ 값이 유한한 숫자가 아니어서 프로필 저장을 중단합니다' };
-      }
-    }
     const statusErr = await checkUploadEnabled();
     if (statusErr) return statusErr;
     try {
@@ -378,20 +364,12 @@ window.OhsorryDb = (function () {
       const userRpcPayload = {
         p_iidx_id: payload.iidx_id,
         p_dj_name: payload.dj_name || null,
-        p_star: payload.star_estimate != null ? Number(payload.star_estimate) : null,
-        p_ereter_star: payload.ereter_star != null ? Number(payload.ereter_star) : null,
+        p_star: null,
+        p_ereter_star: null,
         p_sp_rank: rankToInt(payload.sp_rank),
         p_dp_rank: rankToInt(payload.dp_rank),
-        p_native_star: payload.native_star != null ? Number(payload.native_star) : null,  // v3.4.0
-        p_sp_cpi: payload.sp_cpi != null ? Math.round(Number(payload.sp_cpi)) : null,      // SP 대표 실력값(CPI). null → COALESCE 보존
-        p_sp_star: payload.sp_star != null ? Number(payload.sp_star) : null,               // 発狂★相当. SP 크롤/INF 만 채움
-        p_r_star: payload.r_star != null ? Number(payload.r_star) : null,                  // 사용자 r★. null → COALESCE 보존
       };
-      if (hasSpRStarModel) {
-        userRpcPayload.p_sp_r_star = payload.sp_r_star;
-        userRpcPayload.p_sp_r_star_model_id = payload.sp_r_star_model_id;
-        userRpcPayload.p_sp_r_star_formula_version = payload.sp_r_star_formula_version;
-      }
+      if (Object.prototype.hasOwnProperty.call(payload, 'plays')) userRpcPayload.p_plays = payload.plays;
       await callRpc('upsert_user', userRpcPayload);
       // 2. user_radars (SP / DP 각각, 있을 때만)
       const radar = payload.notes_radar;
@@ -728,57 +706,24 @@ window.OhsorryDb = (function () {
   //   ereter_star(ereter.net 실측값, EXCLUDED 무조건 덮어쓰기 컬럼)는 여기서 재계산 불가 — fetchUserStars 로
   //   기존값을 그대로 재전송해 보존(위 fetchUserStars 와 동일 이유).
   const ONLYOSR_URL = 'https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw/onlyOSR.js';
-  const OSR135_URL = 'https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw/OSR13.5%2B.js';
-  const ONLYOSR_TO_ERETER_URL = 'https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw/onlyOSRtoEreter.js';
-  const RATING_DATA_URL = 'https://gist.githubusercontent.com/OhSorry-DP/c3da608194c44f431abd2f1a7a4a9f5e/raw/ohSorryRating.json';
-  const DIFF_INT_TO_STR = { 0: 'BEGINNER', 1: 'NORMAL', 2: 'HYPER', 3: 'ANOTHER', 4: 'LEGGENDARIA' };
-  let onlyOsrLoaded = false;
-  async function ensureOnlyOsrLoaded() {
-    if (onlyOsrLoaded && window.onlyOSR && window.OSR135 && window.onlyOSRtoEreter) return;
-    // 순서 중요 — onlyOSRtoEreter.js 가 evaluate 되는 순간(top-level const) window.onlyOSR/window.OSR135 를
-    //   바로 참조하므로, 그 둘을 먼저 확실히 로드한 뒤 onlyOSRtoEreter 를 eval 해야 한다.
-    const [osrText, osr135Text, o2eText] = await Promise.all([
-      fetch(ONLYOSR_URL, { cache: 'default' }).then((r) => { if (!r.ok) throw new Error('onlyOSR HTTP ' + r.status); return r.text(); }),
-      fetch(OSR135_URL, { cache: 'default' }).then((r) => { if (!r.ok) throw new Error('OSR13.5+ HTTP ' + r.status); return r.text(); }),
-      fetch(ONLYOSR_TO_ERETER_URL, { cache: 'default' }).then((r) => { if (!r.ok) throw new Error('onlyOSRtoEreter HTTP ' + r.status); return r.text(); }),
-    ]);
-    // eslint-disable-next-line no-eval
-    if (!window.onlyOSR) (0, eval)(osrText);
-    // eslint-disable-next-line no-eval
-    if (!window.OSR135) (0, eval)(osr135Text);
-    // eslint-disable-next-line no-eval
-    if (!window.onlyOSRtoEreter) (0, eval)(o2eText);
-    if (!window.onlyOSR || !window.OSR135 || !window.onlyOSRtoEreter) throw new Error('onlyOSR/OSR135/onlyOSRtoEreter 전역 등록 실패');
-    onlyOsrLoaded = true;
-  }
   async function recomputeAndSaveStar(iidxId) {
-    const id = String(iidxId || '').trim().replace(/-/g, '');
-    if (!id) return { ok: false, error: 'iidx_id 가 없습니다' };
+    const signal = await notifyUploadComplete(iidxId);
+    return { ...signal, pending: true };
+  }
+
+  async function notifyUploadComplete(iidxId) {
+    const id = typeof iidxId === 'string' ? iidxId.replace(/-/g, '') : '';
+    if (!/^\d{8}$/.test(id)) return { ok: false, error: 'iidx_id 형식이 올바르지 않습니다' };
+    const statusErr = await checkUploadEnabled();
+    if (statusErr) return statusErr;
     try {
-      const [, ratingData, gridRows, prevStars] = await Promise.all([
-        ensureOnlyOsrLoaded(),
-        fetch(RATING_DATA_URL + '?t=' + Date.now(), { cache: 'no-store' }).then((r) => { if (!r.ok) throw new Error('ohSorryRating.json HTTP ' + r.status); return r.json(); }),
-        fetchGridRows(id),   // DP 전체(all charts, play_style 기본 1) — CSV 로 방금 갱신된 값 포함
-        fetchUserStars(id),
-      ]);
-      const charts = gridRows
-        .filter((r) => r && typeof r.diff === 'number' && DIFF_INT_TO_STR[r.diff] && r.title)
-        .map((r) => ({ title: r.title, diff: DIFF_INT_TO_STR[r.diff], lampNum: typeof r.lamp === 'number' ? r.lamp : 0 }));
-      if (charts.length === 0) return { ok: false, error: '재계산할 차트 없음' };
-      if (!prevStars.ok) return { ok: false, error: '기존 star/ereter_star 조회 실패' };
-      //   4번째 인자 opts.prevStar = 단조 래칫(기존 star 아래로 안 내려감). ereterData 는 여기선 미사용.
-      const result = window.onlyOSRtoEreter.inferEreter(charts, ratingData, null, { prevStar: prevStars.star });
-      if (result.ereterStar == null) return { ok: false, error: result.reason || '별값 산출 불가(표본 부족)' };
-      const profileRes = await upsertUserProfile({
-        iidx_id: id,
-        star_estimate: result.ereterStar,
-        native_star: result.ohsorryStar,
-        ereter_star: prevStars.ereter_star,   // 무조건 덮어쓰기 컬럼 — 기존값 보존
+      await callRpc('upsert_user', {
+        p_iidx_id: id, p_dj_name: null, p_star: null, p_ereter_star: null,
+        p_sp_rank: null, p_dp_rank: null,
       });
-      if (!profileRes.ok) return { ok: false, error: profileRes.error };
-      return { ok: true, star: result.ereterStar, nativeStar: result.ohsorryStar, nFit12: result.nFit12, reason: result.reason };
+      return { ok: true };
     } catch (e) {
-      return { ok: false, error: e && e.message };
+      return { ok: false, error: e && e.message ? e.message : String(e) };
     }
   }
 
@@ -807,7 +752,7 @@ window.OhsorryDb = (function () {
       return { skipped: true, reason: 'no dbPayload' };
     }
 
-    const out = { profile: null, scores: null };
+    const out = { profile: null, scores: null, dump: null };
 
     // 3. 유저 프로필 + radar upsert (upsert_user + upsert_user_radar SP/DP).
     try {
@@ -839,31 +784,10 @@ window.OhsorryDb = (function () {
       }
     }
 
-    // 5. 사용자 패턴 점수 (quantile score 평균) upsert — feature-scores-slim.json (gist) 활용.
-    //    plays 차트 (exScore > 0) 마다 precomputed quantile score (0~100) lookup → feature 별 평균.
-    //    score=0 인 곡은 분모 제외 (CHARGE/SOF-LAN baseline + 다른 feature 의 raw=0 곡).
     const iidxId = result.dbPayload && result.dbPayload.iidx_id;
-    if (iidxId) {
-      try {
-        const vec = await computePatternScoreVec(iidxId);
-        if (vec) {
-          if (await callUpsertFeatureScore(iidxId, vec)) console.log('[OhsorryDb] feature score upsert 성공 (NOTES=' + vec.NOTES.toFixed(1) + ' charts=' + vec.__count + ')');
-        } else {
-          console.warn('[OhsorryDb] pattern 점수 계산 skip (feature-scores fetch 실패 또는 plays 차트 부족)');
-        }
-      } catch (e) {
-        console.warn('[OhsorryDb] pattern 점수 계산/upsert 예외:', e && e.message);
-      }
-      // 5b. SP 피쳐 스코어 — DB 에 SP 채보 점수(play_style=0)가 있는 유저만. 없으면 null → 조용히 skip.
-      //     DP 와 별개 row(play_style=0)라 서로 덮어쓰지 않는다. DP 와 독립 try — SP 실패가 DP 결과에 영향 없게.
-      try {
-        const spVec = await computeSpPatternScoreVec(iidxId);
-        if (spVec) {
-          if (await callUpsertFeatureScore(iidxId, spVec, 0)) console.log('[OhsorryDb] SP feature score upsert 성공 (NOTES=' + spVec.NOTES.toFixed(1) + ' charts=' + spVec.__count + ')');
-        }
-      } catch (e) {
-        console.warn('[OhsorryDb] SP pattern 점수 계산/upsert 예외:', e && e.message);
-      }
+    const inserted = out.scores && Number(out.scores.inserted) || 0;
+    if (inserted > 0) {
+      out.dump = await notifyUploadComplete(iidxId);
     }
     return out;
   }
@@ -962,26 +886,7 @@ window.OhsorryDb = (function () {
   //   PostgREST RPC 는 기본 max_rows=1000. plays 많은 유저는 한 번에 다 못 받으므로
   //   ?limit=&offset= 페이지네이션 (ohSorryWeb api.js / backfill-pattern-score.js 와 동일 패턴).
   //   playStyle 을 넘기면 p_play_style 인자 전송(0=SP). 생략 시 미전송 → RPC DEFAULT 1(DP), 기존 호출과 동일.
-  async function fetchGridRows(iidxId, playStyle) {
-    const pageSize = 1000;
-    const rows = [];
-    let offset = 0;
-    for (;;) {
-      const body = { p_iidx_id: iidxId };
-      if (playStyle != null) body.p_play_style = playStyle;
-      const res = await fetch(
-        SUPABASE_URL + `/rest/v1/rpc/make_grid_data?limit=${pageSize}&offset=${offset}`,
-        { method: 'POST', headers: HEADERS, body: JSON.stringify(body) },
-      );
-      if (!res.ok) throw new Error('make_grid_data HTTP ' + res.status);
-      const page = await res.json();
-      if (!Array.isArray(page) || page.length === 0) break;
-      rows.push(...page);
-      if (page.length < pageSize) break;
-      offset += pageSize;
-    }
-    return rows;
-  }
+  async function fetchGridRows() { throw new Error('scores grid reads are retired'); }
 
   // make_grid_data 로 유저의 supabase 저장 차트 받아 → rows → entries 어댑터 → 공용 kernel.
   //   1. chart 의 36 feature quantile score (0~100) lookup
@@ -1152,42 +1057,11 @@ window.OhsorryDb = (function () {
   //   identity 와 제공된 레벨을 보존해 정본 자산의 key/textage/variant 및 SP12 membership 으로 판정한다.
   const SP_STAR_DIFF_STR = { 0: 'BEGINNER', 1: 'NORMAL', 2: 'HYPER', 3: 'ANOTHER', 4: 'LEGGENDARIA' };
   async function fetchSpChartsForStar(iidxId) {
-    const rows = await fetchGridRows(iidxId, 0);
-    const charts = [];
-    for (const r of rows) {
-      if (!r || !r.title) continue;
-      const diff = SP_STAR_DIFF_STR[r.diff];
-      if (!diff) continue;
-      const chart = { title: r.title, diff: diff, lampNum: r.lamp || 0 };
-      if (r.textage_song_id != null) chart.textageId = String(r.textage_song_id);
-      if (r.variant != null) chart.variant = r.variant;
-      if (r.key != null) chart.key = r.key;
-      const level = r.game_level != null ? r.game_level : r.gameLevel;
-      chart.gameLevel = level != null && Number.isFinite(Number(level)) ? Number(level) : 12; // make_grid_data 는 레벨이 없다 — CPI 경로(computeUserSpCpi)의 SP12 전제 유지, ★ 는 master membership 으로 재판정
-      if (r.source != null) chart.source = r.source;
-      charts.push(chart);
-    }
-    return charts;
+    throw new Error('fetchSpChartsForStar is retired');
   }
 
   async function fetchSpRateStarRows(iidxId) {
-    const pageSize = 1000;
-    const rows = [];
-    let offset = 0;
-    for (;;) {
-      const res = await fetch(
-        SUPABASE_URL + `/rest/v1/rpc/make_sp_rate_star_rows?limit=${pageSize}&offset=${offset}&order=score_id.asc`,
-        { method: 'POST', headers: HEADERS, body: JSON.stringify({ p_iidx_id: iidxId }) },
-      );
-      if (!res.ok) throw new Error('make_sp_rate_star_rows HTTP ' + res.status);
-      const page = await res.json();
-      if (!Array.isArray(page)) throw new Error('make_sp_rate_star_rows returned non-array');
-      if (page.length === 0) break;
-      rows.push(...page);
-      if (page.length < pageSize) break;
-      offset += pageSize;
-    }
-    return rows;
+    throw new Error('fetchSpRateStarRows is retired');
   }
 
   return {
@@ -1199,13 +1073,10 @@ window.OhsorryDb = (function () {
     // ★값 재계산 + 저장(onlyOSR/onlyOSRtoEreter) — CSV Upload 등 코어 없이 점수만 바뀐 경우용.
     //   upsert_user 호출이 users.date 를 갱신 → 웹훅이 dump-user 를 깨워 페르소나까지 자동 재생성.
     recomputeAndSaveStar: recomputeAndSaveStar,
+    notifyUploadComplete: notifyUploadComplete,
     // SP 피쳐 스코어 계산+적재 (play_style=0). uploadResult 5b 가 자동 호출하지만,
     //   SP 전용 경량 경로(calcOhsorryCore SP 크롤)처럼 uploadResult 를 안 타는 흐름에서 직접 부를 수 있게 노출.
-    upsertSpPatternScore: async function (iidxId) {
-      const vec = await computeSpPatternScoreVec(iidxId);
-      if (!vec) return null;
-      return (await callUpsertFeatureScore(iidxId, vec, 0)) ? vec : null;
-    },
+    upsertSpPatternScore: async function () { return null; },
     // SP 별값 재계산용 — DB 저장 SP 기록 전체를 spSkillCpi 입력 포맷으로 반환(세션 크롤분만 쓰지 않기 위함).
     fetchSpChartsForStar: fetchSpChartsForStar,
     fetchSpRateStarRows: fetchSpRateStarRows,
