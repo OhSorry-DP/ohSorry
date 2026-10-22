@@ -674,7 +674,7 @@ window.OhsorryDb = (function () {
       for (const row of validScoreRows) {
         if (!byId.has(row.iidx_id)) byId.set(row.iidx_id, []);
         const dateKst = row.date_kst || (typeof row.date === 'string'
-          ? new Date(Number(instant(row.date) / 1000n + 9n * 3600000000n)).toISOString().slice(0, 10) : undefined);
+          ? new Date(Number(instant(row.date) / 1000n) + 9 * 3600000).toISOString().slice(0, 10) : undefined);
         byId.get(row.iidx_id).push([row.song_id, row.diff, row.lamp, row.ex_score, row.played_version,
           row.date, dateKst, row.play_style, row.bp, row.note_count]);
       }
