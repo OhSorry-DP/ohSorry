@@ -121,6 +121,8 @@ function __ohsorryShowDone(profile, style, isOwn) {
     `<div style="font-size:13px;font-weight:600;word-break:break-all">${dj}</div>` +
     (id ? `<div style="font-size:11px;color:#868e96;font-family:monospace;margin-top:1px">${id}</div>` : '') +
     (rankLine ? `<div style="font-size:12px;margin-top:4px">${rankLine}</div>` : '') +
+    '<div style="font-size:11.5px;color:#495057;margin-top:6px">업로드 완료 · 공식값은 덤프 후 반영</div>' +
+    (p.__dumpSignalError ? '<div style="font-size:11.5px;color:#c92a2a;margin-top:3px">완료 신호 실패 · 재시도 필요</div>' : '') +
     `<a href="${webUrl}" target="_blank" rel="noopener" ` +
       'style="display:block;margin-top:12px;padding:8px 0;text-align:center;background:#1d9e75;color:#fff;font-size:12.5px;font-weight:600;border-radius:6px;text-decoration:none">오소리웹에서 내 카드 보기 →</a>' +
     __ohsorryLoginBtnHtml(idNorm, isOwn, 'full');
@@ -153,6 +155,7 @@ function __ohsorryShowDoneList(entries) {
         `<span title="${dj}" style="flex:1 1 auto;min-width:40px;overflow:hidden;text-overflow:ellipsis;font-size:13px;font-weight:600">${dj}</span>` +
         (id ? `<span style="flex:none;font-size:11px;color:#868e96;font-family:monospace">${id}</span>` : '') +
         (rankTxt ? `<span style="flex:none;font-size:11.5px;color:#495057">${rankTxt}</span>` : '') +
+        (p.__dumpSignalError ? '<span style="flex:none;font-size:10.5px;color:#c92a2a">신호 재시도 필요</span>' : '') +
         `<a href="${webUrl}" target="_blank" rel="noopener" ` +
           'style="flex:none;padding:6px 9px;background:#1d9e75;color:#fff;font-size:11.5px;font-weight:600;border-radius:6px;text-decoration:none">이동 →</a>' +
         __ohsorryLoginBtnHtml(idNorm, e.isOwn, 'compact') +
@@ -167,6 +170,7 @@ function __ohsorryShowDoneList(entries) {
       `<div style="font-size:14px;font-weight:700;color:#1d9e75">✅ 업로드 완료 (${list.length}명)</div>` +
       '<button id="__ohsorry_done_x" style="background:transparent;border:0;color:#aaa;cursor:pointer;font-size:18px;line-height:1;padding:0 2px">×</button>' +
     '</div>' +
+    '<div style="font-size:11.5px;color:#495057;margin:4px 0 2px">업로드 완료 · 공식값은 덤프 후 반영</div>' +
     rowsHtml;
   document.body.appendChild(el);
   el.querySelector('#__ohsorry_done_x')?.addEventListener('click', () => el.remove());
@@ -717,7 +721,7 @@ window.OhsorryCore = {
       if (typeof r2e.ereterStar === 'number') {
         starEstimate = r2e.ereterStar;
         nativeStar = typeof r2e.ohsorryStar === 'number' ? r2e.ohsorryStar : null;
-        console.log(`[step2] ★ = onlyOSRtoEreter ${starEstimate.toFixed(2)} (native ${nativeStar != null ? nativeStar.toFixed(2) : 'N/A'}, tier ${r2e.tier})`);
+        console.log(`[step2] 잠정 ★ = onlyOSRtoEreter ${starEstimate.toFixed(2)} (native ${nativeStar != null ? nativeStar.toFixed(2) : 'N/A'}, tier ${r2e.tier})`);
       } else {
         console.warn('[step2] onlyOSRtoEreter ereterStar 없음 — ★/native_star 미산출(기존 supabase 값 보존)');
       }
@@ -742,59 +746,31 @@ window.OhsorryCore = {
     const spIidx = profile && profile.iidxId ? profile.iidxId.replace(/-/g, '') : null;
     const spPlayed = (allCharts || []).filter((c) => c.exScore > 0 || c.lampNum > 0);
     let spUploaded = null;
+    let spInserted = 0;
     let spUploadFailReason = null;  // null 이면 성공(또는 spRows.length===0 인 정상 케이스). 값이 있으면 완료 박스 대신 alert.
-    let prevStar = null, prevEreterStar = null;
-    let starsLookupOk = false;
+    let dumpSignal = null;
     if (spIidx && window.OhsorryDb && window.OhsorryDb.upsertUserChartScores) {
       // 5.6b. 프로필(users + user_radars) 저장 — SP 모드는 ★분석을 안 하므로 star/ereter_star 를 새로
       //   계산하지 않는다. upsert_user 가 그 둘을 EXCLUDED 로 무조건 덮어쓰는 정책(02_users.sql)이라,
       //   기존 값을 조회해 그대로 재전송(없으면 null). dj_name/sp_rank/dp_rank/radar 는 status fetch 값으로 갱신.
       try {
-        if (window.OhsorryDb.fetchUserStars) {
-          try {
-            const prev = await window.OhsorryDb.fetchUserStars(spIidx);
-            starsLookupOk = !!(prev && prev.ok);
-            if (starsLookupOk) { prevStar = prev.star; prevEreterStar = prev.ereter_star; }
-          } catch (e) {
-            console.warn('[SP] 기존 star/ereter_star 조회 예외:', e && e.message);
-          }
-        } else {
-          console.warn('[SP] fetchUserStars 없음 — 기존 star/ereter_star 조회 실패로 처리');
-        }
-        // SP 단독 입력은 이 profile upsert(users 테이블 갱신)가 사실상 "웹훅 트리거 전용" 호출이다.
-        //   users row 가 안 바뀌면 dump-trigger 웹훅이 안 떠서 리포트가 영영 안 만들어진다.
-        //   그런데 upsertUserProfile / upsertUserChartScores 는 각각 따로 checkUploadEnabled() 를 호출하고,
-        //   그 안의 service-status gist fetch 가 순간 실패하면 fail-closed(그 결과는 캐시 안 함)로 이 호출만
-        //   조용히 차단(return {ok:false})된다. 뒤이은 scores upsert 는 재fetch 성공으로 통과 →
-        //   "scores 만 반영되고 리포트는 미발화" 레이스가 실제로 발생(72281972).
-        //   → 리턴값을 확인하고 실패 시 1회 재시도한다. profile 이 성공하면 service-status 성공응답이
-        //     캐시(5분)에 채워져 바로 뒤의 scores upsert 통과도 함께 보장된다.
-        const skipSpProfileUpsert = !starsLookupOk;
+        // SP 프로필은 비공식 필드만 저장한다. 공식값 조회 성공 여부로 업로드를 막지 않는다.
         const spProfilePayload = {
           iidx_id: spIidx,
           dj_name: profile.djName || null,
-          star_estimate: prevStar,       // 기존값 보존 (없으면 null)
-          ereter_star: prevEreterStar,   // 기존값 보존 (없으면 null)
           sp_rank: profile.spRank || null,
           dp_rank: profile.dpRank || null,
-          sp_cpi: null,                  // ⬇ scores upsert 뒤 DB 전체 SP 기록으로 계산해 2차 upsert 한다(null=COALESCE 보존)
-          sp_star: null,                 // 〃 — 세션 크롤분만으로 계산하면 과거 기록이 빠져 별값이 무너진다
           notes_radar: profileHasRadar
             ? { sp: hasRadarData(profile.spRadar) ? profile.spRadar : null, dp: hasRadarData(profile.dpRadar) ? profile.dpRadar : null }
             : null,
         };
-        let spProfRes = null;
-        if (skipSpProfileUpsert) {
-          console.error('[SP profile upsert] 기존 star/ereter_star 값을 알 수 없어 프로필 저장을 건너뜁니다 (scores 저장은 계속)');
-        } else {
-          spProfRes = await window.OhsorryDb.upsertUserProfile(spProfilePayload);
-        }
-        if (!skipSpProfileUpsert && (!spProfRes || !spProfRes.ok)) {
+        let spProfRes = await window.OhsorryDb.upsertUserProfile(spProfilePayload);
+        if (!spProfRes || !spProfRes.ok) {
           console.warn('[SP profile upsert] 1차 실패 — 재시도:', spProfRes && spProfRes.error);
           await new Promise((r) => setTimeout(r, 400));
           spProfRes = await window.OhsorryDb.upsertUserProfile(spProfilePayload);
         }
-        if (!skipSpProfileUpsert && (!spProfRes || !spProfRes.ok)) {
+        if (!spProfRes || !spProfRes.ok) {
           // 최종 실패 시 users 미갱신 → 웹훅/리포트 미발화. 로그로 명시(scores 는 아래에서 별도 진행).
           console.warn('[SP profile upsert] 최종 실패 — 웹훅/리포트 미발화 위험:', spProfRes && spProfRes.error);
         }
@@ -814,6 +790,7 @@ window.OhsorryCore = {
         //   spUploaded 자체의 의미(성공 시 건수, 아니면 null)는 유지 — 실패 사유는 별도 변수(spUploadFailReason)로.
         try {
           const res = await window.OhsorryDb.upsertUserChartScores(spRows);
+          spInserted = Number(res && res.inserted) || 0;
           const uploadOk = !!(res && res.ok && !res.empty);
           spUploaded = uploadOk ? spRows.length : null;
           if (!uploadOk) {
@@ -825,71 +802,24 @@ window.OhsorryCore = {
           spUploadFailReason = '스코어: ' + ((e && e.message) || '예외');
         }
       }
-      // SP 대표 실력값(sp_cpi/sp_star) — scores upsert **뒤에** DB 저장 SP 기록 전체로 계산한다.
-      //   🔴 예전엔 이번 크롤 세션의 allCharts 만 썼다. 그러면 과거 기록이 통째로 빠져 별값이 무너진다
-      //      (실사고: DB 기준 ★21.3 이어야 할 유저가 0.0 으로 저장, sp_star 보유 248명 중 110명 저하).
-      //      0.0 은 "표본부족 null" 이 아니라 유효값이라 upsert_user 의 COALESCE 보존까지 뚫는다.
-      //   표본부족(null)/조회실패면 전송하지 않고 기존값을 보존한다(fail-closed).
-      //   starsLookupOk 가 false 면 기존 star/ereter_star 를 모르므로 upsert 자체를 하지 않는다.
-      if (spSkillLib && cpiData && window.OhsorryDb.fetchSpChartsForStar && starsLookupOk) {
+      if (spIidx && spInserted > 0 && window.OhsorryDb && window.OhsorryDb.notifyUploadComplete) {
         try {
-          const dbSpCharts = await window.OhsorryDb.fetchSpChartsForStar(spIidx);
-          if (!spSkillLib || typeof spSkillLib.computeSpStarGuarded !== 'function') throw new Error('SP guarded star kernel unavailable');
-          const sp = spSkillLib.computeSpStarGuarded(dbSpCharts, cpiData, { normFn: norm });
-          const hasCpi = sp && Number.isFinite(sp.cpiInt);
-          const hasStar = sp && Number.isFinite(sp.starRounded);
-          if (hasCpi || hasStar) {
-            console.log(`[SP] 대표 실력값 sp_cpi=${hasCpi ? sp.cpiInt : '미산출'} sp_star=${hasStar ? sp.starRounded : '미산출'} (method ${sp.method || 'unknown'}, reason ${sp.reason || 'none'}, DB 전체 SP ${dbSpCharts.length}차트, pairs ${sp.nPairs})`);
-            const starRes = await window.OhsorryDb.upsertUserProfile({
-              iidx_id: spIidx,
-              star_estimate: prevStar,      // 기존값 그대로 재전송 (sql/27 미적용 DB 대비 명시 보존)
-              ereter_star: prevEreterStar,  // 〃
-              ...(hasCpi ? { sp_cpi: sp.cpiInt } : {}),
-              ...(hasStar ? { sp_star: sp.starRounded } : {}),
-            });
-            if (!starRes || !starRes.ok) console.warn('[SP] sp_star 갱신 실패:', starRes && starRes.error);
-          } else {
-            console.warn(`[SP] 대표값 미산출 — CPI=${sp && sp.cpiInt} ★=${sp && sp.starRounded}; 기존값 보존 (method ${sp && sp.method}, reason ${sp && sp.reason})`);
-          }
-        } catch (e) { console.warn('[SP] sp_star DB 재계산 실패 — 기존값 보존:', e && e.message); }
+          dumpSignal = await window.OhsorryDb.notifyUploadComplete(spIidx);
+          if (!dumpSignal || !dumpSignal.ok) console.warn('[SP] 완료 신호 실패:', dumpSignal && dumpSignal.error);
+        } catch (e) {
+          dumpSignal = { ok: false, error: (e && e.message) || String(e) };
+          console.warn('[SP] 완료 신호 실패:', dumpSignal.error);
+        }
       }
-      // SP r★(스코어 별값) — scores upsert 뒤 make_sp_rate_star_rows 로 DB 전체 SP 이력을 받아 spUserRateStar(U1)로 계산
-      // 같은 modelId·formulaVersion 일 때만 래칫, 표본부족이면 새 모델 tuple 에 null 저장
-      // 조회·계산 실패면 저장하지 않아 기존 3열을 보존
-      if (spUploadFailReason == null && window.OhsorryDb && window.OhsorryDb.fetchSpRateStarRows && starsLookupOk &&
-          spUserRateStarLib && spRateStar && textageSongs) {
-        try {
-          const rows = await window.OhsorryDb.fetchSpRateStarRows(spIidx);
-          const prev = await window.OhsorryDb.fetchUserStars(spIidx);
-          if (!prev || !prev.ok) throw new Error('previous SP profile lookup failed');
-          const result = spUserRateStarLib.inferSpUserRStar(rows, spRateStar, {
-            textageSongs, normFn: norm, kernel: userRateStarLib,
-            prev: { rStar: prev.sp_r_star, modelId: prev.sp_r_star_model_id, formulaVersion: prev.sp_r_star_formula_version },
-          });
-          if (result && (result.status === 'ok' || result.status === 'few_plays')) {
-            const saved = await window.OhsorryDb.upsertUserProfile({
-              iidx_id: spIidx, star_estimate: prevStar, ereter_star: prevEreterStar,
-              sp_r_star: result.status === 'ok' && Number.isFinite(result.rStar) ? result.rStar : null,
-              sp_r_star_model_id: result.modelId, sp_r_star_formula_version: result.formulaVersion,
-            });
-            if (!saved || !saved.ok) console.warn('[SP] r★ 저장 실패:', saved && saved.error);
-          }
-        } catch (e) { console.warn('[SP] r★ 계산/저장 실패 — 기존값 보존:', e && e.message); }
-      }
-      // SP 오소리 피쳐 스코어(user_ohsorry_radars play_style=0) — 웹 SP 분석탭의 피처별 랭킹/상대평가 baseline.
-      //   scores upsert **뒤에** 계산해야 방금 올린 점수가 make_grid_data 에 반영된다.
-      //   구 dbConn gist 환경(함수 부재)에서는 조용히 skip — SP 업로드 자체는 영향 없음.
-      if (window.OhsorryDb.upsertSpPatternScore) {
-        try {
-          const spVec = await window.OhsorryDb.upsertSpPatternScore(spIidx);
-          if (spVec) console.log(`[SP] 피쳐 스코어 upsert 성공 (NOTES=${spVec.NOTES.toFixed(1)} charts=${spVec.__count})`);
-        } catch (e) { console.warn('[SP feature score]', e && e.message); }
+      if (dumpSignal && !dumpSignal.ok && profile) {
+        profile.__dumpSignalError = dumpSignal.error || '완료 신호 실패';
       }
     }
     const spResult = {
       spMode: true, mode, isRival, wrapperVersion, dbVersionString,
       profile, style: 'SP', spRank: profile ? (profile.spRank || null) : null,
       iidxId: spIidx, spChartCount: spPlayed.length, spUploaded,
+      dump: dumpSignal,
     };
     // own·rival 모두 완료 박스(대상 IIDX ID 의 카드로 이동). 여러 명이면 wrapper 가 리스트로(suppressDone).
     // spRows.length===0 (SP 성적 없는 DP 전용 유저)는 정상 — spUploadFailReason 이 안 채워진다.
@@ -898,6 +828,7 @@ window.OhsorryCore = {
       if (!opts.suppressDone) {
         alert(['오소리 업로드에 실패했어요.', '']
           .concat([spUploadFailReason])
+          .concat(dumpSignal && !dumpSignal.ok ? ['완료 신호 실패: ' + (dumpSignal.error || '실패') + ' (재시도 필요)'] : [])
           .concat(['', '콘솔(F12) 로그를 확인해주세요.'])
           .join(String.fromCharCode(10)));
       }
@@ -908,71 +839,12 @@ window.OhsorryCore = {
     return spResult;
   }
 
-  // -------- 5.7. ereter★ (업로드 ereter_star 용) --------
-  //   ereter.net 이 산정한 그 유저의 ★ (있으면). dbPayload.ereter_star 로 저장.
-  const idNormForRec = profile && profile.iidxId ? profile.iidxId.replace(/-/g, '') : null;
-  const eraterTrueStar = (idNormForRec && ereterPlayers) ? ereterPlayers[idNormForRec] : null;
-
   // -------- 6. 업로드 payload build (users 프로필 + scores rows) --------
   let dbPayload = null;
   let chartScoreRows = null;
   if (profile && profile.iidxId) {
     const iidxIdNorm = profile.iidxId.replace(/-/g, '');
     const nowIso = new Date().toISOString();
-    // 기존 star 조회 — 용도가 둘이다.
-    //   ① 부분 크롤이면 별값 미계산 → 그대로 재전송(upsert_user 의 star EXCLUDED 덮어쓰기로 null wipe 방지).
-    //   ② 풀 크롤이면 단조 래칫의 하한 — 클리어를 더했는데 별값이 내려가는 걸 막는다. 모델(onlyOSRtoEreter)
-    //      자체는 미플레이 곡을 새로 클리어하는 케이스를 원리적으로 못 막는다(클리어율 분모가 "친 곡 수"라
-    //      신규곡이 들어오면 분모도 같이 늘어난다). 계수/난이도축 재배포 후 재기준화는 래칫을 안 타는
-    //      backfillStars.js --apply 로 한다.
-    //   native_star 는 COALESCE 라 null 전송 시 자동 보존. ereter_star 는 ereter 룩업(크롤 무관)이라 그대로.
-    let preservedStar = null, preservedEreterStar = null, previousRStar = null;
-    let starsLookupOk = false;
-    if (window.OhsorryDb && window.OhsorryDb.fetchUserStars) {
-      try {
-        const prev = await window.OhsorryDb.fetchUserStars(iidxIdNorm);
-        starsLookupOk = !!(prev && prev.ok);
-        if (starsLookupOk && prev.star != null) preservedStar = prev.star;
-        if (starsLookupOk && prev.ereter_star != null) preservedEreterStar = prev.ereter_star;
-        if (starsLookupOk && prev.r_star != null && Number.isFinite(Number(prev.r_star))) previousRStar = Number(prev.r_star);
-      } catch (e) {
-        console.warn('[step2] 기존 star/ereter_star/r_star 조회 예외:', e && e.message);
-      }
-    } else {
-      console.warn('[step2] fetchUserStars 없음 — 기존 star/ereter_star/r_star 조회 실패로 처리');
-    }
-    const skipProfileUpsert = !starsLookupOk && (starEstimate == null || eraterTrueStar == null);
-    if (skipProfileUpsert) {
-      console.error('[step2] star/ereter_star 값을 알 수 없어 프로필 저장을 건너뜁니다 (scores 저장은 계속)');
-    }
-    // 래칫 적용 후 최종 star. starEstimate 가 null(부분 크롤/산출 실패)이면 기존값 그대로 쓴다.
-    let finalStar = starEstimate;
-    if (finalStar != null && preservedStar != null && Number(preservedStar) > finalStar) {
-      console.log('[step2] ★ 래칫 — 계산값 ' + finalStar.toFixed(2) + ' < 기존 ' + Number(preservedStar).toFixed(2) + ' → 기존값 유지');
-      finalStar = Number(preservedStar);
-    }
-    // 사용자 r★는 기존 표시용 ★와 완전히 독립적으로 계산한다. 전체 DP 크롤에서만 산출하며,
-    // 실패/표본부족/부분 크롤이면 기존 DB r_star를 유지하고 starEstimate를 fallback으로 쓰지 않는다.
-    let finalRStar = previousRStar;
-    if (!fullCrawl) {
-      console.log('[step2] 일부 시리즈만 크롤 — r★ 계산 skip (기존 users.r_star 보존)');
-    } else if (userRateStarLib && ratingData) {
-      try {
-        const rStarResult = userRateStarLib.inferUserRStar(allCharts, ratingData, {
-          normFn: norm,
-          scale: ratingData.rateStar && ratingData.rateStar.scale ? ratingData.rateStar.scale : null,
-          prevRStar: previousRStar,
-        });
-        if (typeof rStarResult.rStar === 'number' && Number.isFinite(rStarResult.rStar)) {
-          finalRStar = rStarResult.rStar;
-          console.log(`[step2] r★ = ${finalRStar.toFixed(2)} (${rStarResult.method || rStarResult.reason || 'unknown'}, charts ${rStarResult.nCharts})`);
-        } else {
-          console.warn('[step2] userRateStar rStar 없음 — 기존 users.r_star 보존:', rStarResult.reason || 'unknown');
-        }
-      } catch (e) { console.warn('[step2] userRateStar 실패 — 기존 users.r_star 보존:', e.message); }
-    } else {
-      console.warn('[step2] userRateStar/ohSorryRating 미로드 — 기존 users.r_star 보존');
-    }
     let nPlayedLv12 = 0, fcCount = 0, exhCount = 0, hcCount = 0, nClearedLv12 = 0;
     for (const c of allCharts) {
       if (useOnlyLv12 && c.gameLevel !== 12) continue;
@@ -997,30 +869,12 @@ window.OhsorryCore = {
     dbPayload = {
       iidx_id: iidxIdNorm,
       dj_name: profile.djName || null,
-      star_estimate: finalStar != null ? Number(finalStar.toFixed(4)) : (preservedStar != null ? Number(preservedStar) : null),  // 래칫 적용값 / 부분 크롤이면 기존값 보존
-      r_star: finalRStar != null ? Number(finalRStar.toFixed(2)) : null,
-      native_star: nativeStar != null ? Number(nativeStar.toFixed(4)) : null,  // v3.4.0: onlyOSR 전체곡 native (null → COALESCE 보존)
-      ereter_star: eraterTrueStar != null ? Number(eraterTrueStar) : (preservedEreterStar != null ? Number(preservedEreterStar) : null),
-      raw_s: null,                  // 현재 미산출 (컬럼 호환). native_star/star_estimate 가 별값 정본.
-      version: dbVersionString,
       sp_rank: profile.spRank || null,
       dp_rank: profile.dpRank || null,
-      n_cleared: nClearedLv12,
-      n_played_lv12: nPlayedLv12,
-      fc_count: fcCount,
-      hc_count: hcCount,
-      exh_count: exhCount,
-      level_filter: 'lv12',
-      series: SERIES,
-      // v3.3.6 core 0.0.345 — charts_json=null. user_chart_scores 가 single source of truth.
-      //   게스트 페이지 서열표는 get_user_charts RPC 로 fallback. INFOhSorry / ereter backfill 도 동일.
-      //   디스크 부담 큰 jsonb (~270KB/user) 제거 + 중복 데이터 정리.
-      charts_json: null,
       notes_radar: profileHasRadar
         ? { sp: hasRadarData(profile.spRadar) ? profile.spRadar : null, dp: hasRadarData(profile.dpRadar) ? profile.dpRadar : null }
         : null,
     };
-    if (skipProfileUpsert) delete dbPayload.star_estimate;
     // 점수가 있거나, 한 번이라도 플레이해 램프가 붙은(FAILED 포함) 차트만 — NO PLAY 만 제외
     chartScoreRows = allCharts.filter((c) => c.exScore > 0 || c.lampNum > 0).map((c) => {
       const key = norm(c.title) + '|' + c.diff;
@@ -1071,11 +925,13 @@ window.OhsorryCore = {
           if (!opts.suppressDone) {
             alert(['오소리 업로드에 실패했어요.', '']
               .concat(why)
+              .concat(up && up.dump && !up.dump.ok ? ['완료 신호 실패: ' + (up.dump.error || '실패') + ' (재시도 필요)'] : [])
               .concat(['', '콘솔(F12) 로그를 확인해주세요.'])
               .join(String.fromCharCode(10)));
           }
         } else {
           console.log('[오소리] 업로드 완료 — https://iidx.in 에서 카드 확인.');
+          if (up.dump && !up.dump.ok && profile) profile.__dumpSignalError = up.dump.error || '완료 신호 실패';
           if (!opts.suppressDone) __ohsorryShowDone(profile, 'DP', !isRival);   // 여러 명이면 wrapper 가 리스트로
         }
       }

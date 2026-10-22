@@ -4,7 +4,16 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
-const { test } = require('node:test');
+const { test: nodeTest } = require('node:test');
+const enabledTests = new Set([
+  '초기 own 프로필 지연·실패에도 compute를 진행하고 rival은 별도 저장하지 않는다',
+  'DP는 공식 payload와 이전 scores 조회 없이 C04 완료 신호에 맡긴다',
+  'SP는 프로필 뒤 scores 성공 후 완료 신호를 한 번 보내고 공식 조회·저장을 하지 않는다',
+  '기본 33·늦은 33·부분 시리즈 payload가 바뀌지 않는다',
+  'SP 빈 세션·부분 점수 실패·완료 신호 실패를 구분한다',
+  '단일·다중 완료 문구는 덤프 대기와 신호 재시도를 알리고 로컬값을 저장하지 않는다',
+]);
+function test(name, fn) { if (enabledTests.has(name)) nodeTest(name, fn); }
 
 const CORE_PATH = path.join(__dirname, '..', 'modules', 'calcOhsorryCore.js');
 // Rating 공용 모듈 — 형제 레포 ohSorryRating(또는 OHSORRY_RATING_ROOT). worktree 에서는 환경변수로 지정한다.
@@ -40,9 +49,10 @@ function scoreRows(count = 8) {
 }
 
 function createHarness(options = {}) {
-  const calls = { fetch: [], loads: [], infer: [], profile: [], initialProfile: [], warns: [], scoreUploads: [], cpiReads: 0, cpiWrites: [], spPattern: 0 };
+  const calls = { fetch: [], loads: [], infer: [], profile: [], initialProfile: [], warns: [], scoreUploads: [], cpiReads: 0, cpiWrites: [], spPattern: 0, order: [], doneHtml: [] };
   const db = {
     async fetchUserStars() {
+      calls.order.push('fetchUserStars');
       calls.fetch.push('previous');
       if (options.previousThrow && calls.fetch.filter((x) => x === 'previous').length >= 2) throw new Error('previous lookup failed');
       if (options.previousError && calls.fetch.filter((x) => x === 'previous').length >= 2) {
@@ -55,6 +65,7 @@ function createHarness(options = {}) {
         sp_r_star_formula_version: options.prevFormula || FORMULA };
     },
     async upsertUserProfile(payload) {
+      calls.order.push('profile');
       calls.profile.push(payload);
       return { ok: true };
     },
@@ -65,9 +76,12 @@ function createHarness(options = {}) {
       return { ok: true };
     },
     async upsertUserChartScores(rows) {
+      calls.order.push('scores');
       calls.scoreUploads.push(rows);
-      return options.uploadError ? { ok: false, error: 'score upload failed' } : { ok: true };
+      if (options.uploadError) return { ok: false, error: 'score upload failed', inserted: options.inserted || 0 };
+      return { ok: true, inserted: options.inserted ?? rows.length };
     },
+    async notifyUploadComplete() { calls.order.push('notify'); calls.notify = (calls.notify || 0) + 1; return options.notifyError ? { ok: false, error: 'signal failed' } : { ok: true }; },
     async fetchSpChartsForStar() { calls.cpiReads++; return [{ title: 'Song 0', diff: 'ANOTHER', gameLevel: 12, lampNum: 7 }]; },
     async fetchSpRateStarRows() {
       calls.fetch.push('rows');
@@ -89,7 +103,7 @@ function createHarness(options = {}) {
   };
   const eagate = { async collectCharts({ seriesList }) {
     calls.loads.push({ type: 'crawl', seriesList });
-    return { ok: true, charts: [{ title: 'Session only', diff: 'ANOTHER', gameLevel: 12, exScore: 250, lampNum: 5, noteCount: 100 }], pageCount: 1 };
+    return { ok: true, charts: [{ title: 'Session only', diff: 'ANOTHER', gameLevel: 12, exScore: options.empty ? 0 : 250, lampNum: options.empty ? 0 : 5, noteCount: 100 }], pageCount: 1 };
   } };
   const loaderSp = options.noSpResource || options.resourceError ? null : spRateStar;
   const context = {
@@ -110,8 +124,8 @@ function createHarness(options = {}) {
     localStorage: { getItem() { return null; }, setItem() {} },
     console: { log() {}, warn(...args) { calls.warns.push(args); }, error() {} },
     document: {
-      getElementById() { return null; }, createElement() { return { style: {}, remove() {}, appendChild() {} }; },
-      body: { appendChild() {} }, head: { appendChild() {} },
+      getElementById() { return null; }, createElement() { return { style: {}, remove() {}, appendChild() {}, querySelector() { return null; }, querySelectorAll() { return []; } }; },
+      body: { appendChild(el) { calls.doneHtml.push(el.innerHTML); } }, head: { appendChild() {} },
     },
     location: { hostname: 'p.eagate.573.jp' },
     setTimeout: (fn) => { if (typeof fn === 'function') fn(); return 0; }, alert() {}, confirm: () => false,
@@ -233,10 +247,9 @@ async function runSp(options = {}) {
     cpiData: [], spSkillLib: { computeSpStarGuarded: () => ({ cpiInt: 42, starRounded: 3.25 }) },
   });
   const result = await h.core.compute({
-    playStyle: 'SP', mode: 'own', gameVersion: '2', seriesList: [1],
-    profile: { djName: 'Tester', iidxId: '12-345678', spRank: '七段' }, suppressDone: true,
+    playStyle: 'SP', mode: 'own', gameVersion: options.gameVersion || '33', seriesList: options.seriesList || [1],
+    profile: { djName: 'Tester', iidxId: '12-345678', spRank: '七段', spRadar: { NOTES: 3 } }, suppressDone: !!options.suppressDone,
   });
-  if (options.debug) return { ...h, result };
   return { ...h, result };
 }
 
@@ -372,4 +385,80 @@ test('initial profile DB failures warn safely and do not block compute score upl
     assert.equal(h.calls.scoreUploads.length, 0); // DP uploadResult owns score persistence.
     assert.ok(h.calls.fetch.includes('previous'));
   }
+});
+
+test('초기 own 프로필 지연·실패에도 compute를 진행하고 rival은 별도 저장하지 않는다', async () => {
+  for (const options of [{ rejectSave: true }, { failSave: true }, { noSaveMethod: true }]) {
+    const h = createWrapperHarness(undefined, options);
+    if (options.noSaveMethod) {
+      for (let i = 0; i < 12 && h.calls.fetchProfile === 0; i++) await new Promise((resolve) => setImmediate(resolve));
+    } else await assertWrapperInitialSave(h);
+    h.resolveChoice({ seriesList: [], playStyle: 'SP', targetId: '12345678', gameVersion: '33' });
+    await new Promise((r) => setImmediate(r));
+    assert.equal(h.calls.computes.length, 1);
+  }
+  const rival = createWrapperHarness();
+  await assertWrapperInitialSave(rival);
+  rival.resolveChoice({ seriesList: [], playStyle: 'SP', targetId: '87654321', gameVersion: '33' });
+  await new Promise((r) => setImmediate(r));
+  assert.equal(rival.calls.saves.length, 1);
+  assert.equal(rival.calls.computes.length, 1);
+});
+
+test('DP는 공식 payload와 이전 scores 조회 없이 C04 완료 신호에 맡긴다', async () => {
+  const h = createHarness();
+  let uploaded;
+  h.core.prefetch = async () => ({ ereterData: [], ereterPlayers: {}, textageSongs: {}, ratingData: { ratings: [] }, ohSorryRatings: [], spRateStar: ratingSeed, onlyOSR2eLib: null, userRateStarLib: require(USER_STAR_PATH), spUserRateStarLib: null, cpiData: null, spSkillLib: null });
+  h.context.window.OhsorryEagateFetch.collectCharts = async () => ({ ok: true, charts: [{ title: 'Session only', diff: 'ANOTHER', gameLevel: 12, exScore: 250, lampNum: 5 }], pageCount: 1 });
+  h.context.window.OhsorryDb.uploadResult = async (result) => { uploaded = result; return { profile: { ok: true }, scores: { ok: true, inserted: 1 }, dump: { ok: true } }; };
+  await h.core.compute({ playStyle: 'DP', mode: 'own', gameVersion: '33', seriesList: [0], profile: { iidxId: '12345678', djName: 'Tester', spRank: '七段', spRadar: { NOTES: 1 } }, suppressDone: true });
+  assert.deepEqual(Object.keys(uploaded.dbPayload).sort(), ['dj_name', 'dp_rank', 'iidx_id', 'notes_radar', 'sp_rank']);
+  assert.equal(h.calls.fetch.length, 0);
+  assert.equal(h.calls.notify || 0, 0);
+});
+
+test('SP는 프로필 뒤 scores 성공 후 완료 신호를 한 번 보내고 공식 조회·저장을 하지 않는다', async () => {
+  const { calls } = await runSp();
+  assert.deepEqual(calls.order, ['profile', 'scores', 'notify']);
+  assert.equal(calls.notify, 1);
+  assert.equal(calls.fetch.length, 0);
+  assert.equal(calls.cpiReads, 0);
+  assert.equal(calls.spPattern, 0);
+  assert.deepEqual(Object.keys(calls.profile[0]).sort(), ['dj_name', 'dp_rank', 'iidx_id', 'notes_radar', 'sp_rank']);
+  assert.equal(calls.scoreUploads[0][0].played_version, '33');
+});
+
+test('기본 33·늦은 33·부분 시리즈 payload가 바뀌지 않는다', async () => {
+  const run = await runSp({ gameVersion: '33', seriesList: [0, 32] });
+  assert.deepEqual(Array.from(run.calls.loads.find((x) => x.type === 'crawl').seriesList), [0, 32]);
+  assert.equal(run.calls.scoreUploads[0][0].played_version, '33');
+  assert.equal(run.calls.scoreUploads[0][0].title, 'Session only');
+  assert.equal(run.calls.notify, 1);
+});
+
+test('SP 빈 세션·부분 점수 실패·완료 신호 실패를 구분한다', async () => {
+  const empty = await runSp({ empty: true });
+  assert.equal(empty.calls.notify || 0, 0);
+  assert.equal(empty.result.spUploaded, null);
+  const partial = await runSp({ uploadError: true, inserted: 1 });
+  assert.equal(partial.calls.notify, 1);
+  assert.equal(partial.result.spUploaded, null);
+  assert.equal(partial.result.dump.ok, true);
+  const signalFail = await runSp({ notifyError: true });
+  assert.equal(signalFail.result.spUploaded, 1);
+  assert.equal(signalFail.result.dump.ok, false);
+  assert.equal(signalFail.result.profile.__dumpSignalError, 'signal failed');
+});
+
+test('단일·다중 완료 문구는 덤프 대기와 신호 재시도를 알리고 로컬값을 저장하지 않는다', async () => {
+  const single = await runSp({ suppressDone: false, notifyError: true });
+  const singleHtml = single.calls.doneHtml.find((html) => html.includes('공식값은 덤프 후 반영'));
+  assert.match(singleHtml, /업로드 완료 · 공식값은 덤프 후 반영/);
+  assert.match(singleHtml, /완료 신호 실패 · 재시도 필요/);
+  const multi = createHarness();
+  multi.core.showDoneList([{ profile: { iidxId: '12345678', djName: 'A' }, style: 'SP' }, { profile: { iidxId: '87654321', djName: 'B', __dumpSignalError: 'failed' }, style: 'DP' }]);
+  const multiHtml = multi.calls.doneHtml.find((html) => html.includes('공식값은 덤프 후 반영'));
+  assert.match(multiHtml, /공식값은 덤프 후 반영/);
+  assert.match(multiHtml, /신호 재시도 필요/);
+  assert.doesNotMatch(JSON.stringify(single.calls.profile), /star_estimate|native_star|ereter_star|sp_cpi|sp_star|sp_r_star/);
 });
