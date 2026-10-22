@@ -42,7 +42,7 @@ test('공식값이 섞인 프로필도 공식 인자 없이 저장하고 비공�
   const body = JSON.parse(rpc(calls, 'upsert_user')[0].options.body);
   assert.deepEqual(Object.keys(body).sort(), ['p_iidx_id', 'p_dj_name', 'p_dp_rank', 'p_plays', 'p_sp_rank', 'p_star', 'p_ereter_star'].sort());
   assert.equal(body.p_star, null);
-  assert.equal(body.p_ereter_star, null);
+  assert.equal(body.p_ereter_star, 98);   // ereter 외부 룩업은 공식 계산이 아니라 그대로 전달
   assert.equal(body.p_plays, 7);
   assert.deepEqual(JSON.parse(rpc(calls, 'upsert_user_radar')[0].options.body).p_notes, 3);
 });

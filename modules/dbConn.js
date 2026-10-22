@@ -365,7 +365,7 @@ window.OhsorryDb = (function () {
         p_iidx_id: payload.iidx_id,
         p_dj_name: payload.dj_name || null,
         p_star: null,
-        p_ereter_star: null,
+        p_ereter_star: payload.ereter_star != null ? Number(payload.ereter_star) : null,   // ereter 외부 룩업(공식 계산 아님) — null 이면 COALESCE 보존
         p_sp_rank: rankToInt(payload.sp_rank),
         p_dp_rank: rankToInt(payload.dp_rank),
       };
