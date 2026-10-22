@@ -2,6 +2,13 @@
 
 ohSorry 의 변경 이력입니다. 사용방법은 [README.md](README.md) 를 참고하세요.
 
+### 2026-10-22 — Supabase scores 버퍼화 3단계: 업로드 직후 공식 계산 제거 (미배포)
+
+- `dbConn.js`: 업로드 직후 ★·native★·r★·SP CPI/★·SP r★·피처 계산·저장과 그 입력용 Supabase scores 읽기(grid·SP 차트·SP r★ 행·기존 별값 조회)를 제거. 공식값은 dump-user 가 R2 hist 로 계산해 R2·users 에 반영한다(ohsorry-data). scores 저장 뒤 `notifyUploadComplete(iidxId)` 로 users.date 만 갱신해 덤프를 깨운다(일부 청크 저장도 신호). `ereter_star`(외부 룩업)·DJ명·단위·plays·원본 레이더는 계속 보낸다.
+- `calcOhsorryCore.js`: 세션 계산 ★ 는 「잠정」 로그·표시만, 저장 안 함. 완료 패널에 「업로드 완료 · 공식값은 덤프 후 반영」, 신호 실패 표시. 수집 루프·33 기본값·시즌 선택은 그대로.
+- 🔴 배포 순서: ohsorry-data `SCORE_BUFFER_PREPARE=1`(덤프 공식 계산·역기록) 켠 뒤 gist 배포. 웹 CSV(`notifyUploadComplete` 사용)보다 먼저 gist 를 올린다.
+- 테스트: core·db 12/12, 변이 5종 검출.
+
 ### 2026-10-18 — 크롤러 로딩 직후 본인 users 행·노트레이더 초기 저장 (calcOhsorryCore v0.0.416 · dbConn v0.0.423 · wrapper v3.5.3, 미배포)
 
 - `ohsorry.js`: 본인 `status.html` 프로필을 받은 즉시 `Core.saveInitialProfile` 을 부른다(결과를 기다리지 않음). 성적 크롤을 시작하지 않고 모달만 띄워도 신규·기존 유저 모두 users 행과 SP/DP 노트레이더가 저장된다. 공식 CSV 에는 레이더 열이 없어 CSV 업로드만 하는 유저는 크롤러를 한 번 띄우면 레이더가 갱신된다(웹 설정 화면 안내와 짝).
