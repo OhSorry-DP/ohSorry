@@ -2,6 +2,12 @@
 
 ohSorry 의 변경 이력입니다. 사용방법은 [README.md](README.md) 를 참고하세요.
 
+### 2026-10-24 — 업로드 완료 통지·프로필 웹훅 억제 플래그 (기본 OFF, 미배포)
+
+- dbConn `upsertUserChartScores(rows, options)`: `FAST_DUMP_ENQUEUE_CRAWLER`(false) 를 켜면 모든 점수 청크가 성공하고 실제 전송 행이 있을 때만 `https://iidx.in/api/dump-trigger?upload_complete=1` 로 완료를 알린다. 크롤러는 기존 `auth/issue`→`auth/exchange` 토큰(ID별 페이지 수명 캐시, 401 이면 폐기), CSV 는 `options.completionSource='csv'`·`fastDumpEnabled` 와 같은 출처 쿠키. 5초 timeout, 결과 불명·5xx·손상 응답은 같은 UUID 로 1회 재전송, 실패는 로그만. 부분 실패에서도 불리는 기존 `notifyUploadComplete` 는 그대로다.
+- dbConn `PROFILE_DUMP_COMPLETION_ONLY`(false) 를 켜면 업로드 전 프로필 저장(`upsertUserProfile`·`upsertInitialUserProfile`)만 Admin sql/37 의 `upsert_user_upload_profile` 로 보내, 업로드 한 번에 dump 디스패치가 완료 통지 1번만 나가게 한다. 🔴 SQL37 운영 적용 뒤에 켤 것.
+- 테스트 32/32. 반영은 gist 게시 후.
+
 ### 2026-10-24 — 업로드 필터 날짜 파싱 메모 (미배포)
 
 - dbConn 동기화 블록(정본 `ohsorry-data/.github/scripts/score-history.mjs`)의 `day`·`instant` 가 성공한 파싱 결과만 `Map` 에 메모한다(각 상한 32,768개, 넘으면 비움). 실패 입력은 저장하지 않아 예외는 그대로다. 블록 위치·호출 흐름은 변경 없음(메모 수명 = 업로드 호출 1회). 정본 기준 6,259행 병합·후보 검증 0.41~0.45초 → 0.14~0.15초. 반영은 gist 게시 후.
