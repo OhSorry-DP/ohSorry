@@ -13,7 +13,7 @@ function response(body, { ok = true, status = 200 } = {}) {
   return { ok, status, async text() { return text; }, async json() { return body; } };
 }
 
-function loadDb(handler, uploadEnabled = true, dateParse = Date.parse, { fastDumpEnabled = false, uuidFactory } = {}) {
+function loadDb(handler, uploadEnabled = true, dateParse = Date.parse, { fastDumpEnabled = false, profileDumpCompletionOnly = false, uuidFactory } = {}) {
   const calls = [];
   const warnings = [];
   const logs = [];
@@ -38,6 +38,12 @@ function loadDb(handler, uploadEnabled = true, dateParse = Date.parse, { fastDum
     const enabledSource = source.replace('const FAST_DUMP_ENQUEUE_CRAWLER = false;', 'const FAST_DUMP_ENQUEUE_CRAWLER = true;');
     assert.notEqual(enabledSource, source, 'crawler feature gate declaration must be present');
     assert.equal((source.match(/const FAST_DUMP_ENQUEUE_CRAWLER = false;/g) || []).length, 1);
+    source = enabledSource;
+  }
+  if (profileDumpCompletionOnly) {
+    const enabledSource = source.replace('const PROFILE_DUMP_COMPLETION_ONLY = false;', 'const PROFILE_DUMP_COMPLETION_ONLY = true;');
+    assert.notEqual(enabledSource, source, 'profile completion-only feature gate declaration must be present');
+    assert.equal((source.match(/const PROFILE_DUMP_COMPLETION_ONLY = false;/g) || []).length, 1);
     source = enabledSource;
   }
   vm.runInNewContext(source, context, { filename: DB_CONN });
@@ -405,6 +411,103 @@ test('공식값이 섞인 프로필도 공식 인자 없이 저장하고 비공�
   assert.equal(body.p_ereter_star, 98);   // ereter 외부 룩업은 공식 계산이 아니라 그대로 전달
   assert.equal(body.p_plays, 7);
   assert.deepEqual(JSON.parse(rpc(calls, 'upsert_user_radar')[0].options.body).p_notes, 3);
+});
+
+test('프로필 완료 전용 기본 OFF는 기존 RPC 이름과 payload를 유지하고 ON은 두 프로필만 래핑한다', async () => {
+  const payload = { iidx_id: '12345678', dj_name: 'DJ', sp_rank: 'A', dp_rank: 'B', plays: 9,
+    notes_radar: { sp: { NOTES: 3 } }, ereter_star: 4 };
+  const off = loadDb(async () => response(null));
+  const offResult = await off.db.upsertUserProfile(payload);
+  const offInitial = await off.db.upsertInitialUserProfile(payload);
+  assert.deepEqual([offResult.ok, offInitial.ok], [true, true]);
+  assert.equal(rpc(off.calls, 'upsert_user').length, 2);
+  assert.equal(rpc(off.calls, 'upsert_user_upload_profile').length, 0);
+  const offBody = JSON.parse(rpc(off.calls, 'upsert_user')[0].options.body);
+  assert.equal(offBody.p_plays, 9);
+  assert.equal(offBody.p_ereter_star, 4);
+
+  const on = loadDb(async () => response(null), true, Date.parse, { profileDumpCompletionOnly: true });
+  assert.equal((await on.db.upsertInitialUserProfile(payload)).ok, true);
+  assert.equal((await on.db.upsertUserProfile(payload)).ok, true);
+  assert.equal(rpc(on.calls, 'upsert_user_upload_profile').length, 2);
+  assert.equal(rpc(on.calls, 'upsert_user').length, 0);
+  assert.deepEqual(JSON.parse(rpc(on.calls, 'upsert_user_upload_profile')[1].options.body), offBody);
+  assert.equal(rpc(on.calls, 'upsert_user_radar').length, 2);
+});
+
+test('완료 전용 ON은 점수 성공 후에만 기존 완료 RPC를 한 번 호출한다', async () => {
+  const { db, calls } = loadDb(async (url) => url.includes('/rest/v1/songs')
+    ? response([{ song_id: 1, title: 'Test DP', ac: 1 }]) : response(null), true, Date.parse,
+  { profileDumpCompletionOnly: true });
+  const result = await db.uploadResult({ dbPayload: { iidx_id: '12345678', dj_name: 'DJ' }, chartScoreRows: [
+    { iidx_id: '12345678', title: 'Test DP', diff: 'ANOTHER', ex_score: 100, played_version: 33 },
+  ] });
+  assert.equal(result.profile.ok, true); assert.equal(result.scores.ok, true); assert.equal(result.dump.ok, true);
+  const names = calls.filter(({ url }) => /\/rpc\/(upsert_user|upsert_user_upload_profile|upsert_scores)$/.test(url))
+    .map(({ url }) => url.split('/').pop());
+  assert.deepEqual(names, ['upsert_user_upload_profile', 'upsert_scores', 'upsert_user']);
+  const lastBody = JSON.parse(rpc(calls, 'upsert_user').at(-1).options.body);
+  assert.equal(lastBody.p_iidx_id, '12345678');
+  assert.equal(rpc(calls, 'upsert_user_upload_profile').length, 1);
+});
+
+test('완료 전용 wrapper 오류는 legacy 프로필 RPC로 폴백하지 않고 기존 오류를 반환한다', async () => {
+  const { db, calls } = loadDb(async (url) => url.endsWith('/rpc/upsert_user_upload_profile')
+    ? response({ message: 'wrapper failed' }, { ok: false, status: 500 }) : response(null), true, Date.parse,
+  { profileDumpCompletionOnly: true });
+  const result = await db.upsertUserProfile({ iidx_id: '12345678' });
+  assert.equal(result.ok, false);
+  assert.match(result.error, /500/);
+  assert.equal(rpc(calls, 'upsert_user_upload_profile').length, 1);
+  assert.equal(rpc(calls, 'upsert_user').length, 0);
+});
+
+test('프로필 억제 플래그와 crawler fast enqueue 플래그는 독립이며 부분 실패 통지는 유지한다', async () => {
+  for (const profileDumpCompletionOnly of [false, true]) {
+    for (const fastDumpEnabled of [false, true]) {
+      const { db, calls } = loadDb(async (url) => {
+        if (url.includes('/rest/v1/songs')) return response([{ song_id: 1, title: 'One', ac: 1 }]);
+        if (url.startsWith('https://data.iidx.in/hist/')) return response([]);
+        if (url.endsWith('/rpc/upsert_scores')) return response(null, { ok: false, status: 500 });
+        if (url.endsWith('/auth/issue')) return response({ url: 'https://iidx.in/login?ticket=one' });
+        if (url.endsWith('/auth/exchange')) return response({ iidx_id: '12345678', token: 'token' });
+        if (url.includes('/api/dump-trigger')) return response({ accepted: true });
+        return response(null);
+      }, true, Date.parse, { profileDumpCompletionOnly, fastDumpEnabled });
+      const result = await db.uploadResult({ dbPayload: { iidx_id: '12345678' }, chartScoreRows: [
+        { iidx_id: '12345678', title: 'One', diff: 'ANOTHER', ex_score: 1, played_version: 33 },
+      ] });
+      assert.equal(result.scores.ok, false);
+      assert.equal(rpc(calls, 'upsert_user_upload_profile').length, profileDumpCompletionOnly ? 1 : 0);
+      assert.equal(rpc(calls, 'upsert_user').length, profileDumpCompletionOnly ? 0 : 1);
+      assert.equal(calls.filter(({ url }) => url.includes('/api/dump-trigger')).length, fastDumpEnabled ? 0 : 0);
+      assert.equal(calls.filter(({ url }) => url.endsWith('/auth/issue')).length, 0);
+      if (!profileDumpCompletionOnly && !fastDumpEnabled) {
+        assert.equal(rpc(calls, 'upsert_user').length, 1, 'legacy partial-failure notification is preserved');
+      }
+    }
+  }
+});
+
+test('완료 전용 ON의 프로필 단독, 0행 및 중도 실패 경로는 완료 통지를 추가하지 않는다', async () => {
+  const on = { profileDumpCompletionOnly: true };
+  const standalone = loadDb(async () => response(null), true, Date.parse, on);
+  assert.equal((await standalone.db.upsertInitialUserProfile({ iidx_id: '12345678' })).ok, true);
+  assert.equal(rpc(standalone.calls, 'upsert_user').length, 0);
+
+  const empty = loadDb(async (url) => url.includes('/rest/v1/songs') ? response([{ song_id: 1, title: 'One', ac: 1 }]) : response(null), true, Date.parse, on);
+  const noRows = await empty.db.uploadResult({ dbPayload: { iidx_id: '12345678' }, chartScoreRows: [] });
+  assert.equal(noRows.dump, null);
+  assert.equal(rpc(empty.calls, 'upsert_user').length, 0);
+
+  const failure = loadDb(async (url) => url.includes('/rest/v1/songs')
+    ? response([{ song_id: 1, title: 'One', ac: 1 }])
+    : url.endsWith('/rpc/upsert_scores') ? response(null, { ok: false, status: 500 }) : response(null), true, Date.parse, on);
+  const partial = await failure.db.uploadResult({ dbPayload: { iidx_id: '12345678' }, chartScoreRows: [
+    { iidx_id: '12345678', title: 'One', diff: 'ANOTHER', ex_score: 1, played_version: 33 },
+  ] });
+  assert.equal(partial.scores.ok, false); assert.equal(partial.dump, null);
+  assert.equal(rpc(failure.calls, 'upsert_user').length, 0);
 });
 
 test('초기 부모/radar와 업로드 kill switch 및 ID 검증을 유지한다', async () => {

@@ -75,6 +75,7 @@
 // ============================================================
 
 window.OhsorryDb = (function () {
+  const PROFILE_DUMP_COMPLETION_ONLY = false;
   const FAST_DUMP_ENQUEUE_CRAWLER = false;
   const DUMP_TRIGGER_URL = 'https://iidx.in/api/dump-trigger?upload_complete=1';
   const DUMP_AUTH_URL = 'https://iidx.in';
@@ -375,7 +376,7 @@ window.OhsorryDb = (function () {
         p_dp_rank: rankToInt(payload.dp_rank),
       };
       if (Object.prototype.hasOwnProperty.call(payload, 'plays')) userRpcPayload.p_plays = payload.plays;
-      await callRpc('upsert_user', userRpcPayload);
+      await callRpc(PROFILE_DUMP_COMPLETION_ONLY ? 'upsert_user_upload_profile' : 'upsert_user', userRpcPayload);
       // 2. user_radars (SP / DP 각각, 있을 때만)
       const radar = payload.notes_radar;
       if (radar && typeof radar === 'object') {
@@ -403,7 +404,7 @@ window.OhsorryDb = (function () {
     const statusErr = await checkUploadEnabled();
     if (statusErr) return statusErr;
     try {
-      await callRpc('upsert_user', {
+      await callRpc(PROFILE_DUMP_COMPLETION_ONLY ? 'upsert_user_upload_profile' : 'upsert_user', {
         p_iidx_id: id,
         p_dj_name: safe.dj_name || null,
         p_star: null,
