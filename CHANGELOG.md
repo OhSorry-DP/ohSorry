@@ -2,6 +2,11 @@
 
 ohSorry 의 변경 이력입니다. 사용방법은 [README.md](README.md) 를 참고하세요.
 
+### 2026-10-24 — 업로드 전 프로필 저장 웹훅 억제 켬
+
+- dbConn `PROFILE_DUMP_COMPLETION_ONLY` 기본값 true. Admin sql/37 `upsert_user_upload_profile` 운영 적용(10-24) 뒤 전환 — 크롤러 업로드 한 번에 같은 유저 dump-user run 이 프로필 저장·완료 통지로 2번 뜨고 앞 run 이 취소되던 것이 완료 통지 1번으로 준다. `FAST_DUMP_ENQUEUE_CRAWLER` 는 계속 false.
+- 테스트 33/33. 반영은 gist·R2 게시 후.
+
 ### 2026-10-24 — 업로드 완료 통지·프로필 웹훅 억제 플래그 (기본 OFF, 미배포)
 
 - dbConn `upsertUserChartScores(rows, options)`: `FAST_DUMP_ENQUEUE_CRAWLER`(false) 를 켜면 모든 점수 청크가 성공하고 실제 전송 행이 있을 때만 `https://iidx.in/api/dump-trigger?upload_complete=1` 로 완료를 알린다. 크롤러는 기존 `auth/issue`→`auth/exchange` 토큰(ID별 페이지 수명 캐시, 401 이면 폐기), CSV 는 `options.completionSource='csv'`·`fastDumpEnabled` 와 같은 출처 쿠키. 5초 timeout, 결과 불명·5xx·손상 응답은 같은 UUID 로 1회 재전송, 실패는 로그만. 부분 실패에서도 불리는 기존 `notifyUploadComplete` 는 그대로다.

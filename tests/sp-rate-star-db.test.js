@@ -13,7 +13,7 @@ function response(body, { ok = true, status = 200 } = {}) {
   return { ok, status, async text() { return text; }, async json() { return body; } };
 }
 
-function loadDb(handler, uploadEnabled = true, dateParse = Date.parse, { fastDumpEnabled = false, profileDumpCompletionOnly = false, uuidFactory } = {}) {
+function loadDb(handler, uploadEnabled = true, dateParse = Date.parse, { fastDumpEnabled = false, profileDumpCompletionOnly, uuidFactory } = {}) {
   const calls = [];
   const warnings = [];
   const logs = [];
@@ -40,11 +40,10 @@ function loadDb(handler, uploadEnabled = true, dateParse = Date.parse, { fastDum
     assert.equal((source.match(/const FAST_DUMP_ENQUEUE_CRAWLER = false;/g) || []).length, 1);
     source = enabledSource;
   }
-  if (profileDumpCompletionOnly) {
-    const enabledSource = source.replace('const PROFILE_DUMP_COMPLETION_ONLY = false;', 'const PROFILE_DUMP_COMPLETION_ONLY = true;');
-    assert.notEqual(enabledSource, source, 'profile completion-only feature gate declaration must be present');
-    assert.equal((source.match(/const PROFILE_DUMP_COMPLETION_ONLY = false;/g) || []).length, 1);
-    source = enabledSource;
+  const profileGateMatches = source.match(/const PROFILE_DUMP_COMPLETION_ONLY = (true|false);/g) || [];
+  assert.equal(profileGateMatches.length, 1, 'profile completion-only feature gate declaration must appear exactly once');
+  if (profileDumpCompletionOnly !== undefined) {
+    source = source.replace(/const PROFILE_DUMP_COMPLETION_ONLY = (true|false);/, `const PROFILE_DUMP_COMPLETION_ONLY = ${profileDumpCompletionOnly};`);
   }
   vm.runInNewContext(source, context, { filename: DB_CONN });
   return { db: context.window.OhsorryDb, calls, warnings, logs };
@@ -166,7 +165,7 @@ test('unchanged differs from empty and completion is sent only after inserted ro
     if (url.includes('/rest/v1/songs')) return response([{ song_id: 100, title: 'Filter Song', ac: 1 }]);
     if (url.startsWith('https://data.iidx.in/hist/')) return response([HIST_ROW]);
     return response(null);
-  });
+  }, true, Date.parse, { profileDumpCompletionOnly: false });
   let result = await db.uploadResult({ dbPayload: { iidx_id: '89388691', dj_name: 'DJ' }, chartScoreRows: [scoreRow({
     ex_score: 2000, date: HIST_ROW[5], date_kst: HIST_ROW[6], bp: null, note_count: HIST_ROW[9],
   })] });
@@ -175,7 +174,7 @@ test('unchanged differs from empty and completion is sent only after inserted ro
   result = await db.uploadResult({ dbPayload: { iidx_id: '89388691' }, chartScoreRows: [] });
   assert.equal(result.scores.empty, true); assert.equal(result.dump, null); assert.equal(rpc(calls, 'upsert_scores').length, 0);
   assert.equal(rpc(calls, 'upsert_user').length, 2); assert.equal(rpc(calls, 'upsert_user_radar').length, 0);
-  const sending = loadDb(async (url) => url.startsWith('https://data.iidx.in/hist/') ? response([]) : url.includes('/rest/v1/songs') ? response([{ song_id: 100, title: 'Filter Song', ac: 1 }]) : response(null));
+  const sending = loadDb(async (url) => url.startsWith('https://data.iidx.in/hist/') ? response([]) : url.includes('/rest/v1/songs') ? response([{ song_id: 100, title: 'Filter Song', ac: 1 }]) : response(null), true, Date.parse, { profileDumpCompletionOnly: false });
   result = await sending.db.uploadResult({ dbPayload: { iidx_id: '89388691' }, chartScoreRows: [scoreRow()] });
   assert.equal(result.scores.inserted, 1); assert.equal(result.dump.ok, true);
 });
@@ -312,7 +311,7 @@ test('crawler failures and no-op score uploads never enqueue while existing part
     if (url.startsWith('https://data.iidx.in/hist/')) return response([]);
     if (url.endsWith('/rpc/upsert_scores')) return ++scoreCalls === 1 ? response(null) : response(null, { ok: false, status: 500 });
     return response(null);
-  }, true, Date.parse, { fastDumpEnabled: true });
+  }, true, Date.parse, { fastDumpEnabled: true, profileDumpCompletionOnly: false });
   const result = await partial.db.uploadResult({ dbPayload: { iidx_id: '89388691' }, chartScoreRows: Array.from({ length: 1001 }, (_, i) => validBulkRow(i)) });
   assert.equal(result.scores.ok, false);
   assert.equal(result.scores.inserted, 1000);
@@ -398,7 +397,7 @@ test('ac and legen bit supplementation checks ensure_song ID and preserves serie
 });
 
 test('공식값이 섞인 프로필도 공식 인자 없이 저장하고 비공식 plays와 원본 radar를 보낸다', async () => {
-  const { db, calls } = loadDb(async () => response(null));
+  const { db, calls } = loadDb(async () => response(null), true, Date.parse, { profileDumpCompletionOnly: false });
   const result = await db.upsertUserProfile({
     iidx_id: '12345678', dj_name: 'DJ', sp_rank: '---', dp_rank: '---', notes_radar: { sp: { NOTES: 3 } }, plays: 7,
     star_estimate: 99, ereter_star: 98, native_star: 97, r_star: 96, sp_cpi: 95, sp_star: 94,
@@ -413,10 +412,10 @@ test('공식값이 섞인 프로필도 공식 인자 없이 저장하고 비공�
   assert.deepEqual(JSON.parse(rpc(calls, 'upsert_user_radar')[0].options.body).p_notes, 3);
 });
 
-test('프로필 완료 전용 기본 OFF는 기존 RPC 이름과 payload를 유지하고 ON은 두 프로필만 래핑한다', async () => {
+test('프로필 완료 전용 명시 OFF는 기존 RPC 이름과 payload를 유지하고 ON은 두 프로필만 래핑한다', async () => {
   const payload = { iidx_id: '12345678', dj_name: 'DJ', sp_rank: 'A', dp_rank: 'B', plays: 9,
     notes_radar: { sp: { NOTES: 3 } }, ereter_star: 4 };
-  const off = loadDb(async () => response(null));
+  const off = loadDb(async () => response(null), true, Date.parse, { profileDumpCompletionOnly: false });
   const offResult = await off.db.upsertUserProfile(payload);
   const offInitial = await off.db.upsertInitialUserProfile(payload);
   assert.deepEqual([offResult.ok, offInitial.ok], [true, true]);
@@ -433,6 +432,15 @@ test('프로필 완료 전용 기본 OFF는 기존 RPC 이름과 payload를 유�
   assert.equal(rpc(on.calls, 'upsert_user').length, 0);
   assert.deepEqual(JSON.parse(rpc(on.calls, 'upsert_user_upload_profile')[1].options.body), offBody);
   assert.equal(rpc(on.calls, 'upsert_user_radar').length, 2);
+});
+
+test('파일 기본값 ON은 두 프로필을 wrapper로 저장하고 완료 통지는 legacy RPC를 사용한다', async () => {
+  const { db, calls } = loadDb(async () => response(null));
+  assert.equal((await db.upsertUserProfile({ iidx_id: '12345678', dj_name: 'DJ' })).ok, true);
+  assert.equal((await db.upsertInitialUserProfile({ iidx_id: '12345678', dj_name: 'DJ' })).ok, true);
+  assert.equal((await db.notifyUploadComplete('12345678')).ok, true);
+  assert.equal(rpc(calls, 'upsert_user_upload_profile').length, 2);
+  assert.equal(rpc(calls, 'upsert_user').length, 1);
 });
 
 test('완료 전용 ON은 점수 성공 후에만 기존 완료 RPC를 한 번 호출한다', async () => {
@@ -511,7 +519,7 @@ test('완료 전용 ON의 프로필 단독, 0행 및 중도 실패 경로는 완
 });
 
 test('초기 부모/radar와 업로드 kill switch 및 ID 검증을 유지한다', async () => {
-  const { db, calls } = loadDb(async () => response(null));
+  const { db, calls } = loadDb(async () => response(null), true, Date.parse, { profileDumpCompletionOnly: false });
   assert.equal((await db.upsertInitialUserProfile({ iidx_id: '12-345678', dj_name: 'DJ', notes_radar: { sp: { NOTES: 1 } } })).ok, true);
   assert.equal(rpc(calls, 'upsert_user').length, 1);
   assert.equal(rpc(calls, 'upsert_user_radar').length, 1);
@@ -525,7 +533,7 @@ test('초기 부모/radar와 업로드 kill switch 및 ID 검증을 유지한다
 test('DP/SP scores 커밋 뒤 완료 신호를 보내고 scores 읽기와 패턴 POST는 하지 않는다', async () => {
   const { db, calls } = loadDb(async (url) => url.includes('/rest/v1/songs')
     ? response([{ song_id: 1, title: 'Test DP', ac: 1 }, { song_id: 2, title: 'Test SP', ac: 1 }])
-    : response(null));
+    : response(null), true, Date.parse, { profileDumpCompletionOnly: false });
   const result = await db.uploadResult({
     dbPayload: { iidx_id: '12345678', dj_name: 'DJ' },
     chartScoreRows: [
@@ -570,7 +578,7 @@ test('부분 성공은 신호를 보내고 전체 실패/첫 청크 실패/부�
     if (url.includes('/rpc/upsert_scores')) return ++scoreCalls === 1 ? response(null) : response(null, { ok: false, status: 500 });
     if (url.includes('/rpc/upsert_user') && failSignal && rpc(calls, 'upsert_user').length > 1) return response(null, { ok: false, status: 503 });
     return response(null);
-  });
+  }, true, Date.parse, { profileDumpCompletionOnly: false });
   const rows = Array.from({ length: 1001 }, (_, i) => ({ iidx_id: '12345678', title: 'Song ' + i, diff: 'ANOTHER', ex_score: 1, played_version: 33 }));
   // 청크별 결과를 통해 부분 커밋 뒤 신호와 결과 분리를 확인한다.
   failSignal = true;
@@ -585,7 +593,7 @@ test('부분 성공은 신호를 보내고 전체 실패/첫 청크 실패/부�
     if (url.includes('/rest/v1/songs')) return response([{ song_id: 1, title: 'One', ac: 1 }]);
     if (url.includes('/rpc/upsert_scores')) return response(null, { ok: false, status: 500 });
     return response(null);
-  });
+  }, true, Date.parse, { profileDumpCompletionOnly: false });
   const failed = await firstFailure.db.uploadResult({
     dbPayload: { iidx_id: '12345678' },
     chartScoreRows: [{ iidx_id: '12345678', title: 'One', diff: 'ANOTHER', ex_score: 1, played_version: 33 }],
@@ -596,7 +604,7 @@ test('부분 성공은 신호를 보내고 전체 실패/첫 청크 실패/부�
   assert.equal(rpc(firstFailure.calls, 'upsert_user').length, 1);
 
   const parentFailure = loadDb(async (url) => url.endsWith('/rpc/upsert_user')
-    ? response(null, { ok: false, status: 500 }) : response(null));
+    ? response(null, { ok: false, status: 500 }) : response(null), true, Date.parse, { profileDumpCompletionOnly: false });
   const noParent = await parentFailure.db.uploadResult({
     dbPayload: { iidx_id: '12345678' }, chartScoreRows: [{ iidx_id: '12345678', title: 'One', diff: 'ANOTHER', ex_score: 1, played_version: 33 }],
   });
