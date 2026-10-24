@@ -13,7 +13,7 @@ function response(body, { ok = true, status = 200 } = {}) {
   return { ok, status, async text() { return text; }, async json() { return body; } };
 }
 
-function loadDb(handler, uploadEnabled = true) {
+function loadDb(handler, uploadEnabled = true, dateParse = Date.parse) {
   const calls = [];
   const warnings = [];
   const logs = [];
@@ -28,7 +28,7 @@ function loadDb(handler, uploadEnabled = true) {
       return result;
     },
     console: { log(...args) { logs.push(args); }, warn(...args) { warnings.push(args); }, error(...args) { warnings.push(args); } },
-    Date, Map, Set, Promise, Number, String, BigInt, TypeError, Error,
+    Date: class extends Date { static parse(value) { return dateParse(value); } }, Map, Set, Promise, Number, String, BigInt, TypeError, Error,
     Object, Array, Math, JSON, isFinite, encodeURIComponent, URL, setTimeout, clearTimeout,
   };
   vm.runInNewContext(fs.readFileSync(DB_CONN, 'utf8'), context, { filename: DB_CONN });
@@ -67,6 +67,45 @@ test('hist snapshot is shared per user within an upload and refreshed on the nex
   assert.equal(next.ok, true, JSON.stringify(next)); assert.equal(next.unchanged, true);
   assert.equal(reads.get('89388691'), 2);
   assert.equal(rpc(calls, 'upsert_scores').length, 1);
+});
+
+test('score history date memo reuses successful parses within one upload', async () => {
+  let parseCalls = 0;
+  const { db } = loadDb(async (url) => url.includes('/rest/v1/songs')
+    ? response([{ song_id: 100, title: 'Filter Song', ac: 1 }]) : response([]), true,
+  (value) => { parseCalls++; return Date.parse(value); });
+  const { db: cachedDb } = loadDb(async (url) => url.includes('/rest/v1/songs')
+    ? response([{ song_id: 100, title: 'Filter Song', ac: 1 }])
+    : url.startsWith('https://data.iidx.in/hist/') ? response([HIST_ROW, [101, 3, 5, 1900, 33, HIST_ROW[5], HIST_ROW[6], 1, null, 1500]]) : response(null), true,
+  (value) => { parseCalls++; return Date.parse(value); });
+  await cachedDb.upsertUserChartScores([scoreRow()]);
+  assert.ok(parseCalls > 0);
+  assert.ok(parseCalls < 12, `expected repeated date parsing to be skipped, got ${parseCalls} Date.parse calls`);
+});
+
+test('score history date memo preserves repeated invalid input errors', async () => {
+  const { db, warnings } = loadDb(async (url) => url.includes('/rest/v1/songs')
+    ? response([{ song_id: 100, title: 'Filter Song', ac: 1 }])
+    : url.startsWith('https://data.iidx.in/hist/') ? response([[100, 3, 5, 2000, 33, 'bad-date', '2026-10-22', 1, null, 1500]]) : response(null));
+  await db.upsertUserChartScores([scoreRow()]);
+  const messages = warnings.map((args) => args.join(' ')).filter((value) => value.includes('비교 실패'));
+  assert.equal(messages.length, 1);
+  assert.match(messages[0], /date requires a timestamp with timezone/);
+});
+
+test('score history date memos remain correct after 32769 distinct valid inputs', async () => {
+  const base = Date.UTC(2000, 0, 1);
+  const dayValues = Array.from({ length: 32769 }, (_, i) => new Date(base + i * 86400000).toISOString().slice(0, 10));
+  const instantValues = dayValues.map((day) => `${day}T01:02:03.123456+00:00`);
+  const { db } = loadDb(async (url) => url.includes('/rest/v1/songs')
+    ? response([{ song_id: 100, title: 'Filter Song', ac: 1 }]) : response([]));
+  const rows = dayValues.map((day, i) => scoreRow({
+    iidx_id: String(10000000 + i), date: instantValues[i], date_kst: new Date(Date.parse(day + 'T00:00:00Z') + 9 * 3600000).toISOString().slice(0, 10),
+    title: 'Filter Song', ex_score: 100,
+  }));
+  const result = await db.upsertUserChartScores(rows);
+  assert.equal(result.ok, true);
+  assert.equal(result.inserted, 32769);
 });
 
 test('hist transport, JSON, schema, and date failures warn and send all rows', async () => {

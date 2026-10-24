@@ -580,13 +580,21 @@ window.OhsorryDb = (function () {
       // Pure score history merge helpers. Date parsing follows dbr-history.mjs day()/instant().
       const COLS = 10;
       const fail = (message) => { throw new TypeError(message); };
+      const DATE_PARSE_MEMO_LIMIT = 32768;
+      const dayMemo = new Map();
+      const instantMemo = new Map();
       function day(value) {
+        if (typeof value === 'string' && dayMemo.has(value)) return value;
         if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)
           || !Number.isFinite(Date.parse(`${value}T00:00:00Z`))
           || new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) !== value) fail('invalid date_kst');
+        if (dayMemo.size >= DATE_PARSE_MEMO_LIMIT) dayMemo.clear();
+        dayMemo.set(value, value);
         return value;
       }
       function instant(value) {
+        const cached = typeof value === 'string' ? instantMemo.get(value) : undefined;
+        if (cached !== undefined) return cached;
         const m = typeof value === 'string' && value.match(
           /^(\d{4}-\d{2}-\d{2})[T ](\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,6}))?(Z|[+-]\d{2}(?::?\d{2})?)$/,
         );
@@ -597,7 +605,10 @@ window.OhsorryDb = (function () {
           : m[6].includes(':') ? m[6] : `${m[6].slice(0, 3)}:${m[6].slice(3)}`;
         const ms = Date.parse(`${m[1]}T${m[2]}:${m[3]}:${m[4]}${zone}`);
         if (!Number.isFinite(ms)) fail('invalid timestamp timezone');
-        return BigInt(ms) * 1000n + BigInt((m[5] || '').padEnd(6, '0'));
+        const result = BigInt(ms) * 1000n + BigInt((m[5] || '').padEnd(6, '0'));
+        if (instantMemo.size >= DATE_PARSE_MEMO_LIMIT) instantMemo.clear();
+        instantMemo.set(value, result);
+        return result;
       }
       function integer(value, label, nullable = false) {
         if (nullable && value === null) return;
