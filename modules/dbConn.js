@@ -76,7 +76,7 @@
 
 window.OhsorryDb = (function () {
   const PROFILE_DUMP_COMPLETION_ONLY = true;
-  const FAST_DUMP_ENQUEUE_CRAWLER = false;
+  const FAST_DUMP_ENQUEUE_CRAWLER = true;
   const DUMP_TRIGGER_URL = 'https://iidx.in/api/dump-trigger?upload_complete=1';
   const DUMP_AUTH_URL = 'https://iidx.in';
   const dumpBearerById = new Map();

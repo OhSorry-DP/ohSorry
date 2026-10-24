@@ -13,7 +13,7 @@ function response(body, { ok = true, status = 200 } = {}) {
   return { ok, status, async text() { return text; }, async json() { return body; } };
 }
 
-function loadDb(handler, uploadEnabled = true, dateParse = Date.parse, { fastDumpEnabled = false, profileDumpCompletionOnly, uuidFactory } = {}) {
+function loadDb(handler, uploadEnabled = true, dateParse = Date.parse, { fastDumpEnabled = true, profileDumpCompletionOnly, uuidFactory } = {}) {
   const calls = [];
   const warnings = [];
   const logs = [];
@@ -34,11 +34,12 @@ function loadDb(handler, uploadEnabled = true, dateParse = Date.parse, { fastDum
     Object, Array, Math, JSON, isFinite, encodeURIComponent, URL, setTimeout, clearTimeout,
   };
   let source = fs.readFileSync(DB_CONN, 'utf8');
-  if (fastDumpEnabled) {
-    const enabledSource = source.replace('const FAST_DUMP_ENQUEUE_CRAWLER = false;', 'const FAST_DUMP_ENQUEUE_CRAWLER = true;');
-    assert.notEqual(enabledSource, source, 'crawler feature gate declaration must be present');
-    assert.equal((source.match(/const FAST_DUMP_ENQUEUE_CRAWLER = false;/g) || []).length, 1);
-    source = enabledSource;
+  assert.equal((source.match(/const FAST_DUMP_ENQUEUE_CRAWLER = true;/g) || []).length, 1,
+    'crawler feature gate default must be true exactly once');
+  if (!fastDumpEnabled) {
+    const disabledSource = source.replace('const FAST_DUMP_ENQUEUE_CRAWLER = true;', 'const FAST_DUMP_ENQUEUE_CRAWLER = false;');
+    assert.notEqual(disabledSource, source, 'crawler feature gate declaration must be present');
+    source = disabledSource;
   }
   const profileGateMatches = source.match(/const PROFILE_DUMP_COMPLETION_ONLY = (true|false);/g) || [];
   assert.equal(profileGateMatches.length, 1, 'profile completion-only feature gate declaration must appear exactly once');
@@ -195,21 +196,25 @@ test('filtered 1001 rows preserve two chunk failure accounting', async () => {
   assert.deepEqual(bodies.map((x) => x.p_rows.length), [1000, 1]);
 });
 
-test('fast completion stays off by default and explicit off preserves upload behavior', async () => {
+test('fast completion is on by default and explicit off preserves upload behavior', async () => {
   for (const explicitOff of [false, true]) {
     let scoreCalls = 0;
     const { db, calls } = loadDb(async (url) => {
       if (url.includes('/rest/v1/songs')) return response([{ song_id: 1, title: 'Filter Song', ac: 1 }]);
       if (url.startsWith('https://data.iidx.in/hist/')) return response([]);
       if (url.endsWith('/rpc/upsert_scores')) { scoreCalls++; return response(null); }
+      if (url.endsWith('/auth/issue')) return response({ url: 'https://iidx.in/login?ticket=one' });
+      if (url.endsWith('/auth/exchange')) return response({ iidx_id: '89388691', token: 'token' });
+      if (url.includes('/api/dump-trigger')) return response({ accepted: true });
       return response(null);
-    });
+    }, true, Date.parse, explicitOff ? { fastDumpEnabled: false } : {});
     const rows = [scoreRow()];
-    const result = await db.upsertUserChartScores(rows, explicitOff ? { completionSource: 'csv', fastDumpEnabled: false } : undefined);
+    const result = await db.upsertUserChartScores(rows);
     assert.equal(result.ok, true);
     assert.equal(result.inserted, 1);
     assert.equal(scoreCalls, 1);
-    assert.equal(calls.some(({ url }) => /auth\/(issue|exchange)|dump-trigger/.test(url)), false);
+    assert.equal(calls.filter(({ url }) => url.includes('/api/dump-trigger')).length, explicitOff ? 0 : 1);
+    assert.equal(calls.filter(({ url }) => url.endsWith('/auth/issue')).length, explicitOff ? 0 : 1);
   }
 });
 
