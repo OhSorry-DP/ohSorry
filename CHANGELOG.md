@@ -2,6 +2,11 @@
 
 ohSorry 의 변경 이력입니다. 사용방법은 [README.md](README.md) 를 참고하세요.
 
+### 2026-10-25 — 크롤러 업로드 완료 통지 켬
+
+- dbConn `FAST_DUMP_ENQUEUE_CRAWLER = true`. 크롤러 점수 업로드가 모든 청크 성공 뒤 `auth/issue`→`auth/exchange` Bearer 로 `https://iidx.in/api/dump-trigger?upload_complete=1` 에 완료를 알린다. 서버가 세대를 발급하면 빠른 경로(Edge)가 그리드·Recent 를 먼저 게시하고, 실패하면 기존 느린 덤프가 폴백이다.
+- `tests/sp-rate-star-db.test.js`: 기본 ON·명시 OFF(소스 치환) 둘 다 검사. 상수를 false 로 되돌리면 실패로 검출.
+
 ### 2026-10-24 — 업로드 전 프로필 저장 웹훅 억제 켬
 
 - dbConn `PROFILE_DUMP_COMPLETION_ONLY` 기본값 true. Admin sql/37 `upsert_user_upload_profile` 운영 적용(10-24) 뒤 전환 — 크롤러 업로드 한 번에 같은 유저 dump-user run 이 프로필 저장·완료 통지로 2번 뜨고 앞 run 이 취소되던 것이 완료 통지 1번으로 준다. `FAST_DUMP_ENQUEUE_CRAWLER` 는 계속 false.
