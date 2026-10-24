@@ -13,7 +13,7 @@ function response(body, { ok = true, status = 200 } = {}) {
   return { ok, status, async text() { return text; }, async json() { return body; } };
 }
 
-function loadDb(handler, uploadEnabled = true, dateParse = Date.parse) {
+function loadDb(handler, uploadEnabled = true, dateParse = Date.parse, { fastDumpEnabled = false, uuidFactory } = {}) {
   const calls = [];
   const warnings = [];
   const logs = [];
@@ -28,10 +28,19 @@ function loadDb(handler, uploadEnabled = true, dateParse = Date.parse) {
       return result;
     },
     console: { log(...args) { logs.push(args); }, warn(...args) { warnings.push(args); }, error(...args) { warnings.push(args); } },
+    crypto: { randomUUID: uuidFactory || (() => { let n = 0; return () => `00000000-0000-4000-8000-${String(++n).padStart(12, '0')}`; })() },
+    AbortController,
     Date: class extends Date { static parse(value) { return dateParse(value); } }, Map, Set, Promise, Number, String, BigInt, TypeError, Error,
     Object, Array, Math, JSON, isFinite, encodeURIComponent, URL, setTimeout, clearTimeout,
   };
-  vm.runInNewContext(fs.readFileSync(DB_CONN, 'utf8'), context, { filename: DB_CONN });
+  let source = fs.readFileSync(DB_CONN, 'utf8');
+  if (fastDumpEnabled) {
+    const enabledSource = source.replace('const FAST_DUMP_ENQUEUE_CRAWLER = false;', 'const FAST_DUMP_ENQUEUE_CRAWLER = true;');
+    assert.notEqual(enabledSource, source, 'crawler feature gate declaration must be present');
+    assert.equal((source.match(/const FAST_DUMP_ENQUEUE_CRAWLER = false;/g) || []).length, 1);
+    source = enabledSource;
+  }
+  vm.runInNewContext(source, context, { filename: DB_CONN });
   return { db: context.window.OhsorryDb, calls, warnings, logs };
 }
 
@@ -179,6 +188,191 @@ test('filtered 1001 rows preserve two chunk failure accounting', async () => {
   const result = await db.upsertUserChartScores(Array.from({ length: 1001 }, (_, i) => validBulkRow(i)));
   assert.equal(result.ok, false); assert.equal(result.inserted, 1000); assert.equal(result.failedChunk, 2); assert.equal(result.totalChunks, 2);
   assert.deepEqual(bodies.map((x) => x.p_rows.length), [1000, 1]);
+});
+
+test('fast completion stays off by default and explicit off preserves upload behavior', async () => {
+  for (const explicitOff of [false, true]) {
+    let scoreCalls = 0;
+    const { db, calls } = loadDb(async (url) => {
+      if (url.includes('/rest/v1/songs')) return response([{ song_id: 1, title: 'Filter Song', ac: 1 }]);
+      if (url.startsWith('https://data.iidx.in/hist/')) return response([]);
+      if (url.endsWith('/rpc/upsert_scores')) { scoreCalls++; return response(null); }
+      return response(null);
+    });
+    const rows = [scoreRow()];
+    const result = await db.upsertUserChartScores(rows, explicitOff ? { completionSource: 'csv', fastDumpEnabled: false } : undefined);
+    assert.equal(result.ok, true);
+    assert.equal(result.inserted, 1);
+    assert.equal(scoreCalls, 1);
+    assert.equal(calls.some(({ url }) => /auth\/(issue|exchange)|dump-trigger/.test(url)), false);
+  }
+});
+
+test('CSV completion is sent once after successful score chunks with same-origin credentials', async () => {
+  let scoreCalls = 0;
+  const { db, calls } = loadDb(async (url, options) => {
+    if (url.includes('/rest/v1/songs')) return response([{ song_id: 1, title: 'Filter Song', ac: 1 }]);
+    if (url.startsWith('https://data.iidx.in/hist/')) return response([]);
+    if (url.endsWith('/rpc/upsert_scores')) { scoreCalls++; return response(null); }
+    if (url.includes('/api/dump-trigger')) return response({ accepted: true });
+    return response(null);
+  });
+  const result = await db.upsertUserChartScores([scoreRow()], { completionSource: 'csv', fastDumpEnabled: true });
+  assert.equal(result.ok, true);
+  assert.equal(scoreCalls, 1);
+  const complete = calls.filter(({ url }) => url.includes('/api/dump-trigger'));
+  assert.equal(complete.length, 1);
+  assert.equal(complete[0].options.credentials, 'same-origin');
+  assert.deepEqual(JSON.parse(complete[0].options.body), {
+    source: 'csv', iidx_id: '89388691', request_id: '00000000-0000-4000-8000-000000000001',
+  });
+  assert.equal(rpc(calls, 'upsert_user').length, 0);
+});
+
+test('CSV completion retries uncertain response with identical UUID and body', async () => {
+  const completeCalls = [];
+  const { db } = loadDb(async (url, options) => {
+    if (url.includes('/rest/v1/songs')) return response([{ song_id: 1, title: 'Filter Song', ac: 1 }]);
+    if (url.startsWith('https://data.iidx.in/hist/')) return response([]);
+    if (url.includes('/api/dump-trigger')) { completeCalls.push(options); return completeCalls.length === 1 ? Promise.reject(new Error('response lost')) : response({ accepted: true }); }
+    return response(null);
+  });
+  const result = await db.upsertUserChartScores([scoreRow()], { completionSource: 'csv', fastDumpEnabled: true });
+  assert.equal(result.ok, true);
+  assert.equal(completeCalls.length, 2);
+  assert.equal(completeCalls[0].body, completeCalls[1].body);
+  assert.deepEqual(JSON.parse(completeCalls[0].body), JSON.parse(completeCalls[1].body));
+});
+
+test('crawler gate sends one completion after both score chunks and uploadResult adds no duplicate', async () => {
+  let scoreCalls = 0;
+  const { db, calls } = loadDb(async (url, options) => {
+    if (url.includes('/rest/v1/songs')) {
+      const offset = Number(new URL(url).searchParams.get('offset'));
+      return response(Array.from({ length: Math.min(1000, 1001 - offset) }, (_, i) => ({ song_id: offset + i + 1, title: `Song ${offset + i}`, ac: 1 })));
+    }
+    if (url.startsWith('https://data.iidx.in/hist/')) return response([]);
+    if (url.endsWith('/rpc/upsert_scores')) { scoreCalls++; return response(null); }
+    if (url.endsWith('/auth/issue')) return response({ url: 'https://iidx.in/login?ticket=ticket-one' });
+    if (url.endsWith('/auth/exchange')) return response({ iidx_id: '89388691', token: 'token-one' });
+    if (url.includes('/api/dump-trigger')) return response({ accepted: true });
+    return response(null);
+  }, true, Date.parse, { fastDumpEnabled: true });
+  const rows = Array.from({ length: 1001 }, (_, i) => validBulkRow(i));
+  const scores = await db.upsertUserChartScores(rows);
+  assert.equal(scores.ok, true);
+  assert.equal(scoreCalls, 2);
+  assert.equal(calls.filter(({ url }) => url.includes('/api/dump-trigger')).length, 1);
+  assert.deepEqual(calls.filter(({ url }) => url.endsWith('/rpc/upsert_scores')).map(({ options }) => JSON.parse(options.body).p_rows.length), [1000, 1]);
+
+  const upload = loadDb(async (url) => {
+    if (url.includes('/rest/v1/songs')) return response([{ song_id: 1, title: 'Filter Song', ac: 1 }]);
+    if (url.startsWith('https://data.iidx.in/hist/')) return response([]);
+    return response(null);
+  }, true, Date.parse, { fastDumpEnabled: true });
+  await upload.db.uploadResult({ dbPayload: { iidx_id: '89388691' }, chartScoreRows: [scoreRow()] });
+  assert.equal(upload.calls.some(({ url }) => url.includes('/api/dump-trigger')), false);
+});
+
+test('crawler failures and no-op score uploads never enqueue while existing partial notify remains', async () => {
+  for (const failChunk of [1, 2]) {
+    let scoreCalls = 0;
+    const { db, calls } = loadDb(async (url) => {
+      if (url.includes('/rest/v1/songs')) {
+        const offset = Number(new URL(url).searchParams.get('offset'));
+        return response(Array.from({ length: Math.min(1000, 1001 - offset) }, (_, i) => ({ song_id: offset + i + 1, title: `Song ${offset + i}`, ac: 1 })));
+      }
+      if (url.startsWith('https://data.iidx.in/hist/')) return response([]);
+      if (url.endsWith('/rpc/upsert_scores')) return ++scoreCalls === failChunk ? response(null, { ok: false, status: 500 }) : response(null);
+      return response(null);
+    }, true, Date.parse, { fastDumpEnabled: true });
+    const result = await db.upsertUserChartScores(Array.from({ length: 1001 }, (_, i) => validBulkRow(i)));
+    assert.equal(result.ok, false);
+    assert.equal(calls.some(({ url }) => url.includes('/api/dump-trigger')), false);
+  }
+  for (const rows of [[], [scoreRow({ ex_score: HIST_ROW[3], date: HIST_ROW[5], date_kst: HIST_ROW[6], bp: null, note_count: HIST_ROW[9] })]]) {
+    const { db, calls } = loadDb(async (url) => url.includes('/rest/v1/songs') ? response([{ song_id: 100, title: 'Filter Song', ac: 1 }])
+      : url.startsWith('https://data.iidx.in/hist/') ? response([HIST_ROW]) : response(null), true, Date.parse, { fastDumpEnabled: true });
+    const result = await db.upsertUserChartScores(rows);
+    assert.equal(result.ok, true);
+    assert.equal(calls.some(({ url }) => url.includes('/api/dump-trigger')), false);
+  }
+  let scoreCalls = 0;
+  const partial = loadDb(async (url) => {
+    if (url.includes('/rest/v1/songs')) {
+      const offset = Number(new URL(url).searchParams.get('offset'));
+      return response(Array.from({ length: Math.min(1000, 1001 - offset) }, (_, i) => ({ song_id: offset + i + 1, title: `Song ${offset + i}`, ac: 1 })));
+    }
+    if (url.startsWith('https://data.iidx.in/hist/')) return response([]);
+    if (url.endsWith('/rpc/upsert_scores')) return ++scoreCalls === 1 ? response(null) : response(null, { ok: false, status: 500 });
+    return response(null);
+  }, true, Date.parse, { fastDumpEnabled: true });
+  const result = await partial.db.uploadResult({ dbPayload: { iidx_id: '89388691' }, chartScoreRows: Array.from({ length: 1001 }, (_, i) => validBulkRow(i)) });
+  assert.equal(result.scores.ok, false);
+  assert.equal(result.scores.inserted, 1000);
+  assert.equal(result.dump.ok, true);
+  assert.equal(rpc(partial.calls, 'upsert_user').length, 2);
+  assert.equal(partial.calls.some(({ url }) => url.includes('/api/dump-trigger')), false);
+});
+
+test('crawler completion failures preserve score result and warn; 401 drops bearer and users get distinct request IDs', async () => {
+  const outcome = async (kind) => {
+    let attempts = 0;
+    const { db, warnings } = loadDb(async (url, options) => {
+      if (url.includes('/rest/v1/songs')) return response([{ song_id: 1, title: 'Filter Song', ac: 1 }]);
+      if (url.startsWith('https://data.iidx.in/hist/')) return response([]);
+      if (url.endsWith('/rpc/upsert_scores')) return response(null);
+      if (url.endsWith('/auth/issue')) return response({ url: 'https://iidx.in/login?ticket=ticket' });
+      if (url.endsWith('/auth/exchange')) return response({ iidx_id: '89388691', token: 'token' });
+      if (url.includes('/api/dump-trigger')) {
+        attempts++;
+        if (kind === 'throw') throw new Error('network lost');
+        if (kind === 'timeout') { options.signal.addEventListener('abort', () => {}); return new Promise((resolve, reject) => options.signal.addEventListener('abort', () => reject(new Error('aborted')))); }
+        return response(null, { ok: false, status: 503 });
+      }
+      return response(null);
+    }, true, Date.parse, { fastDumpEnabled: true });
+    const result = await db.upsertUserChartScores([scoreRow()]);
+    assert.equal(result.ok, true);
+    assert.ok(warnings.length > 0);
+    return { result, attempts };
+  };
+  const off = loadDb(async (url) => url.includes('/rest/v1/songs') ? response([{ song_id: 1, title: 'Filter Song', ac: 1 }])
+    : url.startsWith('https://data.iidx.in/hist/') ? response([]) : response(null));
+  const baseline = await off.db.upsertUserChartScores([scoreRow()]);
+  for (const kind of ['503', 'throw', 'timeout']) {
+    const { result, attempts } = await outcome(kind);
+    assert.deepEqual({ ...result }, { ...baseline });
+    assert.equal(attempts, kind === '503' || kind === 'throw' || kind === 'timeout' ? 2 : 0);
+  }
+
+  let issues = 0; let completion = 0;
+  const idTest = loadDb(async (url, options) => {
+    if (url.includes('/rest/v1/songs')) return response([{ song_id: 1, title: 'Filter Song', ac: 1 }]);
+    if (url.startsWith('https://data.iidx.in/hist/')) return response([]);
+    if (url.endsWith('/auth/issue')) { issues++; return response({ url: `https://iidx.in/login?ticket=ticket-${issues}` }); }
+    if (url.endsWith('/auth/exchange')) return response({ iidx_id: '89388691', token: 'token-' + issues });
+    if (url.includes('/api/dump-trigger')) { completion++; return response(null, { ok: false, status: completion === 1 ? 401 : 200 }); }
+    return response(null);
+  }, true, Date.parse, { fastDumpEnabled: true });
+  await idTest.db.upsertUserChartScores([scoreRow()]);
+  await idTest.db.upsertUserChartScores([scoreRow()]);
+  assert.equal(issues, 2);
+  assert.equal(completion, 2);
+
+  let requestNo = 0;
+  const multi = loadDb(async (url, options) => {
+    if (url.includes('/rest/v1/songs')) return response([{ song_id: 1, title: 'Filter Song', ac: 1 }]);
+    if (url.startsWith('https://data.iidx.in/hist/')) return response([]);
+    if (url.endsWith('/auth/issue')) { const id = JSON.parse(options.body); return response({ url: `https://iidx.in/login?ticket=${id.iidx_id}` }); }
+    if (url.endsWith('/auth/exchange')) { const issue = multi.calls.findLast(({ url }) => url.endsWith('/auth/issue')); const id = JSON.parse(issue.options.body).iidx_id; return response({ iidx_id: id, token: 'token-' + id }); }
+    if (url.includes('/api/dump-trigger')) { requestNo++; return response({ accepted: true }); }
+    return response(null);
+  }, true, Date.parse, { fastDumpEnabled: true, uuidFactory: () => `00000000-0000-4000-8000-${String(++requestNo).padStart(12, '0')}` });
+  await multi.db.upsertUserChartScores([scoreRow(), scoreRow({ iidx_id: '12345678' })]);
+  const posts = multi.calls.filter(({ url }) => url.includes('/api/dump-trigger'));
+  assert.equal(posts.length, 2);
+  assert.notEqual(JSON.parse(posts[0].options.body).request_id, JSON.parse(posts[1].options.body).request_id);
 });
 
 test('ac and legen bit supplementation checks ensure_song ID and preserves series grouping', async () => {

@@ -75,6 +75,11 @@
 // ============================================================
 
 window.OhsorryDb = (function () {
+  const FAST_DUMP_ENQUEUE_CRAWLER = false;
+  const DUMP_TRIGGER_URL = 'https://iidx.in/api/dump-trigger?upload_complete=1';
+  const DUMP_AUTH_URL = 'https://iidx.in';
+  const dumpBearerById = new Map();
+  const dumpBearerPromiseById = new Map();
   const SUPABASE_URL = 'https://cvxpeecxiawddmrzbdvn.supabase.co';
   // Legacy JWT anon key (publishable key 는 RLS 호환성 문제로 사용 X) — 본체와 동일
   const SUPABASE_KEY =
@@ -431,7 +436,7 @@ window.OhsorryDb = (function () {
   //   다른 필드 (dj_name, game_level, dj_level, level) 는 무시 (새 디비 미사용).
   //   PK (song_id, iidx_id, diff, played_version) 중복 안전망: dedup 으로 best ex_score 유지.
   //   리턴: { ok: boolean, error?: string, unmatched?: number, inserted?: number }
-  async function upsertUserChartScores(rows) {
+  async function upsertUserChartScores(rows, options) {
     if (!Array.isArray(rows) || rows.length === 0) {
       // 0건은 "성공" 이 아니라 "쓸 게 없었음" — 호출부가 완료로 표시하지 않도록 구분한다.
       // (이걸 ok:true 로만 돌려주면 성적을 하나도 못 읽은 크롤이 "업로드 완료" 로 보인다)
@@ -780,11 +785,97 @@ window.OhsorryDb = (function () {
       if (seriesGroups.size > 0) {
         console.log(`[OhsorryDb] songs.series_no 갱신: ${seriesBumped}건 (${seriesGroups.size}시리즈)`);
       }
+      const completionSource = options && options.completionSource === 'csv' ? 'csv'
+        : options && Object.prototype.hasOwnProperty.call(options, 'completionSource') ? null : 'crawler';
+      const completionEnabled = completionSource === 'csv' ? options.fastDumpEnabled === true
+        : completionSource === 'crawler' ? FAST_DUMP_ENQUEUE_CRAWLER : false;
+      if (filteredScoreRows.length > 0 && inserted > 0 && completionEnabled) {
+        const ids = Array.from(new Set(filteredScoreRows.map((row) => String(row.iidx_id || '').replace(/-/g, '')).filter((id) => /^\d{8}$/.test(id))));
+        for (const id of ids) {
+          try {
+            await enqueueDumpComplete(id, completionSource);
+          } catch (error) {
+            console.warn(`[OhsorryDb] dump completion enqueue failed iidx_id=${id}: ${error && error.message ? error.message : error}`);
+          }
+        }
+      } else if (filteredScoreRows.length > 0 && inserted > 0 && options && Object.prototype.hasOwnProperty.call(options, 'completionSource') && completionSource === null) {
+        console.warn('[OhsorryDb] dump completion skipped: unknown completionSource');
+      }
       return filteredScoreRows.length === 0
         ? { ok: true, unmatched, inserted, autoEnsured, unchanged: true }
         : { ok: true, unmatched, inserted, autoEnsured };
     } catch (e) {
       return { ok: false, error: e.message };
+    }
+  }
+
+  function createRequestId() {
+    try {
+      if (typeof crypto !== 'undefined' && crypto && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+    } catch (_) { /* unavailable in some embedded browsers */ }
+    console.warn('[OhsorryDb] dump completion skipped: crypto.randomUUID unavailable');
+    return null;
+  }
+
+  async function getCrawlerDumpBearer(iidxId) {
+    if (dumpBearerById.has(iidxId)) return dumpBearerById.get(iidxId);
+    if (dumpBearerPromiseById.has(iidxId)) return dumpBearerPromiseById.get(iidxId);
+    const pending = (async () => {
+      const issue = await fetch(`${DUMP_AUTH_URL}/auth/issue`, {
+        method: 'POST', credentials: 'omit', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ iidx_id: iidxId, source: 'crawler' }),
+      });
+      const issueBody = await issue.json();
+      if (!issue.ok || !issueBody || !issueBody.url) throw new Error(issueBody && issueBody.error || `auth/issue HTTP ${issue.status}`);
+      const ticket = new URL(issueBody.url).searchParams.get('ticket');
+      if (!ticket) throw new Error('auth/issue response did not contain ticket');
+      const exchange = await fetch(`${DUMP_AUTH_URL}/auth/exchange`, {
+        method: 'POST', credentials: 'omit', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ticket, mode: 'token' }),
+      });
+      const exchangeBody = await exchange.json();
+      if (!exchange.ok || !exchangeBody || exchangeBody.iidx_id !== iidxId || !exchangeBody.token) throw new Error(exchangeBody && exchangeBody.error || `auth/exchange rejected iidx_id or HTTP ${exchange.status}`);
+      dumpBearerById.set(iidxId, exchangeBody.token);
+      return exchangeBody.token;
+    })();
+    dumpBearerPromiseById.set(iidxId, pending);
+    try { return await pending; }
+    finally { dumpBearerPromiseById.delete(iidxId); }
+  }
+
+  async function enqueueDumpComplete(iidxId, source) {
+    const requestId = createRequestId();
+    if (!requestId) return;
+    let headers = { 'Content-Type': 'application/json' };
+    const credentials = source === 'csv' ? 'same-origin' : 'omit';
+    if (source === 'crawler') headers.Authorization = 'Bearer ' + await getCrawlerDumpBearer(iidxId);
+    const body = JSON.stringify({ source, iidx_id: iidxId, request_id: requestId });
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5000);
+      let responseBody;
+      try {
+        const response = await fetch(DUMP_TRIGGER_URL, { method: 'POST', credentials, headers, body, signal: controller.signal });
+        if (source === 'crawler' && response.status === 401) {
+          dumpBearerById.delete(iidxId);
+          return;
+        }
+        if (response.status >= 500) {
+          if (attempt === 0) continue;
+          throw new Error(`dump-trigger HTTP ${response.status}`);
+        }
+        if (!response.ok) throw Object.assign(new Error(`dump-trigger HTTP ${response.status}`), { noRetry: true });
+        responseBody = await response.json();
+        if (!responseBody || typeof responseBody !== 'object' || typeof responseBody.accepted !== 'boolean') {
+          if (attempt === 0) continue;
+          throw new Error('dump-trigger response malformed');
+        }
+        if (responseBody.accepted === false) return;
+        return;
+      } catch (error) {
+        if (error && error.noRetry) throw error;
+        if (attempt === 1) throw error;
+      } finally { clearTimeout(timeout); }
     }
   }
 
