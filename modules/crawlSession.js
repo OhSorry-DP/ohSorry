@@ -108,8 +108,7 @@
       : { status: 'unmatched', observation, songId: null };
   }
 
-  function finalizeIdentity(observations, coverage, commonKey, aliasTitle) {
-    if (typeof commonKey !== 'function') throw new TypeError('commonKey must be a function');
+  function finalizeIdentity(observations, coverage, aliasTitle) {
     if (typeof aliasTitle !== 'function') throw new TypeError('aliasTitle must be a function');
     const required = coverage && (coverage.requiredSeries || coverage.requiredSeriesNos);
     const succeeded = coverage && (coverage.succeededSeries || coverage.successfulSeries || coverage.succeededSeriesNos);
@@ -117,24 +116,11 @@
     const successSet = new Set(succeeded);
     const complete = required.every((n) => successSet.has(n));
     const rows = (Array.isArray(observations) ? observations : []).map((item) => ({ ...item }));
-    const confirmed = new Map();
-    for (const item of rows) {
-      if (item.status !== 'matched' || item.songId == null) continue;
-      const key = commonKey(aliasTitle(item.observation ? item.observation.title : item.title));
-      if (!confirmed.has(key)) confirmed.set(key, []);
-      confirmed.get(key).push({ songId: item.songId, seriesNo: (item.observation || item).seriesNo });
-    }
     const newBySeries = new Map();
     for (const item of rows) {
       if (item.status !== 'unmatched') continue;
       const row = item.observation || item;
-      const key = commonKey(aliasTitle(row.title));
-      const ids = new Set((confirmed.get(key) || []).filter((entry) => entry.seriesNo !== row.seriesNo).map((entry) => entry.songId));
-      if (ids && ids.size === 1) {
-        item.status = 'matched'; item.songId = [...ids][0]; item.identityResolution = 'cross-series';
-      } else if (ids && ids.size > 1) {
-        item.status = 'unresolved'; item.songId = null; item.reason = 'multiple-confirmed-song-ids';
-      } else if (!complete) {
+      if (!complete) {
         item.status = 'deferred'; item.songId = null; item.reason = 'incomplete-series-coverage';
       } else {
         item.status = 'new'; item.songId = null;
