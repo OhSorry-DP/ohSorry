@@ -381,8 +381,10 @@ test('buildPlan skips unknown note metadata and keeps NEW with the server reserv
   assert.equal(result.newRequests[0].p_textage_song_id, '@crawl:new-only');
   assert.equal(result.newRequests[0].p_ac, null);
   assert.equal(result.newRequests[0].p_legen, 1);
-  assert.equal(result.newRequests[0].scoreless, true);
+  assert.deepEqual([5, 2, 1, 0].map((lamp) => planner([scoreRow({ exScore: 0, lamp })], [], { compareHistory: (_, rows) => rows }).rows.length), [1, 1, 0, 0]);
   assert.equal(result.rows.length, 0);
+  assert.equal(result.newRequests[0].scoreless, true);
+  assert.equal(planner([{ ...fresh, observation: { ...fresh.observation, lampNum: 5, lamp: 'HARD' } }], [], { chartNotes: () => null }).newRequests[0].lamp, 5);
 });
 
 test('buildPlan output is stable across observation completion order', () => {

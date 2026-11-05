@@ -256,7 +256,7 @@
         date: chosenEx.base.date, bp: bpEntry.base.bp,
         note_count: entries.find((x) => x.base.note_count != null)?.base.note_count ?? null };
       if (exemplar.confirmed) {
-        if (maxEx <= 0) continue;
+        if (maxEx <= 0 && maxLamp < LAMP_MAP.AC) continue;
         const histForUser = history.filter((h) => Array.isArray(h) ? h[0] === row.song_id && h[7] === row.play_style :
           h.song_id === row.song_id && h.iidx_id === row.iidx_id && h.play_style === row.play_style);
         const tuple = [row.song_id, row.diff, row.lamp, row.ex_score, row.played_version, row.date,
@@ -271,7 +271,7 @@
         const request = { ...row, song_id: tempKey, title: exemplar.item.aliasTitle ?? source.title,
           p_textage_song_id: '@crawl:new-only', p_ac: newDiff === DIFF_MAP.LEGGENDARIA ? null : 1,
           p_legen: newDiff === DIFF_MAP.LEGGENDARIA ? 1 : null };
-        if (maxEx <= 0) {
+        if (maxEx <= 0 && maxLamp < LAMP_MAP.AC) {
           delete request.date; delete request.date_kst; delete request.ex_score; delete request.lamp;
           delete request.bp; delete request.note_count; request.scoreless = true;
         }
