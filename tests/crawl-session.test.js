@@ -39,7 +39,7 @@ test('successes and permanent failures remain complete and are returned in stabl
   const result = await api._runQueueForTest({ seriesNos: [3, 1, 2], retryPolicy: {}, betweenRequestsMs: () => 0, fetchSeries: async (n) => {
     await Promise.resolve(); return n === 2 ? { status: 'error', error: 'HTTP 500' } : { status: 'ok', charts: [{ n }] };
   } }, 3);
-  assert.deepEqual(result.series.map((x) => [x.seriesNo, x.status, x.completed]), [[1, 'ok', true], [2, 'error', true], [3, 'ok', true]]);
+  assert.deepEqual(result.series.map((x) => [x.seriesNo, x.status, x.completed]), [[1, 'ok', true], [2, 'error', false], [3, 'ok', true]]);
   assert.deepEqual(result.charts.map((x) => x.n), [1, 3]);
 });
 
@@ -81,4 +81,65 @@ test('browser UMD and CommonJS expose the same API', () => {
   assert.deepEqual(Object.keys(browser.OhsorryCrawlSession), Object.keys(api));
   assert.equal(browser.OhsorryCrawlSession.SERIES_CONCURRENCY, api.SERIES_CONCURRENCY);
   assert.deepEqual(Array.from(browser.OhsorryCrawlSession.EMPTY_PAUSE_MS), api.EMPTY_PAUSE_MS);
+});
+
+const identityKey = (value) => String(value ?? '').replace(/И/g, 'N').normalize('NFKC').toLowerCase().replace(/[^a-z0-9]/g, '');
+const observation = (seriesNo, title, extra = {}) => ({ seriesNo, title, diff: 'ANOTHER', playStyle: 'DP', playedVersion: 30, observedAt: '2026-11-05T00:00:00Z', ...extra });
+
+test('same-series common keys resolve ZENITH aliases while preserving the observation', () => {
+  const songs = [
+    { song_id: 1677, title: 'ZEИITH', series_no: 30, ac: 1, legen: 0, textage_song_id: 'zenith30' },
+    { song_id: 1564, title: 'Zenith', series_no: 28, ac: 1, legen: 0, textage_song_id: 'zenith28' },
+  ];
+  const source = observation(30, 'ZENITH');
+  const result = api.resolveObservation(source, songs, identityKey, []);
+  assert.equal(result.status, 'matched');
+  assert.equal(result.songId, 1677);
+  assert.deepEqual(result.observation, { ...source, rawKey: [30, 'ZENITH', 'ANOTHER', 'DP'] });
+  assert.equal(api.resolveObservation(observation(28, 'Zenith'), songs, identityKey, []).songId, 1564);
+});
+
+test('same-title entries in different series only resolve within the observed series', () => {
+  const songs = [
+    { song_id: 369, title: 'SHOOTING STAR', series_no: 30, ac: 1, legen: 0 },
+    { song_id: 1700, title: 'Shooting Star', series_no: 31, ac: 1, legen: 0 },
+  ];
+  assert.equal(api.resolveObservation(observation(30, 'Shooting Star'), songs, identityKey, []).songId, 369);
+  assert.equal(api.resolveObservation(observation(29, 'Shooting Star'), songs, identityKey, []).status, 'unmatched');
+});
+
+test('AC bit narrows ADVANCE to the eagate AC song', () => {
+  const songs = [
+    { song_id: 'advanc32', title: 'ADVANCE', series_no: 30, ac: 1, legen: 0 },
+    { song_id: 'advance', title: 'ADVANCE', series_no: 30, ac: 2, legen: 0 },
+  ];
+  assert.equal(api.resolveObservation(observation(30, 'ADVANCE'), songs, identityKey, []).songId, 'advanc32');
+});
+
+test('C2 series identity exception selects exactly one remaining AC candidate', () => {
+  const songs = [
+    { song_id: 41, title: 'Shared', series_no: 30, ac: 1, legen: 0 },
+    { song_id: 42, title: 'Shared', series_no: 30, ac: 1, legen: 0 },
+  ];
+  const row = observation(30, 'Shared');
+  const exception = [{ seriesNo: 30, sourceTitle: 'Shared', songId: 42 }];
+  assert.equal(api.resolveObservation(row, songs, identityKey, exception).songId, 42);
+  assert.equal(api.resolveObservation(row, songs, identityKey, []).status, 'unmatched');
+  assert.equal(api.resolveObservation(row, songs, identityKey, [{ ...exception[0], songId: 999 }]).status, 'unmatched');
+  assert.equal(api.resolveObservation(row, songs, identityKey, [exception[0], { ...exception[0], songId: 41 }]).status, 'unmatched');
+});
+
+test('raw observations with Shared in different series remain separate', () => {
+  const rows = [observation(30, 'Shared'), observation(31, 'Shared')];
+  const resolved = rows.map((row) => api.resolveObservation(row, [], identityKey, []));
+  assert.notDeepEqual(resolved[0].observation.rawKey, resolved[1].observation.rawKey);
+  assert.deepEqual(resolved.map((item) => item.observation.seriesNo), [30, 31]);
+});
+
+test('songs load failure is distinct from a valid empty song list', () => {
+  const row = observation(30, 'Unknown');
+  assert.equal(api.resolveObservation(row, null, identityKey, []).status, 'error');
+  const empty = api.resolveObservation(row, [], identityKey, []);
+  assert.equal(empty.status, 'unmatched');
+  assert.equal(empty.songId, null);
 });

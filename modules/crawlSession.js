@@ -71,16 +71,42 @@
       while (clock() < pauseUntil) await waitForChange(pauseUntil);
       await runPass(pending, true);
     }
-    const series = sorted.map((seriesNo) => ({ seriesNo, ...state.get(seriesNo), completed: state.get(seriesNo).status !== 'pending' }));
+    const series = sorted.map((seriesNo) => ({ seriesNo, ...state.get(seriesNo), completed: state.get(seriesNo).status === 'ok' }));
     return { series, charts: series.flatMap((item) => item.charts), completed: series.every((item) => item.completed) };
   }
 
   function defaultSleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
+
+  function resolveObservation(row, songs, commonKey, exceptions) {
+    const observation = { ...row, rawKey: [row.seriesNo, row.title, row.diff, row.playStyle] };
+    if (!Array.isArray(songs)) return { status: 'error', observation, songId: null, error: 'songs-unavailable' };
+    if (typeof commonKey !== 'function') throw new TypeError('commonKey must be a function');
+
+    let candidates = songs.filter((song) => song && song.series_no === row.seriesNo && commonKey(song.title) === commonKey(row.title));
+    if (candidates.length === 1) return { status: 'matched', observation, songId: candidates[0].song_id };
+    if (candidates.length > 1) {
+      const acCandidates = candidates.filter((song) => (Number(song.ac) & 1) !== 0);
+      candidates = acCandidates;
+      if (candidates.length === 1) return { status: 'matched', observation, songId: candidates[0].song_id };
+      if (candidates.length > 1 && row.diff === 'LEGGENDARIA') {
+        const legenCandidates = candidates.filter((song) => (Number(song.legen) & 1) !== 0);
+        if (legenCandidates.length === 1) return { status: 'matched', observation, songId: legenCandidates[0].song_id };
+        candidates = legenCandidates;
+      }
+    }
+    if (candidates.length > 1 && Array.isArray(exceptions)) {
+      const matches = exceptions.filter((entry) => entry && entry.seriesNo === row.seriesNo && entry.sourceTitle === row.title &&
+        candidates.some((song) => song.song_id === entry.songId));
+      if (matches.length === 1) return { status: 'matched', observation, songId: matches[0].songId };
+    }
+    return { status: 'unmatched', observation, songId: null };
+  }
 
   return Object.freeze({
     SERIES_CONCURRENCY,
     EMPTY_PAUSE_MS: Object.freeze(EMPTY_PAUSE_MS),
     runQueue(options) { return runQueueInternal(options, SERIES_CONCURRENCY); },
     _runQueueForTest(options, slots) { return runQueueInternal(options, slots); },
+    resolveObservation,
   });
 });
