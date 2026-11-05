@@ -2,6 +2,13 @@
 
 ohSorry 의 변경 이력입니다. 사용방법은 [README.md](README.md) 를 참고하세요.
 
+### 2026-11-05 — v34 제니스 혼입 지혈
+
+- eagate 웹은 ZEИITH 를 ASCII `ZENITH` 로 준다. 이 제목이 norm 에서 Zenith(1564)로 매칭되고, ID dedup 에서 EX 높은 쪽만 남아 ZEИITH 기록이 Zenith 를 덮었다. `bump_song_series` 로 1564 의 시리즈도 30 으로 덮였다.
+- dbConn: 게임 버전 34·원문 `ZENITH`·관측 시리즈 30 이면 1677 로 저장한다. 다른 시리즈의 `ZENITH` 는 저장하지 않고 unmatched 샘플에 남긴다. CSV·INF·v33 은 기존 경로다.
+- 1564·1677 은 `bump_song_series` 대상에서 뺀다. 미플레이 등록 경로의 `ZENITH` 도 건너뛴다.
+- 임시 조치다. 새 크롤러의 시리즈 판정으로 대체한다. 검증: 테스트 36/36. 반영은 gist·R2 게시 후.
+
 ### 2026-10-25 — 크롤러 업로드 완료 통지 켬
 
 - dbConn `FAST_DUMP_ENQUEUE_CRAWLER = true`. 크롤러 점수 업로드가 모든 청크 성공 뒤 `auth/issue`→`auth/exchange` Bearer 로 `https://iidx.in/api/dump-trigger?upload_complete=1` 에 완료를 알린다. 서버가 세대를 발급하면 빠른 경로(Edge)가 그리드·Recent 를 먼저 게시하고, 실패하면 기존 느린 덤프가 폴백이다.

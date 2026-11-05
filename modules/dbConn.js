@@ -1,4 +1,7 @@
 // dbConn.js — 오소리 DB 통신 모듈 (v0.0.418)
+// 제니스 특례는 추후 일반 시리즈 판정으로 대체할 예정.
+const ZENITH_SERIES_CASE = { version: 34, title: 'ZENITH', seriesNo: 30, songId: 1677 };
+const SERIES_BUMP_EXCLUDED_IDS = new Set([1564, 1677]);
 // v0.0.418 — users.r_star 독립 저장. fetchUserStars 조회 + upsert_user p_r_star 전달(null은 DB COALESCE 보존).
 // v0.0.417 — recomputeAndSaveStar 에 단조 래칫 적용. onlyOSRtoEreter v0.0.4 의 opts.prevStar 로
 //            기존 star 보다 낮아지지 않게 한다. 클리어를 더했는데 별값이 내려가는 걸 막는 최종 방어선
@@ -483,11 +486,20 @@ window.OhsorryDb = (function () {
         if (diffInt == null) { invalidDiff++; continue; }
         const playedVersion = parseInt(r.played_version, 10);
         if (isNaN(playedVersion)) { invalidVersion++; continue; }
+        const isEagateZenith = !(options && options.completionSource === 'csv')
+          && Object.prototype.hasOwnProperty.call(r, 'seriesNo')
+          && playedVersion === ZENITH_SERIES_CASE.version
+          && r.title === ZENITH_SERIES_CASE.title;
+        if (isEagateZenith && !(typeof r.seriesNo === 'number' && r.seriesNo === ZENITH_SERIES_CASE.seriesNo)) {
+          unmatched++;
+          if (unmatchedSamples.length < 10) unmatchedSamples.push(`${r.title} (seriesNo=${String(r.seriesNo)}; 제니스 관측 시리즈 불일치)`);
+          continue;
+        }
         const nk = normTitle(r.title);
         // 재발 방지(B-1): 옛 NULL행을 textage행으로 입양 (조건 충족 시 songMap 갱신).
-        await maybeAdopt(songMap, nk, songMap.get(nk));
+        if (!isEagateZenith) await maybeAdopt(songMap, nk, songMap.get(nk));
         const candidates = songMap.get(nk);
-        let songId = pickSongId(candidates, playedVersion);
+        let songId = isEagateZenith ? ZENITH_SERIES_CASE.songId : pickSongId(candidates, playedVersion);
         if (songId == null) {
           // songs 마스터에 미등록 신곡 — ensure_song RPC 로 자동 등록.
           //   ac 비트 (1=AC, 2=INF) 결정: playedVersion 0=INF, 그 외=AC.
@@ -529,9 +541,11 @@ window.OhsorryDb = (function () {
         }
         // 시리즈 폴더 fetch 시 채워진 seriesNo (1~33) 를 song_id 별로 모음.
         if (typeof r.seriesNo === 'number' && r.seriesNo > 0) {
-          let set = seriesGroups.get(r.seriesNo);
-          if (!set) { set = new Set(); seriesGroups.set(r.seriesNo, set); }
-          set.add(songId);
+          if (!SERIES_BUMP_EXCLUDED_IDS.has(songId)) {
+            let set = seriesGroups.get(r.seriesNo);
+            if (!set) { set = new Set(); seriesGroups.set(r.seriesNo, set); }
+            set.add(songId);
+          }
         }
         const lampInt = r.lamp != null && LAMP_MAP[r.lamp] != null ? LAMP_MAP[r.lamp] : null;
         const exScore = r.ex_score != null ? Number(r.ex_score) : null;
@@ -896,6 +910,7 @@ window.OhsorryDb = (function () {
       let ensured = 0;
       for (const title of titles) {
         if (!title) continue;
+        if (seriesNo === 34 && title === ZENITH_SERIES_CASE.title) continue;
         const nk = normTitle(title);
         if (!nk) continue;
         await maybeAdopt(songMap, nk, songMap.get(nk));
@@ -919,7 +934,7 @@ window.OhsorryDb = (function () {
             continue;
           }
         }
-        if (songId != null) songIds.push(songId);
+        if (songId != null && !SERIES_BUMP_EXCLUDED_IDS.has(songId)) songIds.push(songId);
       }
       if (songIds.length) {
         try {
