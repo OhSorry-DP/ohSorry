@@ -74,7 +74,7 @@ test('eagate adapter applies retry policy and returns exhausted empty-series fai
   const result = await adapter.collectCharts({ series: '33', seriesList: [0, 1], style: '1', updateProgress() {}, alertFn: (message) => notices.push(message) });
   assert.deepEqual({ ...configured.retryPolicy, delaysMs: Array.from(configured.retryPolicy.delaysMs) }, { maxCycles: 10, delaysMs: [2000, 4000, 8000], capMs: 8000 });
   assert.equal(typeof configured.betweenRequestsMs, 'function');
-  assert.equal(configured.betweenRequestsMs(), 800);
+  assert.equal(configured.betweenRequestsMs(), 1300);
   assert.equal(attempts, 12);
   assert.deepEqual(t.sleeps.filter((ms) => ms === 2000 || ms === 4000 || ms === 8000), [2000, 4000, 8000, 8000, 8000, 8000, 8000, 8000, 8000, 8000]);
   assert.equal(result.ok, true);
