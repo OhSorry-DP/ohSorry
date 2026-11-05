@@ -144,6 +144,23 @@ test('songs load failure is distinct from a valid empty song list', () => {
   assert.equal(empty.songId, null);
 });
 
+test('song title keys are indexed once per songs array and commonKey function', () => {
+  const songs = Array.from({ length: 2000 }, (_, index) => ({
+    song_id: index + 1, title: `Song ${index}`, series_no: 30, ac: 1, legen: 0,
+  }));
+  let calls = 0;
+  const countedKey = (title) => { calls += 1; return identityKey(title); };
+  for (let index = 0; index < 1000; index += 1) {
+    api.resolveObservation(observation(30, `Song ${index}`), songs, countedKey, []);
+  }
+  assert.ok(calls <= songs.length + 1000);
+
+  const otherSongs = songs.slice();
+  const beforeOtherArray = calls;
+  api.resolveObservation(observation(30, 'Song 0'), otherSongs, countedKey, []);
+  assert.equal(calls - beforeOtherArray, otherSongs.length + 1);
+});
+
 const aliasIdentity = (value) => value === 'ZE?ITH' ? 'ZENITH' : value;
 const resolved = (seriesNo, title, songId) => ({ status: 'matched', songId, observation: observation(seriesNo, title) });
 const missing = (seriesNo, title, extra = {}) => ({ status: 'unmatched', songId: null, observation: observation(seriesNo, title, extra) });

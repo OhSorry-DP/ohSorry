@@ -8,6 +8,7 @@
   const SERIES_CONCURRENCY = 2;
   const NEW_LIMIT_PER_OLD_SERIES = 10;
   const EMPTY_PAUSE_MS = [2000, 4000, 8000];
+  const songIndexes = new WeakMap();
   const DIFF_MAP = Object.freeze({ BEGINNER: 0, NORMAL: 1, HYPER: 2, ANOTHER: 3, LEGGENDARIA: 4 });
   const LAMP_MAP = Object.freeze({ NP: 0, F: 1, AC: 2, EC: 3, NC: 4, HC: 5, EX: 6, FC: 7, PFC: 7,
     'NO PLAY': 0, FAILED: 1, ASSIST: 2, EASY: 3, CLEAR: 4, HARD: 5, 'EX HARD': 6, 'FULL COMBO': 7 });
@@ -81,12 +82,41 @@
 
   function defaultSleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 
+  function getSongIndex(songs, commonKey) {
+    let indexesByKeyFunction = songIndexes.get(songs);
+    if (!indexesByKeyFunction) {
+      indexesByKeyFunction = new WeakMap();
+      songIndexes.set(songs, indexesByKeyFunction);
+    }
+    let index = indexesByKeyFunction.get(commonKey);
+    if (!index) {
+      index = new Map();
+      for (const song of songs) {
+        if (!song) continue;
+        let byTitleKey = index.get(song.series_no);
+        if (!byTitleKey) {
+          byTitleKey = new Map();
+          index.set(song.series_no, byTitleKey);
+        }
+        const titleKey = commonKey(song.title);
+        if (!byTitleKey.has(titleKey)) byTitleKey.set(titleKey, []);
+        byTitleKey.get(titleKey).push({ song, titleKey });
+      }
+      indexesByKeyFunction.set(commonKey, index);
+    }
+    return index;
+  }
+
   function resolveObservation(row, songs, commonKey, exceptions) {
     const observation = { ...row, rawKey: [row.seriesNo, row.title, row.diff, row.playStyle] };
     if (!Array.isArray(songs)) return { status: 'error', observation, songId: null, error: 'songs-unavailable' };
     if (typeof commonKey !== 'function') throw new TypeError('commonKey must be a function');
 
-    let candidates = songs.filter((song) => song && song.series_no === row.seriesNo && commonKey(song.title) === commonKey(row.title));
+    const titleKey = commonKey(row.title);
+    const indexed = getSongIndex(songs, commonKey).get(row.seriesNo);
+    let candidates = indexed && indexed.has(titleKey)
+      ? indexed.get(titleKey).filter((entry) => entry.song.series_no === row.seriesNo && entry.titleKey === titleKey).map((entry) => entry.song)
+      : [];
     if (candidates.length === 1) return { status: 'matched', observation, songId: candidates[0].song_id };
     if (candidates.length > 1) {
       const acCandidates = candidates.filter((song) => (Number(song.ac) & 1) !== 0);
