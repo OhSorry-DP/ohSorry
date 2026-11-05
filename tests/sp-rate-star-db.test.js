@@ -644,6 +644,38 @@ test('웹 크롤 계획은 기존 점수와 예약 NEW를 한 번의 upsert_scor
   assert.equal(rpc(calls, 'bump_song_series').length, 0);
 });
 
+test('DP 계획 저장은 프로필 뒤 한 번 전송하고 완료 신호도 한 번 보낸다', async () => {
+  const { db, calls } = loadDb(async () => response(null), true, Date.parse, { profileDumpCompletionOnly: true });
+  const plan = { rows: [{ iidx_id: '12345678', song_id: 1564, diff: 3, play_style: 1, ex_score: 100, lamp: 4, played_version: 33 }], newRequests: [] };
+  const result = await db.uploadResult({ dbPayload: { iidx_id: '12345678' }, chartScoreRows: [] }, { plan });
+  assert.equal(result.profile.ok, true);
+  assert.equal(result.scores.ok, true);
+  assert.equal(result.scores.inserted, 1);
+  assert.equal(result.dump.ok, true);
+  assert.equal(rpc(calls, 'upsert_scores').length, 1);
+  assert.equal(rpc(calls, 'upsert_user').length, 1);
+  assert.equal(calls.filter(({ url }) => url.includes('dump-trigger')).length, 0);
+});
+
+test('SP 계획의 자체 완료 신호는 끌 수 있다', async () => {
+  const { db, calls } = loadDb(async () => response(null), true, Date.parse, { profileDumpCompletionOnly: true });
+  const plan = { rows: [{ iidx_id: '12345678', song_id: 1564 }], newRequests: [] };
+  assert.equal((await db.uploadWebCrawlPlan(plan, { iidxId: '12345678', notify: false })).ok, true);
+  assert.equal(rpc(calls, 'upsert_user').length, 0);
+  assert.equal(calls.filter(({ url }) => url.includes('dump-trigger')).length, 0);
+  await db.notifyUploadComplete('12345678');
+  assert.equal(rpc(calls, 'upsert_user').length, 1);
+});
+
+test('곡 마스터 읽기 실패는 DP 프로필 저장 뒤 점수 저장만 건너뛴다', async () => {
+  const { db, calls } = loadDb(async () => response(null));
+  const result = await db.uploadResult({ dbPayload: { iidx_id: '12345678' }, chartScoreRows: [] }, { plan: { error: 'songs HTTP 500' } });
+  assert.equal(result.profile.ok, true);
+  assert.equal(result.scores.ok, false);
+  assert.match(result.scores.error, /songs/);
+  assert.equal(rpc(calls, 'upsert_scores').length, 0);
+});
+
 test('웹 크롤 빈 계획은 전송하지 않고 RPC 실패 시 완료 통지를 보내지 않는다', async () => {
   const empty = loadDb(async () => response(null));
   assert.equal((await empty.db.uploadWebCrawlPlan({ rows: [], newRequests: [] })).empty, true);

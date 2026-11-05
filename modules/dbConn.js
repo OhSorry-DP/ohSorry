@@ -840,7 +840,7 @@ window.OhsorryDb = (function () {
     }
     const id = options.iidxId || pRows[0].iidx_id;
     let dump = null;
-    if (FAST_DUMP_ENQUEUE_CRAWLER) {
+    if (FAST_DUMP_ENQUEUE_CRAWLER && options.notify !== false) {
       try { await enqueueDumpComplete(String(id || '').replace(/-/g, ''), 'crawler'); dump = { ok: true }; }
       catch (error) { dump = { ok: false, error: error && error.message ? error.message : String(error) }; }
     }
@@ -1179,7 +1179,13 @@ window.OhsorryDb = (function () {
         console.error('[OhsorryDb] 프로필 저장 실패 — chart scores upsert 건너뜀');
       } else {
         try {
-          out.scores = await upsertUserChartScores(result.chartScoreRows);
+          if (Object.prototype.hasOwnProperty.call(opts, 'plan')) {
+            if (opts.plan && opts.plan.error) out.scores = { ok: false, error: opts.plan.error };
+            else {
+              out.scores = await uploadWebCrawlPlan(opts.plan, { iidxId: result.dbPayload.iidx_id, notify: false });
+              if (out.scores && out.scores.ok) out.scores.inserted = Number(out.scores.submitted) || 0;
+            }
+          } else out.scores = await upsertUserChartScores(result.chartScoreRows);
           if (out.scores && out.scores.empty) console.warn('[OhsorryDb] chart scores 0건 — 저장할 성적이 없었습니다 (성적 비공개/파싱 실패 의심)');
           else if (out.scores && out.scores.unchanged) console.log('[OhsorryDb] chart scores unchanged (hist filter removed all valid rows)');
           else if (out.scores && out.scores.ok) console.log('[OhsorryDb] chart scores upsert 성공');

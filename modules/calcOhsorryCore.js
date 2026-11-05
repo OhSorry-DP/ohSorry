@@ -41,6 +41,55 @@ function __ohsorryShowSpinner() {
 function __ohsorryHideSpinner() {
   document.getElementById('__ohsorry_loading_spinner')?.remove();
 }
+
+// 수집한 원본 관측으로만 식별·이력 비교·저장 계획을 만든다.
+async function __buildCrawlPlan(crawl, profile, isSp, version, textageSongs) {
+  const db = window.OhsorryDb;
+  const session = window.OhsorryCrawlSession;
+  const iidxId = profile && profile.iidxId && profile.iidxId.replace(/-/g, '');
+  if (!iidxId || !db || !session || !db.uploadWebCrawlPlan || !db.filterWebCrawlHistoryRows) {
+    return { ok: false, error: '저장 모듈 또는 IIDX ID가 없어요.' };
+  }
+  try {
+    const songsResponse = await fetch('https://data.iidx.in/songs.json', { cache: 'no-store' });
+    if (!songsResponse.ok) throw new Error('songs HTTP ' + songsResponse.status);
+    const songs = await songsResponse.json();
+    if (!Array.isArray(songs)) throw new Error('songs 형식 오류');
+    let hist;
+    try {
+      const response = await fetch(`https://data.iidx.in/hist/${encodeURIComponent(iidxId)}.json`, { cache: 'no-store' });
+      if (response.status === 404) hist = { status: 404 };
+      else if (!response.ok) hist = { status: 'error' };
+      else {
+        const rows = await response.json();
+        hist = Array.isArray(rows) ? { rows } : { status: 'error' };
+      }
+    } catch (_) { hist = { status: 'error' }; }
+    const series = crawl.series || [];
+    const coverage = { requiredSeries: series.map((s) => s.seriesNo), succeededSeries: series.filter((s) => s.status === 'ok').map((s) => s.seriesNo) };
+    const succeeded = new Set(coverage.succeededSeries);
+    const now = new Date().toISOString();
+    const resolved = (crawl.observations || []).filter((row) => succeeded.has(row.seriesNo)).map((row) =>
+      session.resolveObservation({ ...row, playStyle: isSp ? 0 : 1, playedVersion: Number(version), observedAt: row.observedAt || now }, songs, window.OhsorryNorm.commonKey));
+    const finalized = session.finalizeIdentity(resolved, coverage, window.OhsorryNorm.aliasTitle);
+    const songById = new Map(songs.map((song) => [song.song_id, song]));
+    const keys = { BEGINNER: 'B', NORMAL: 'N', HYPER: 'H', ANOTHER: 'A', LEGGENDARIA: 'X' };
+    const plan = session.buildPlan({ observations: finalized, songs, hist, iidxId,
+      chartNotes(source, songId) {
+        const song = songById.get(songId);
+        const meta = song && textageSongs && textageSongs[song.textage_song_id];
+        const key = (source.playStyle === 0 ? 'S' : 'D') + (keys[source.diff] || '');
+        const notes = meta && meta.notes && meta.notes[key];
+        return typeof notes === 'number' && notes > 0 ? notes : null;
+      },
+      compareHistory: db.filterWebCrawlHistoryRows,
+    });
+    profile.__failedSeries = plan.failedSeries;
+    return { ok: true, plan };
+  } catch (error) {
+    return { ok: false, error: (error && error.message) || String(error) };
+  }
+}
 // 완료 박스 "오소리웹 카드" 링크 — SP 면 SP 리센트(#ps@SP), DP 는 기본(웹 기본 모드). idNorm=하이픈 제거 IIDX ID.
 function __ohsorryCardUrl(idNorm, style) {
   if (!idNorm) return 'https://iidx.in/';
@@ -122,6 +171,7 @@ function __ohsorryShowDone(profile, style, isOwn) {
     (id ? `<div style="font-size:11px;color:#868e96;font-family:monospace;margin-top:1px">${id}</div>` : '') +
     (rankLine ? `<div style="font-size:12px;margin-top:4px">${rankLine}</div>` : '') +
     '<div style="font-size:11.5px;color:#495057;margin-top:6px">업로드 완료 · 공식값은 덤프 후 반영</div>' +
+    (p.__failedSeries && p.__failedSeries.length ? `<div style="color:#c92a2a">수집 실패 시리즈: ${p.__failedSeries.join(', ')}</div>` : '') +
     (p.__dumpSignalError ? '<div style="font-size:11.5px;color:#c92a2a;margin-top:3px">완료 신호 실패 · 재시도 필요</div>' : '') +
     `<a href="${webUrl}" target="_blank" rel="noopener" ` +
       'style="display:block;margin-top:12px;padding:8px 0;text-align:center;background:#1d9e75;color:#fff;font-size:12.5px;font-weight:600;border-radius:6px;text-decoration:none">오소리웹에서 내 카드 보기 →</a>' +
@@ -155,6 +205,7 @@ function __ohsorryShowDoneList(entries) {
         `<span title="${dj}" style="flex:1 1 auto;min-width:40px;overflow:hidden;text-overflow:ellipsis;font-size:13px;font-weight:600">${dj}</span>` +
         (id ? `<span style="flex:none;font-size:11px;color:#868e96;font-family:monospace">${id}</span>` : '') +
         (rankTxt ? `<span style="flex:none;font-size:11.5px;color:#495057">${rankTxt}</span>` : '') +
+        (p.__failedSeries && p.__failedSeries.length ? `<span style="color:#c92a2a">수집 실패: ${p.__failedSeries.join(', ')}</span>` : '') +
         (p.__dumpSignalError ? '<span style="flex:none;font-size:10.5px;color:#c92a2a">신호 재시도 필요</span>' : '') +
         `<a href="${webUrl}" target="_blank" rel="noopener" ` +
           'style="flex:none;padding:6px 9px;background:#1d9e75;color:#fff;font-size:11.5px;font-weight:600;border-radius:6px;text-decoration:none">이동 →</a>' +
@@ -608,7 +659,7 @@ window.OhsorryCore = {
   };
 
   // 수집 실행 — eagateFetch 모듈에 위임 (modules/eagateFetch.js). { ok, charts, pageCount } return.
-  if (!window.OhsorryEagateFetch || !window.OhsorryEagateFetch.collectCharts) {
+  if (!window.OhsorryCrawlSession || !window.OhsorryEagateFetch || !window.OhsorryEagateFetch.collectCharts) {
     alert('eagateFetch 모듈이 로드되지 않았어요. 페이지 새로고침 후 재시도해주세요.');
     return;
   }
@@ -620,21 +671,18 @@ window.OhsorryCore = {
     updateProgress,
   });
   if (!r.ok) return;  // 수집 실패 → 중단 (alert 는 eagateFetch 내부에서 이미 표시)
-  allCharts = r.charts;
-  pageCount = r.pageCount;
-  // 34(ZINRAI) 미플레이 신곡도 songs 마스터엔 등록 — scores 는 절대 안 건드림.
-  //   34 리터럴 고정(SERIES 파생 금지, 사용자 확정) — SERIES(opts.gameVersion) 로 파생시키면 33 재크롤(안전망
-  //   경로) 시에도 이 로직이 같이 타서, 34 재분류로 이미 series_no=34 인 곡이 33 재크롤로 다시 33으로
-  //   되돌아가는 왔다갔다 현상이 생긴다. series.html 은 미플레이 칸도 clflg0(NO PLAY)로 렌더해 이미
-  //   allCharts 에 lampNum=0/exScore=0 차트로 들어와 있다(4.6 필터 이전 시점 — 아직 전부 보임).
-  try {
-    const unplayedTitles34 = [...new Set(
-      allCharts.filter((c) => c.seriesNo === 34 && (c.lampNum || 0) === 0 && (c.exScore || 0) === 0).map((c) => c.title),
-    )];
-    if (unplayedTitles34.length && window.OhsorryDb && window.OhsorryDb.ensureUnplayedSongs) {
-      await window.OhsorryDb.ensureUnplayedSongs(unplayedTitles34, 34);
+  // 계산 경로는 기존 title|diff 선택 규칙을 유지하고 관측은 변경하지 않는다.
+  const mergedCharts = new Map();
+  for (const chart of r.charts) {
+    const key = chart.title + '|' + chart.diff;
+    const previous = mergedCharts.get(key);
+    if (!previous || (chart.exScore || 0) > (previous.exScore || 0) ||
+        ((chart.exScore || 0) === (previous.exScore || 0) && (chart.lampNum || 0) > (previous.lampNum || 0))) {
+      mergedCharts.set(key, { ...chart });
     }
-  } catch (e) { console.warn('[오소리] 34 미플레이 신곡 등록 실패(무시):', e && e.message); }
+  }
+  allCharts = [...mergedCharts.values()];
+  pageCount = r.pageCount;
   updateProgress(`완료! 시리즈 ${pageCount}개 ${allCharts.length}곡`, 100);
   // 잠시 후 진행 패널 제거 (점수 패널이 같은 위치에 뜨므로)
   await new Promise((rs) => setTimeout(rs, 500));
@@ -648,7 +696,7 @@ window.OhsorryCore = {
   // -------- 4.5. textage 로 gameLevel 역추정 (series 페이지엔 레벨 정보 없음) --------
   //   series.html 은 게임레벨(★)을 안 주므로 textage levels 로 채운다. style 별 키: SP=S* / DP=D*.
   //   gameLevel 용도: dbPayload lv12 카운트 + chartScoreRows.game_level + SP 점수 필터.
-  //   noteCount 는 DP 사용자 r★ 입력에 필요하므로 같은 textage 엔트리의 notes 값으로 함께 보강한다.
+  //   noteCount 는 같은 textage 엔트리의 스타일별 notes 값으로 보강한다.
   //   동명이곡(norm 충돌, 한 키에 여러 엔트리)은 해당 diff 채보가 실재(레벨≥1)하는 엔트리 우선.
   const SP_DIFF_KEY = { NORMAL: 'SN', HYPER: 'SH', ANOTHER: 'SA', LEGGENDARIA: 'SX', BEGINNER: 'SB' };
   const DP_DIFF_KEY = { NORMAL: 'DN', HYPER: 'DH', ANOTHER: 'DA', LEGGENDARIA: 'DX', BEGINNER: 'DB' };
@@ -663,7 +711,7 @@ window.OhsorryCore = {
       (textageChartsByNorm[key] = textageChartsByNorm[key] || []).push({ levels: s.levels, notes: s.notes || {} });
     }
   }
-  function fillGameLevel(charts, isSp) {
+  function fillGameLevel(charts, isSp, fillNotes = true) {
     if (!textageChartsByNorm) return;
     const KEY = isSp ? SP_DIFF_KEY : DP_DIFF_KEY;
     let filled = 0;
@@ -676,13 +724,13 @@ window.OhsorryCore = {
       if (c.gameLevel == null && typeof chosen.levels[tKey] === 'number' && chosen.levels[tKey] >= 1) {
         c.gameLevel = chosen.levels[tKey]; filled++;
       }
-      if (!isSp && !(c.noteCount > 0) && typeof chosen.notes[tKey] === 'number' && chosen.notes[tKey] > 0) {
+      if (fillNotes && !(c.noteCount > 0) && typeof chosen.notes[tKey] === 'number' && chosen.notes[tKey] > 0) {
         c.noteCount = chosen.notes[tKey];
       }
     }
     console.log(`[step2] textage gameLevel 역추정(${isSp ? 'SP' : 'DP'}): ${filled}곡`);
   }
-  fillGameLevel(allCharts, isSpMode);
+  fillGameLevel(allCharts, isSpMode, !isSpMode);
 
   // -------- 4.6. series 모드 — 실재하지 않는 채보 칸 제거 --------
   // series.html 은 곡마다 BEGINNER~LEGGENDARIA 5칸을 항상 렌더한다 (DP BEGINNER 처럼
@@ -743,13 +791,14 @@ window.OhsorryCore = {
   // ===== SP 모드 (경량) — ★추정/추천 전부 스킵. 점수 크롤 + DJ명/단위 + 오소리웹 이동 패널. =====
   //   own·rival 모두 SP1~12(BEGINNER 제외) 자동 업로드(play_style:0) + 완료 박스. (대상 IIDX ID 의 프로필/점수를 갱신.)
   if (isSpMode) {
+    fillGameLevel(allCharts, true);
     const spIidx = profile && profile.iidxId ? profile.iidxId.replace(/-/g, '') : null;
     const spPlayed = (allCharts || []).filter((c) => c.exScore > 0 || c.lampNum > 0);
     let spUploaded = null;
     let spInserted = 0;
     let spUploadFailReason = null;  // null 이면 성공(또는 spRows.length===0 인 정상 케이스). 값이 있으면 완료 박스 대신 alert.
     let dumpSignal = null;
-    if (spIidx && window.OhsorryDb && window.OhsorryDb.upsertUserChartScores) {
+    if (spIidx && window.OhsorryDb && window.OhsorryDb.uploadWebCrawlPlan) {
       // 5.6b. 프로필(users + user_radars) 저장 — SP 모드는 ★분석을 안 하므로 star/ereter_star 를 새로
       //   계산하지 않는다. upsert_user 가 그 둘을 EXCLUDED 로 무조건 덮어쓰는 정책(02_users.sql)이라,
       //   기존 값을 조회해 그대로 재전송(없으면 null). dj_name/sp_rank/dp_rank/radar 는 status fetch 값으로 갱신.
@@ -785,14 +834,15 @@ window.OhsorryCore = {
           lamp: c.lamp || null, play_style: 0, date: new Date().toISOString(),
           seriesNo: c.seriesNo,   // dbConn 의 bump_song_series(songs.series_no 갱신) 트리거 — 누락 시 신곡이 series_no=99 로 영구 고정됨
         }));
-      if (spRows.length) {
+      {
         // DP 경로(6~7단계)와 동일한 패턴: ok/empty/예외를 구분해 완료 박스 오표시를 막는다.
         //   spUploaded 자체의 의미(성공 시 건수, 아니면 null)는 유지 — 실패 사유는 별도 변수(spUploadFailReason)로.
         try {
-          const res = await window.OhsorryDb.upsertUserChartScores(spRows);
-          spInserted = Number(res && res.inserted) || 0;
-          const uploadOk = !!(res && res.ok && !res.empty);
-          spUploaded = uploadOk ? spRows.length : null;
+          const built = await __buildCrawlPlan(r, profile, true, SERIES, textageSongs);
+          const res = built.ok ? await window.OhsorryDb.uploadWebCrawlPlan(built.plan, { iidxId: spIidx, notify: false }) : built;
+          spInserted = Number(res && (res.submitted ?? res.inserted)) || 0;
+          const uploadOk = !!(res && res.ok);
+          spUploaded = uploadOk && spInserted ? spInserted : null;
           if (!uploadOk) {
             spUploadFailReason = '스코어: ' + (res && res.empty
               ? '0건 (저장할 성적이 없음 — 성적 비공개/파싱 실패 의심)'
@@ -820,11 +870,13 @@ window.OhsorryCore = {
       profile, style: 'SP', spRank: profile ? (profile.spRank || null) : null,
       iidxId: spIidx, spChartCount: spPlayed.length, spUploaded,
       dump: dumpSignal,
+      crawlSave: { ok: !spUploadFailReason, error: spUploadFailReason },
     };
     // own·rival 모두 완료 박스(대상 IIDX ID 의 카드로 이동). 여러 명이면 wrapper 가 리스트로(suppressDone).
     // spRows.length===0 (SP 성적 없는 DP 전용 유저)는 정상 — spUploadFailReason 이 안 채워진다.
     if (spUploadFailReason) {
       console.error('[SP] 업로드 실패 —', spUploadFailReason);
+      if (opts.suppressDone) alert('오소리 업로드에 실패했어요. ' + spUploadFailReason);
       if (!opts.suppressDone) {
         alert(['오소리 업로드에 실패했어요.', '']
           .concat([spUploadFailReason])
@@ -907,7 +959,10 @@ window.OhsorryCore = {
   //   own·rival 모두 완료 박스(djName/iidxId/단위 + 대상 카드 버튼). 대상 IIDX ID 의 데이터를 갱신.
   if (window.OhsorryDb && window.OhsorryDb.uploadResult) {
     try {
-      const up = await window.OhsorryDb.uploadResult(result);
+      const built = await __buildCrawlPlan(r, profile, false, SERIES, textageSongs);
+      const up = await window.OhsorryDb.uploadResult(result, { plan: built.ok ? built.plan : { error: built.error } });
+      result.crawlSave = { ok: !!(up && !up.skipped && up.profile && up.profile.ok && up.scores && up.scores.ok), error: up && up.scores && up.scores.error };
+      if (!result.crawlSave.ok && opts.suppressDone && !(up && up.skipped)) alert('오소리 업로드에 실패했어요. ' + (result.crawlSave.error || '프로필 저장 실패'));
       if (up && up.skipped) console.log(`[오소리] 업로드 skip (${up.reason})`);
       else {
         // 프로필·스코어 결과를 실제로 확인한다 — 예전엔 무조건 "완료" 를 띄워서

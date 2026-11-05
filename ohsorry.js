@@ -19,6 +19,7 @@
   const DB_URL       = GIST_BASE + '/dbConn.js';
   const NORM_URL     = GIST_BASE + '/normTitle.js';
   const EAGATE_URL   = GIST_BASE + '/eagateFetch.js';
+  const SESSION_URL  = GIST_BASE + '/crawlSession.js';
   let __currentAccent = '#8b3ddb';   // 로딩 프로그레스바 색 — 시즌 탭 선택에 맞춰 갱신(기본 34=보라)
 
   async function loadModule(url, globalName) {
@@ -277,6 +278,8 @@
     try {
       await loadModule(NORM_URL,  'OhsorryNorm');
       await loadModule(DB_URL,    'OhsorryDb');
+      delete window.OhsorryCrawlSession;
+      await loadModule(SESSION_URL, 'OhsorryCrawlSession');
       Core = await loadModule(CORE_URL, 'OhsorryCore');
       await loadModule(EAGATE_URL, 'OhsorryEagateFetch');
     } catch (e) {
@@ -336,7 +339,7 @@
           profile: isRival ? undefined : ownProfile,     // own 은 모달에서 받은 프로필 재사용(status 재fetch 안 함)
           suppressDone: true,                            // 완료 박스는 wrapper 가 아래서 리스트로 한 번에
         });
-        if (res && res.profile) doneEntries.push({ profile: res.profile, style: res.style || playStyle });
+        if (res && res.profile && (!res.crawlSave || res.crawlSave.ok)) doneEntries.push({ profile: res.profile, style: res.style || playStyle });
       }
       if (doneEntries.length === 0) alert('업로드된 결과가 없어요. (라이벌 미발견 / 곡 수집 실패)');
       else Core.showDoneList(doneEntries);

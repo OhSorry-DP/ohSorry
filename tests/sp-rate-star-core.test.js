@@ -55,7 +55,7 @@ function createHarness(options = {}) {
       calls.order.push('fetchUserStars');
       calls.fetch.push('previous');
       if (options.previousThrow && calls.fetch.filter((x) => x === 'previous').length >= 2) throw new Error('previous lookup failed');
-      if (options.previousError && calls.fetch.filter((x) => x === 'previous').length >= 2) {
+      if (options.previousError) {
         return { ok: false, star: null, ereter_star: null, r_star: null, sp_r_star: null,
           sp_r_star_model_id: null, sp_r_star_formula_version: null };
       }
@@ -67,6 +67,7 @@ function createHarness(options = {}) {
     async upsertUserProfile(payload) {
       calls.order.push('profile');
       calls.profile.push(payload);
+      if (options.profileFailures && calls.profile.length <= options.profileFailures) return { ok: false, error: 'profile failed' };
       return { ok: true };
     },
     async upsertInitialUserProfile(payload) {
@@ -80,6 +81,15 @@ function createHarness(options = {}) {
       calls.scoreUploads.push(rows);
       if (options.uploadError) return { ok: false, error: 'score upload failed', inserted: options.inserted || 0 };
       return { ok: true, inserted: options.inserted ?? rows.length };
+    },
+    filterWebCrawlHistoryRows(hist, incoming) { return incoming; },
+    async uploadWebCrawlPlan(plan, opts) {
+      assert.equal(opts.notify, false);
+      const rows = [...plan.rows, ...plan.newRequests];
+      if (!rows.length) return { ok: true, empty: true, submitted: 0 };
+      calls.order.push('scores'); calls.scoreUploads.push(rows);
+      if (options.uploadError) return { ok: false, error: 'score upload failed', inserted: options.inserted || 0 };
+      return { ok: true, submitted: options.inserted ?? rows.length };
     },
     async notifyUploadComplete() { calls.order.push('notify'); calls.notify = (calls.notify || 0) + 1; return options.notifyError ? { ok: false, error: 'signal failed' } : { ok: true }; },
     async fetchSpChartsForStar() { calls.cpiReads++; return [{ title: 'Song 0', diff: 'ANOTHER', gameLevel: 12, lampNum: 7 }]; },
@@ -103,13 +113,14 @@ function createHarness(options = {}) {
   };
   const eagate = { async collectCharts({ seriesList }) {
     calls.loads.push({ type: 'crawl', seriesList });
-    return { ok: true, charts: [{ title: 'Session only', diff: 'ANOTHER', gameLevel: 12, exScore: options.empty ? 0 : 250, lampNum: options.empty ? 0 : 5, noteCount: 100 }], pageCount: 1 };
+    const charts = [{ title: 'Session only', diff: 'ANOTHER', gameLevel: 12, exScore: options.empty ? 0 : 250, lampNum: options.empty ? 0 : 5, noteCount: 100, seriesNo: seriesList[0] + 1 }];
+    return { ok: true, charts, observations: charts, series: seriesList.map((n) => ({ seriesNo: n + 1, status: 'ok' })), pageCount: 1 };
   } };
   const loaderSp = options.noSpResource || options.resourceError ? null : spRateStar;
   const context = {
     __loads: calls.loads,
     window: {
-      OhsorryNorm: { norm: (s) => String(s || '').toLowerCase() }, OhsorryDb: db,
+      OhsorryNorm: require('../modules/normTitle.js'), OhsorryDb: db, OhsorryCrawlSession: require('../modules/crawlSession.js'),
       OhsorryEagateFetch: eagate,
       __ohsorryEreterCache: { charts: [{ title: 'Song 0', diff: 'ANOTHER', level: 12 }], players: {} },
       __ohsorryLibCache: { textage: Object.fromEntries(Array.from({ length: 5 }, (_, i) => ['id-' + i, { title: 'Song ' + i, levels: { SA: 12 }, notes: { SA: 100 } }])), 'ohSorry:ratingData': { data: { ratings: [], spRateStar: ratingSeed } } },
@@ -118,6 +129,8 @@ function createHarness(options = {}) {
     },
     fetch: async (url) => {
       calls.loads.push({ type: 'fetch', url: String(url) });
+      if (String(url).includes('/songs.json')) return { ok: true, async json() { return [{ song_id: 999, title: 'Session only', ac: 1, legen: 0, textage_song_id: null, series_no: options.seriesList ? options.seriesList[0] + 1 : 2 }]; } };
+      if (String(url).includes('/hist/')) return { ok: false, status: 404 };
       if (options.resourceError && String(url).includes('spUserRateStar')) throw new Error('resource fetch failed');
       return { ok: true, async json() { return String(url).includes('ohSorryRating') ? { ratings: [], spRateStar: ratingSeed } : []; }, async text() { return ''; } };
     },
@@ -166,7 +179,9 @@ function createWrapperHarness(source = fs.readFileSync(path.join(__dirname, '..'
   context.__choice = choice;
   // loadModule remains the real wrapper function; mocked fetch supplies a fresh script that
   // registers the already prepared module objects in the VM global.
-  context.fetch = async () => ({ ok: true, text: async () => "window.OhsorryNorm={};window.OhsorryDb={};window.OhsorryCore=window.__core;window.OhsorryEagateFetch={};" });
+  context.fetch = async (url) => options.failSession && String(url).includes('crawlSession.js')
+    ? { ok: false, status: 500 }
+    : { ok: true, text: async () => "window.OhsorryNorm={};window.OhsorryDb={};window.OhsorryCrawlSession={};window.OhsorryCore=window.__core;window.OhsorryEagateFetch={};" };
   window.__core = core;
   vm.runInNewContext(safeSource, context, { filename: 'ohsorry.js' });
   const running = Promise.resolve();
@@ -429,14 +444,14 @@ test('SP는 프로필 뒤 scores 성공 후 완료 신호를 한 번 보내고 �
   assert.equal(calls.cpiReads, 0);
   assert.equal(calls.spPattern, 0);
   assert.deepEqual(Object.keys(calls.profile[0]).sort(), ['dj_name', 'dp_rank', 'iidx_id', 'notes_radar', 'sp_rank']);
-  assert.equal(calls.scoreUploads[0][0].played_version, '33');
+  assert.equal(calls.scoreUploads[0][0].played_version, 33);
 });
 
 test('기본 33·늦은 33·부분 시리즈 payload가 바뀌지 않는다', async () => {
   const run = await runSp({ gameVersion: '33', seriesList: [0, 32] });
   assert.deepEqual(Array.from(run.calls.loads.find((x) => x.type === 'crawl').seriesList), [0, 32]);
-  assert.equal(run.calls.scoreUploads[0][0].played_version, '33');
-  assert.equal(run.calls.scoreUploads[0][0].title, 'Session only');
+  assert.equal(run.calls.scoreUploads[0][0].played_version, 33);
+  assert.equal(run.calls.scoreUploads[0][0].song_id, 999);
   assert.equal(run.calls.notify, 1);
 });
 
@@ -465,4 +480,133 @@ test('단일·다중 완료 문구는 덤프 대기와 신호 재시도를 알�
   assert.match(multiHtml, /공식값은 덤프 후 반영/);
   assert.match(multiHtml, /신호 재시도 필요/);
   assert.doesNotMatch(JSON.stringify(single.calls.profile), /star_estimate|native_star|ereter_star|sp_cpi|sp_star|sp_r_star/);
+});
+
+function crawlFixture(options = {}) {
+  const h = createHarness();
+  const plans = [], alerts = [], calculated = [];
+  const songs = [
+    { song_id: 1564, title: 'Zenith', ac: 1, legen: 0, textage_song_id: 'z1', series_no: 28 },
+    { song_id: 1677, title: 'ZENITH', ac: 1, legen: 0, textage_song_id: 'z2', series_no: 30 },
+    { song_id: 160, title: '22DUNK', ac: 1, legen: 0, textage_song_id: 'dunk', series_no: 1 },
+  ];
+  const row = (title, seriesNo, exScore, lampNum = 5) => ({ title, diff: 'ANOTHER', djLevel: null, exScore, lampNum, lamp: 'HARD', seriesNo });
+  const observations = options.rows || [row('Zenith', 28, 150), row('ZENITH', 30, 180), row('22DUNK', 1, 1100), row('22DUNK', 2, 0, 0)];
+  const series = (options.series || [1, 2, 28, 30]).map((seriesNo) => ({ seriesNo, status: seriesNo === options.failed ? 'error' : 'ok', completed: seriesNo !== options.failed, charts: [] }));
+  h.context.window.OhsorryCrawlSession = require('../modules/crawlSession.js');
+  h.context.window.OhsorryNorm = require('../modules/normTitle.js');
+  const db = h.context.window.OhsorryDb;
+  db.filterWebCrawlHistoryRows = (hist, incoming) => incoming.filter((r) => !hist.some((x) => x[0] === r[0] && x[1] === r[1] && x[7] === r[7] && x[3] >= r[3] && x[2] >= r[2]));
+  db.uploadWebCrawlPlan = async (plan, opts) => { plans.push({ plan, opts }); return { ok: true, submitted: plan.rows.length + plan.newRequests.length }; };
+  db.uploadResult = async (result, { plan }) => {
+    await db.upsertUserProfile(result.dbPayload);
+    const scores = plan.error ? { ok: false, error: plan.error } : await db.uploadWebCrawlPlan(plan, { iidxId: result.dbPayload.iidx_id, notify: false });
+    return { profile: { ok: true }, scores, dump: null };
+  };
+  h.context.alert = (s) => alerts.push(s);
+  h.context.fetch = async (url) => {
+    if (String(url).includes('/songs.json')) return options.songsFail ? { ok: false, status: 500 } : { ok: true, json: async () => songs };
+    if (String(url).includes('/hist/')) {
+      if (options.histFail) throw new Error('offline');
+      if (options.hist404) return { ok: false, status: 404 };
+      return { ok: true, json: async () => [[160,2,1,1085,33,'2026-08-20T08:44:38.019+00:00','2026-08-20',0,null,null]] };
+    }
+    throw new Error('unexpected fetch');
+  };
+  h.context.__loadCoreData = async () => ({
+    ereterData: [], ereterPlayers: {}, ohSorryRatings: [], ratingData: {}, textageSongs: {
+      z1: { title: 'Zenith', levels: { SA: 12, DA: 12 }, notes: { SA: 100, DA: 100 } },
+      z2: { title: 'ZENITH', levels: { SA: 12, DA: 12 }, notes: { SA: 100, DA: 100 } },
+      dunk: { title: '22DUNK', levels: { SA: 12, DA: 12 }, notes: { SA: 600, DA: 600 } },
+    },
+    onlyOSR2eLib: { inferEreter(charts) { calculated.push(JSON.parse(JSON.stringify(charts))); return {}; } },
+  });
+  h.context.window.OhsorryEagateFetch.collectCharts = async () => ({ ok: true, charts: observations, observations, series, completed: !options.failed, pageCount: series.length });
+  const run = (style = 'SP', suppressDone = true) => h.core.compute({ playStyle: style, gameVersion: '30', seriesList: Array.from({ length: 30 }, (_, i) => i), profile: { iidxId: '12345678' }, suppressDone });
+  return { ...h, plans, alerts, calculated, run };
+}
+
+nodeTest('SP와 DP 원본 관측을 시리즈별 song_id로 저장하고 NEW를 scoreless로 보낸다', async () => {
+  for (const style of ['SP', 'DP']) {
+    const h = crawlFixture();
+    await h.run(style);
+    assert.equal(h.plans.length, 1);
+    const { plan, opts } = h.plans[0];
+    assert.equal(opts.iidxId, '12345678');
+    assert.deepEqual(Array.from(plan.rows.filter((r) => [1564,1677].includes(r.song_id)), (r) => [r.song_id, r.play_style, r.note_count]), [[1564, style === 'SP' ? 0 : 1, 100], [1677, style === 'SP' ? 0 : 1, 100]]);
+    assert.equal(plan.newRequests[0].title, '22DUNK');
+    assert.equal(plan.newRequests[0].scoreless, true);
+  }
+});
+
+nodeTest('계산 입력은 title|diff로 EX 우선, 동점일 때 램프 우선이다', async () => {
+  const row = (exScore, lampNum, seriesNo) => ({ title: 'Zenith', diff: 'ANOTHER', djLevel: null, exScore, lampNum, lamp: 'HARD', seriesNo });
+  const h = crawlFixture({ rows: [row(120, 7, 28), row(150, 3, 30), row(150, 6, 28)] });
+  await h.run('DP');
+  assert.equal(h.calculated.length, 1);
+  assert.equal(h.calculated[0].length, 1);
+  assert.equal(h.calculated[0][0].exScore, 150);
+  assert.equal(h.calculated[0][0].lampNum, 6);
+});
+
+nodeTest('부분 실패는 NEW를 유보하고 기존 곡을 저장하며 완료 화면에 알린다', async () => {
+  const h = crawlFixture({ failed: 30 });
+  await h.run('SP', false);
+  assert.equal(h.plans.length, 1);
+  assert.deepEqual(Array.from(h.plans[0].plan.failedSeries), [30]);
+  assert.equal(h.plans[0].plan.newRequests.length, 0);
+  assert.equal(h.plans[0].plan.deferred.length, 1);
+  assert.ok(h.plans[0].plan.rows.some((r) => r.song_id === 1564));
+  assert.ok(h.calls.doneHtml.some((s) => s.includes('수집 실패 시리즈: 30')));
+});
+
+nodeTest('songs 실패는 저장을 막고 hist 404와 오류는 검증된 행을 전송한다', async () => {
+  const bad = crawlFixture({ songsFail: true });
+  await bad.run();
+  assert.equal(bad.plans.length, 0);
+  assert.ok(bad.alerts.some((a) => a.includes('songs')));
+  for (const option of [{ hist404: true }, { histFail: true }]) {
+    const h = crawlFixture(option);
+    await h.run();
+    assert.equal(h.plans.length, 1);
+    assert.ok(h.plans[0].plan.rows.some((r) => r.song_id === 160));
+  }
+});
+
+nodeTest('실제 10열 이력은 같은 SP 차트를 비교하고 만점 초과는 거부한다', async () => {
+  const rows = [
+    { title: '22DUNK', diff: 'HYPER', djLevel: null, exScore: 1085, lampNum: 1, lamp: 'FAILED', seriesNo: 1 },
+    { title: 'Zenith', diff: 'ANOTHER', djLevel: null, exScore: 201, lampNum: 5, lamp: 'HARD', seriesNo: 28 },
+  ];
+  const h = crawlFixture({ rows });
+  await h.run('SP');
+  assert.equal(h.plans[0].plan.rows.length, 0);
+  assert.equal(h.plans[0].plan.rejected[0].reason, 'exceeds-chart-maximum');
+  const offline = crawlFixture({ rows, histFail: true });
+  await offline.run('SP');
+  assert.equal(offline.plans[0].plan.rows[0].song_id, 160);
+  assert.equal(offline.plans[0].plan.rows[0].note_count, null);
+});
+
+nodeTest('세션 모듈 로드 실패 시 wrapper는 수집을 시작하지 않는다', async () => {
+  const h = createWrapperHarness(undefined, { failSession: true });
+  h.resolveChoice({ seriesList: [], playStyle: 'SP', targetId: '12345678', gameVersion: '33' });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(h.calls.computes.length, 0);
+  assert.equal(h.calls.fetchProfile, 0);
+  const noSession = createHarness();
+  delete noSession.context.window.OhsorryCrawlSession;
+  let count = 0;
+  noSession.context.window.OhsorryEagateFetch.collectCharts = async () => { count++; return { ok: false }; };
+  await noSession.core.compute({ profile: { iidxId: '12345678' }, playStyle: 'SP' });
+  assert.equal(count, 0);
+});
+
+nodeTest('SP 프로필 저장 실패는 한 번 재시도하고 최종 실패를 경고한다', async () => {
+  for (const failures of [1, 2]) {
+    const run = await runSp({ profileFailures: failures });
+    assert.equal(run.calls.profile.length, 2);
+    assert.equal(run.calls.notify, 1);
+    if (failures === 2) assert.ok(run.calls.warns.some((args) => String(args).includes('최종 실패')));
+  }
 });
