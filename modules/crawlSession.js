@@ -193,7 +193,7 @@
     for (const item of ordered) {
       const source = item.observation || item;
       const confirmed = item.status === 'matched' && item.songId != null;
-      const count = confirmed ? chartNotes(source) : null;
+      const count = confirmed ? chartNotes(source, item.songId, item) : null;
       const ex = Number(source.ex_score ?? source.exScore ?? source.ex);
       const diff = Number.isInteger(source.diff) ? source.diff : DIFF_MAP[source.diff];
       const rawLamp = source.lampNum ?? source.lamp;
@@ -237,7 +237,8 @@
         lamp, bp: source.bp ?? source.missCount ?? null,
         note_count: source.note_count ?? source.noteCount ?? (entry.notes ?? null),
       };
-      const key = JSON.stringify([base.iidx_id, base.song_id, style, diff, version]);
+      const newIdentity = confirmed ? null : [item.aliasTitle ?? source.title, source.seriesNo];
+      const key = JSON.stringify([base.iidx_id, base.song_id, style, diff, version, newIdentity]);
       const rows = grouped.get(key) || []; rows.push({ ...entry, base }); grouped.set(key, rows);
     }
     const rows = [], newRequests = [];

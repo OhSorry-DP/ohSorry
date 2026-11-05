@@ -296,3 +296,30 @@ test('buildPlan handles hist errors, failed series, and deferred rows without ne
   assert.deepEqual(result.failedSeries, []);
   assert.deepEqual(result.newRequests, []);
 });
+
+test('NEW reservations group by alias title and observed series while duplicate charts merge', () => {
+  const fresh = (seriesNo, title, exScore = 10) => ({ status: 'new', aliasTitle: aliasIdentity(title),
+    observation: observation(seriesNo, title, { playedVersion: 34, diff: 'ANOTHER', playStyle: 1,
+      exScore, lampNum: 1, lamp: 'FAILED' }) });
+  const result = planner([fresh(34, 'One'), fresh(34, 'Two'), fresh(34, 'One', 20), fresh(33, 'One')]);
+  assert.equal(result.newRequests.length, 3);
+  assert.deepEqual(result.newRequests.map((row) => [row.title, row.song_id]), [
+    ['One', '@crawl:new:One:33:1:3'], ['One', '@crawl:new:One:34:1:3'], ['Two', '@crawl:new:Two:34:1:3'],
+  ]);
+  assert.equal(result.newRequests.find((row) => row.title === 'One' && row.song_id.includes(':34:')).ex_score, 20);
+});
+
+test('chartNotes receives the original observation and confirmed song ID for per-song limits', () => {
+  const calls = [];
+  const songs = [
+    { song_id: 101, title: 'A', series_no: 34, textage_song_id: 'a34' },
+    { song_id: 202, title: 'B', series_no: 34, textage_song_id: 'b34' },
+  ];
+  const items = songs.map((song, index) => ({ status: 'matched', songId: song.song_id,
+    observation: observation(34, song.title, { playedVersion: 34, diff: 'ANOTHER', playStyle: 1,
+      exScore: index ? 199 : 201, lampNum: 4, lamp: 'CLEAR' }) }));
+  const result = api.buildPlan({ observations: items, songs, iidxId: 'u1', hist: { status: 'ok', rows: [] },
+    chartNotes: (source, songId) => { calls.push([source.title, songId]); return songId === 101 ? 100 : 100; }, compareHistory: () => [] });
+  assert.deepEqual(calls, [['A', 101], ['B', 202]]);
+  assert.deepEqual(result.rejected.map((row) => row.ex), [201]);
+});
