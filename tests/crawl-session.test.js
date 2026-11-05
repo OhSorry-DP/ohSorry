@@ -8,11 +8,114 @@ const { test } = require('node:test');
 const api = require('../modules/crawlSession.js');
 
 const source = fs.readFileSync(path.join(__dirname, '..', 'modules', 'crawlSession.js'), 'utf8');
+const adapterSource = fs.readFileSync(path.join(__dirname, '..', 'modules', 'eagateFetch.js'), 'utf8');
 function fakeTime() {
   let now = 0;
   const sleeps = [];
   return { clock: () => now, sleeps, sleep: async (ms) => { sleeps.push(ms); now += ms; } };
 }
+
+function loadEagate(fetchImpl, session = api, timing = {}) {
+  const window = { OhsorryCrawlSession: session };
+  const simulated = { now: 0 };
+  class FakeDOMParser {
+    parseFromString(html) {
+      const title = html.trim();
+      return { querySelectorAll: () => title ? [{
+        querySelector: (selector) => selector === 'a.music_info' ? { textContent: title } : null,
+        querySelectorAll: () => [{
+          querySelector: (selector) => selector.includes('clflg') ? { getAttribute: () => '/clflg0.gif', src: '/clflg0.gif' } : null,
+          getAttribute: () => '/clflg0.gif', src: '/clflg0.gif', textContent: '0',
+        }],
+      }] : [] };
+    }
+  }
+  const fakeMath = Object.create(Math);
+  fakeMath.random = () => 0;
+  const FakeDate = class extends Date { static now() { return timing.clock ? timing.clock() : simulated.now; } };
+  const fakeSetTimeout = timing.sleep
+    ? (callback, ms) => { timing.sleep(ms).then(callback); }
+    : (callback, ms) => { simulated.now += ms; Promise.resolve().then(callback); };
+  vm.runInNewContext(adapterSource, { window, fetch: fetchImpl, URLSearchParams, DOMParser: FakeDOMParser,
+    Math: fakeMath, Date: FakeDate, Promise, setTimeout: fakeSetTimeout, console });
+  return window.OhsorryEagateFetch;
+}
+
+test('eagate adapter maps seriesNo to list and preserves same-title charts from separate series', async () => {
+  const requests = [];
+  const adapter = loadEagate(async (_url, options) => {
+    requests.push(new URLSearchParams(options.body).get('list'));
+    return { ok: true, text: async () => '22DUNK' };
+  });
+  const result = await adapter.collectCharts({ series: '33', seriesList: [0, 1], style: '0', updateProgress() {}, alertFn() {} });
+  assert.deepEqual(requests.sort(), ['0', '1']);
+  assert.deepEqual({ title: result.charts[0].title, diff: result.charts[0].diff, exScore: result.charts[0].exScore,
+    lampNum: result.charts[0].lampNum, lamp: result.charts[0].lamp, seriesNo: result.charts[0].seriesNo },
+  { title: '22DUNK', diff: 'BEGINNER', exScore: 0, lampNum: 0, lamp: 'NO PLAY', seriesNo: 1 });
+  assert.deepEqual(result.charts.map(({ title, seriesNo, playStyle, playedVersion }) => [title, seriesNo, playStyle, playedVersion]),
+    [['22DUNK', 1, 0, 33], ['22DUNK', 2, 0, 33]]);
+  assert.equal(result.pageCount, 2);
+  assert.equal(result.completed, true);
+  assert.equal(result.observations.length, 2);
+});
+
+test('eagate adapter applies retry policy and returns exhausted empty-series failures', async () => {
+  const t = fakeTime(); let attempts = 0; let configured;
+  const session = { runQueue: async (options) => {
+    configured = options;
+    return api._runQueueForTest({ ...options, clock: t.clock, sleep: t.sleep }, 2);
+  } };
+  const notices = [];
+  const adapter = loadEagate(async (_url, options) => {
+    attempts++;
+    return new URLSearchParams(options.body).get('list') === '0'
+      ? { ok: true, text: async () => '' } : { ok: true, text: async () => '22DUNK' };
+  }, session);
+  const result = await adapter.collectCharts({ series: '33', seriesList: [0, 1], style: '1', updateProgress() {}, alertFn: (message) => notices.push(message) });
+  assert.deepEqual({ ...configured.retryPolicy, delaysMs: Array.from(configured.retryPolicy.delaysMs) }, { maxCycles: 10, delaysMs: [2000, 4000, 8000], capMs: 8000 });
+  assert.equal(typeof configured.betweenRequestsMs, 'function');
+  assert.equal(configured.betweenRequestsMs(), 800);
+  assert.equal(attempts, 12);
+  assert.deepEqual(t.sleeps.filter((ms) => ms === 2000 || ms === 4000 || ms === 8000), [2000, 4000, 8000, 8000, 8000, 8000, 8000, 8000, 8000, 8000]);
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.series.map((item) => [item.seriesNo, item.completed]), [[1, false], [2, true]]);
+  assert.deepEqual(result.charts.map((row) => [row.title, row.seriesNo]), [['22DUNK', 2]]);
+  assert.deepEqual(notices, ['다음 시리즈는 이번에 못 읽었어요: 1. 나머지는 저장해요.']);
+
+  const emptyTime = fakeTime();
+  const emptySession = { runQueue: (options) => api._runQueueForTest({ ...options, clock: emptyTime.clock, sleep: emptyTime.sleep }, 2) };
+  const emptyAdapter = loadEagate(async () => ({ ok: true, text: async () => '' }), emptySession);
+  const allEmpty = await emptyAdapter.collectCharts({ series: '33', seriesList: [0], style: '1', updateProgress() {}, alertFn() {} });
+  assert.equal(allEmpty.ok, false);
+});
+
+test('eagate adapter keeps first-series login failure fatal while returning later observations', async () => {
+  const adapter = loadEagate(async (_url, options) => {
+    const list = new URLSearchParams(options.body).get('list');
+    return list === '0' ? { ok: false, status: 500 } : { ok: true, text: async () => '22DUNK' };
+  });
+  const result = await adapter.collectCharts({ series: '33', seriesList: [0, 1], style: '1', updateProgress() {}, alertFn() {} });
+  assert.deepEqual(result.series.map((item) => [item.seriesNo, item.status, item.completed]), [[1, 'error', false], [2, 'ok', true]]);
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.observations.map((row) => [row.title, row.seriesNo, row.playStyle]), [['22DUNK', 2, 1]]);
+});
+
+test('eagate adapter allows two queue slots to have requests in progress at once', async () => {
+  const t = fakeTime(); const starts = []; let active = 0, peak = 0, releaseFirst;
+  const session = { runQueue: (options) => api._runQueueForTest({ ...options, clock: t.clock, sleep: t.sleep }, 2) };
+  const adapter = loadEagate(async (_url, options) => {
+    const list = new URLSearchParams(options.body).get('list');
+    starts.push([list, t.clock()]);
+    active++; peak = Math.max(peak, active);
+    if (list === '0') await new Promise((resolve) => { releaseFirst = resolve; });
+    if (list === '1') releaseFirst();
+    await Promise.resolve(); active--;
+    return { ok: true, text: async () => '22DUNK' };
+  }, session);
+  await adapter.collectCharts({ series: '33', seriesList: [0, 1, 2, 3], style: '1', updateProgress() {}, alertFn() {} });
+  assert.equal(peak, 2);
+  assert.equal(starts.length, 4);
+});
 
 test('N=1, 2, 3 share the same worker loop and respect the concurrency limit', async () => {
   for (const slots of [1, 2, 3]) {

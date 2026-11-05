@@ -116,124 +116,44 @@
     }
   }
 
-  // 파싱된 차트를 state 에 누적한다. 같은 차트가 여러 시리즈에 반복되므로 EX 우선, 동점이면 램프를 보존한다.
-  function mergeParsedCharts(state, chartIndexByKey, parsed) {
-    let added = 0;
-    for (const ch of parsed.charts) {
-      const k = ch.title + '|' + ch.diff;
-      const previousIndex = chartIndexByKey.get(k);
-      if (previousIndex == null) {
-        chartIndexByKey.set(k, state.charts.length);
-        state.charts.push(ch);
-        added++;
-        continue;
-      }
-      const previous = state.charts[previousIndex];
-      const newEx = ch.exScore || 0;
-      const previousEx = previous.exScore || 0;
-      const newLamp = ch.lampNum || 0;
-      const previousLamp = previous.lampNum || 0;
-      // 전체 시리즈에 같은 차트가 반복될 수 있다. EX 우선, 동점이면 더 높은 램프를 보존한다.
-      if (newEx > previousEx || (newEx === previousEx && newLamp > previousLamp)) {
-        state.charts[previousIndex] = ch;
-      }
-    }
-    return added;
-  }
-
   async function collectBySeries(ictx, state) {
-    const list = ictx.seriesList;     // 수집할 list 값(0~32) 배열 (collectCharts 에서 정렬·검증)
-    const total = list.length;
-    const chartIndexByKey = new Map();
-    const pending = [];
-    for (let i = 0; i < total; i++) {
-      const sn = list[i];             // eamuse list value (0~32)
-      const sd = sn + 1;              // series_no (1~33)
-      ictx.updateProgress(`시리즈 ${sd} 요청 중... (${i + 1}/${total})`, (i / total) * 95);
-      const result = await fetchSeriesOnce(ictx, sn);
-      let parsed = result.parsed;
-      if (!parsed) {
-        if (result.reason === 'http') {
-          if (i === 0) {
-            console.error(`[eagateFetch] 첫 시리즈 fetch 실패: HTTP ${result.status}`);
-            ictx.updateProgress(`시리즈 페이지 HTTP ${result.status} 에러`, 95);
-            ictx.alertFn(`시리즈 페이지를 가져오지 못했어요 (HTTP ${result.status}).\n로그인 상태인지 확인해주세요.`);
-            return false;
-          }
-          console.warn(`[eagateFetch] 시리즈 ${sd} HTTP ${result.status} — skip`);
-        } else {
-          if (i === 0) {
-            console.error('[eagateFetch] 첫 시리즈 fetch 실패:', result.error);
-            ictx.updateProgress(`시리즈 페이지 fetch 실패: ${result.error.message}`, 95);
-            ictx.alertFn(`시리즈 페이지 fetch 실패: ${result.error.message}`);
-            return false;
-          }
-          console.warn(`[eagateFetch] 시리즈 ${sd} fetch 실패: ${result.error.message} — skip`);
-        }
-      }
-      if (!parsed) continue;
-      if (parsed.charts.length === 0) {
-        console.warn(`[eagateFetch] 시리즈 ${sd} 0차트 — 재시도 pending에 추가`);
-        pending.push({ sn });
-      } else {
-        const added = mergeParsedCharts(state, chartIndexByKey, parsed);
-        state.pageCount++;
-        console.log(`[eagateFetch] 시리즈 ${sd} (${i + 1}/${total}): ${parsed.charts.length}차트 / 신규 ${added} (누적 ${state.charts.length})`);
-        ictx.updateProgress(
-          `시리즈 ${sd}: 신규 ${added}차트 (누적 ${state.charts.length})`,
-          ((i + 1) / total) * 95,
-        );
-      }
-      // 사람처럼 시리즈 사이에 대기 (마지막 시리즈 뒤 생략)
-      if (i < total - 1) {
-        await new Promise((r) => setTimeout(r, Math.round(randomDelay())));
-      }
-    }
-    if (state.charts.length === 0) {
+    const session = window.OhsorryCrawlSession;
+    const seriesNos = ictx.seriesList.map((list) => list + 1);
+    const result = await session.runQueue({
+      seriesNos,
+      retryPolicy: { maxCycles: EMPTY_CHART_RETRY_MAX_CYCLES, delaysMs: EMPTY_CHART_RETRY_CYCLE_DELAYS_MS, capMs: EMPTY_CHART_RETRY_CYCLE_DELAY_MAX_MS },
+      betweenRequestsMs: () => Math.round(randomDelay()),
+      fetchSeries: async (seriesNo) => {
+        const index = seriesNos.indexOf(seriesNo);
+        const list = seriesNo - 1;
+        ictx.updateProgress(`시리즈 ${seriesNo} 요청 중... (${index + 1}/${seriesNos.length})`, (index / seriesNos.length) * 95);
+        const fetched = await fetchSeriesOnce(ictx, list);
+        if (!fetched.parsed) return { status: 'error', error: fetched.reason === 'http' ? new Error(`HTTP ${fetched.status}`) : fetched.error };
+        if (fetched.parsed.charts.length > 0) state.pageCount++;
+        const observedAt = new Date().toISOString();
+        const charts = fetched.parsed.charts.map((chart) => ({ ...chart, playStyle: ictx.style === '0' ? 0 : 1,
+          playedVersion: ictx.playedVersion, observedAt }));
+        return { status: 'ok', charts };
+      },
+    });
+    state.series = result.series;
+    state.charts = result.charts;
+    state.observations = result.charts;
+    const firstSeries = result.series[0];
+    const firstFailure = firstSeries && firstSeries.status === 'error';
+    const failedSeriesNos = result.series.filter((item) => !item.completed).map((item) => item.seriesNo);
+    const ok = !firstFailure && state.charts.length > 0;
+    if (firstFailure) {
+      const message = firstSeries.error && firstSeries.error.message || String(firstSeries.error);
+      ictx.updateProgress(`시리즈 페이지 fetch 실패: ${message}`, 95);
+      ictx.alertFn(message.startsWith('HTTP ') ? `시리즈 페이지를 가져오지 못했어요 (${message}).\n로그인 상태인지 확인해주세요.` : `시리즈 페이지 fetch 실패: ${message}`);
+    } else if (!state.charts.length) {
       ictx.alertFn('모든 시리즈에서 곡을 못 찾았어요. 로그인 상태가 아니거나 페이지 구조가 변경됐을 수 있습니다.');
-      return false;
+    } else if (failedSeriesNos.length) {
+      ictx.alertFn(`다음 시리즈는 이번에 못 읽었어요: ${failedSeriesNos.join(', ')}. 나머지는 저장해요.`);
     }
-    for (let cycle = 1; pending.length > 0 && cycle <= EMPTY_CHART_RETRY_MAX_CYCLES; cycle++) {
-      const waitMs = EMPTY_CHART_RETRY_CYCLE_DELAYS_MS[cycle - 1] || EMPTY_CHART_RETRY_CYCLE_DELAY_MAX_MS;
-      console.warn(`[eagateFetch] 0차트 재시도 사이클 ${cycle}/${EMPTY_CHART_RETRY_MAX_CYCLES} 시작 전: pending ${pending.length}개 / ${waitMs / 1000}초 대기`);
-      ictx.updateProgress(`0차트 재시도 사이클 ${cycle}/${EMPTY_CHART_RETRY_MAX_CYCLES} 시작: pending ${pending.length}개 (${waitMs / 1000}초 대기)`, 95);
-      await new Promise((r) => setTimeout(r, waitMs));
-      for (let p = pending.length - 1; p >= 0; p--) {
-        const { sn } = pending[p];
-        const sd = sn + 1;
-        console.warn(`[eagateFetch] 0차트 재시도 사이클 ${cycle}/${EMPTY_CHART_RETRY_MAX_CYCLES} 진행: 시리즈 ${sd}, pending ${pending.length}개`);
-        ictx.updateProgress(`0차트 재시도 사이클 ${cycle}/${EMPTY_CHART_RETRY_MAX_CYCLES}: 시리즈 ${sd} 요청 중... (pending ${pending.length}개)`, 95);
-        const result = await fetchSeriesOnce(ictx, sn);
-        const parsed = result.parsed;
-        if (!parsed) {
-          // 재시도 사이클은 1차 패스가 이미 성공한 뒤다(누적 차트 > 0) — 로그인 문제일 수 없다.
-          //   여기서 전체를 중단하지 않고 다음 사이클에서 다시 시도한다.
-          if (result.reason === 'http') {
-            console.warn(`[eagateFetch] 시리즈 ${sd} HTTP ${result.status} — 이번 사이클만 skip`);
-          } else {
-            console.warn(`[eagateFetch] 시리즈 ${sd} fetch 실패: ${result.error.message} — 이번 사이클만 skip`);
-          }
-        }
-        if (parsed && parsed.charts.length > 0) {
-          const added = mergeParsedCharts(state, chartIndexByKey, parsed);
-          state.pageCount++;
-          pending.splice(p, 1);
-          console.log(`[eagateFetch] 시리즈 ${sd} (재시도 사이클 ${cycle}/${EMPTY_CHART_RETRY_MAX_CYCLES}): ${parsed.charts.length}차트 / 신규 ${added} (누적 ${state.charts.length})`);
-          ictx.updateProgress(`0차트 재시도 사이클 ${cycle}/${EMPTY_CHART_RETRY_MAX_CYCLES}: 시리즈 ${sd} 성공 (pending ${pending.length}개)`, 95);
-        }
-        if (p > 0) {
-          await new Promise((r) => setTimeout(r, Math.round(randomDelay())));
-        }
-      }
-    }
-    if (pending.length > 0) {
-      const failedSeriesNos = pending.map(({ sn }) => sn + 1).sort((a, b) => a - b);
-      console.warn(`[eagateFetch] 0차트 재시도 ${EMPTY_CHART_RETRY_MAX_CYCLES}사이클 소진: 시리즈 ${failedSeriesNos.join(', ')}`);
-      ictx.alertFn(`다음 시리즈에서 차트를 가져오지 못했어요 (0차트): ${failedSeriesNos.join(', ')}.\n잠시 후 다시 시도해 주세요.`);
-      return false;
-    }
-    console.log(`[eagateFetch] 시리즈 ${total}개 합산: ${state.pageCount}회 / ${state.charts.length}차트 파싱 완료`);
-    return true;
+    console.log(`[eagateFetch] 시리즈 ${seriesNos.length}개 합산: ${state.pageCount}회 / ${state.charts.length}차트 파싱 완료`);
+    return { ok, result };
   }
 
   // ---- 공개 API --------------------------------------------------------
@@ -256,10 +176,11 @@
     const SERIES_URL = `https://p.eagate.573.jp/game/2dx/${SERIES}/djdata/music/series.html`;
     console.log(`[eagateFetch] 시리즈 ${seriesList.length}개 / ${style === '1' ? 'DP' : 'SP'}${isRival ? ' (라이벌)' : ''} 시작`);
 
-    const ictx = { SERIES_URL, style, isRival, rivalToken, updateProgress, alertFn, seriesList };
+    const ictx = { SERIES_URL, style, isRival, rivalToken, updateProgress, alertFn, seriesList, playedVersion: Number(SERIES) };
     const state = { charts: [], pageCount: 0 };
-    const ok = await collectBySeries(ictx, state);
-    return { ok, charts: state.charts, pageCount: state.pageCount, fetchMode: 'series' };
+    const { ok, result } = await collectBySeries(ictx, state);
+    return { ok, charts: state.charts, observations: state.observations, series: state.series,
+      completed: result.completed, pageCount: state.pageCount, fetchMode: 'series' };
   }
 
   window.OhsorryEagateFetch = { VERSION, collectCharts };
