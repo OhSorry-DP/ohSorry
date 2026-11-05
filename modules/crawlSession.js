@@ -8,6 +8,9 @@
   const SERIES_CONCURRENCY = 2;
   const NEW_LIMIT_PER_OLD_SERIES = 10;
   const EMPTY_PAUSE_MS = [2000, 4000, 8000];
+  const DIFF_MAP = Object.freeze({ BEGINNER: 0, NORMAL: 1, HYPER: 2, ANOTHER: 3, LEGGENDARIA: 4 });
+  const LAMP_MAP = Object.freeze({ NP: 0, F: 1, AC: 2, EC: 3, NC: 4, HC: 5, EX: 6, FC: 7, PFC: 7,
+    'NO PLAY': 0, FAILED: 1, ASSIST: 2, EASY: 3, CLEAR: 4, HARD: 5, 'EX HARD': 6, 'FULL COMBO': 7 });
 
   async function runQueueInternal(options, slots) {
     const { seriesNos, fetchSeries, retryPolicy = {}, clock = Date.now, sleep = defaultSleep, betweenRequestsMs } = options;
@@ -157,6 +160,113 @@
     return { observations: rows, coverage: { requiredSeries: [...required], succeededSeries: [...succeeded], failedSeries: required.filter((n) => !successSet.has(n)), complete } };
   }
 
+  function buildPlan({ observations = [], songs = [], hist = {}, chartNotes, compareHistory, iidxId } = {}) {
+    if (typeof chartNotes !== 'function') throw new TypeError('chartNotes must be a function');
+    if (typeof compareHistory !== 'function') throw new TypeError('compareHistory must be a function');
+    if (songs && !Array.isArray(songs) && songs.status === 'error') throw new Error('songs-read-failed');
+    const failedSeries = Array.isArray(observations.failedSeries) ? [...observations.failedSeries].sort((a, b) => a - b) :
+      (observations.coverage && Array.isArray(observations.coverage.failedSeries) ? [...observations.coverage.failedSeries].sort((a, b) => a - b) : []);
+    const items = Array.isArray(observations) ? observations : (observations.observations || []);
+    const rejected = [];
+    const valid = [];
+    const ordered = [...items].sort((a, b) => {
+      const x = a.observation || a, y = b.observation || b;
+      return Number(x.seriesNo) - Number(y.seriesNo) || String(x.title).localeCompare(String(y.title)) ||
+        String(x.diff).localeCompare(String(y.diff)) || String(x.observedAt || '').localeCompare(String(y.observedAt || ''));
+    });
+    for (const item of ordered) {
+      const source = item.observation || item;
+      const confirmed = item.status === 'matched' && item.songId != null;
+      const count = confirmed ? chartNotes(source) : null;
+      const ex = Number(source.ex_score ?? source.exScore ?? source.ex);
+      const diff = Number.isInteger(source.diff) ? source.diff : DIFF_MAP[source.diff];
+      const rawLamp = source.lampNum ?? source.lamp;
+      const lamp = Number.isInteger(rawLamp) ? rawLamp : LAMP_MAP[rawLamp];
+      const rawStyle = source.playStyle ?? source.play_style;
+      const style = rawStyle === 0 || rawStyle === 1 ? rawStyle : null;
+      const invalid = [];
+      if (!Number.isInteger(diff)) invalid.push('invalid-diff');
+      if (!Number.isInteger(lamp)) invalid.push('invalid-lamp');
+      if (style === null) invalid.push('invalid-play-style');
+      if (!Number.isFinite(ex) || !Number.isInteger(ex)) invalid.push('invalid-ex-score');
+      if (invalid.length) {
+        rejected.push({ row: source, reason: invalid.join(','), reasons: invalid });
+        continue;
+      }
+      if (count !== null && Number.isFinite(ex) && ex > count * 2) {
+        rejected.push({ row: source, reason: 'exceeds-chart-maximum', ex, notes: count, maximum: count * 2 });
+        continue;
+      }
+      valid.push({ item, source, confirmed, notes: count, ex, diff, lamp, style });
+    }
+    const grouped = new Map();
+    for (const entry of valid) {
+      const { item, source, confirmed, ex, diff, lamp, style } = entry;
+      if (item.status === 'deferred') continue;
+      if (!confirmed && item.status !== 'new') continue;
+      const version = source.playedVersion ?? source.gameVersion;
+      if (!Number.isInteger(Number(version))) {
+        rejected.push({ row: source, reason: 'invalid-played-version' });
+        continue;
+      }
+      const date = source.date ?? source.observedAt ?? null;
+      const dateKst = date && Number.isFinite(Date.parse(date))
+        ? new Date(Date.parse(date) + 9 * 60 * 60 * 1000).toISOString().slice(0, 10) : null;
+      const base = {
+        iidx_id: source.iidxId ?? iidxId,
+        song_id: confirmed ? item.songId : null,
+        diff, play_style: style, played_version: version,
+        date, date_kst: dateKst,
+        ex_score: ex,
+        lamp, bp: source.bp ?? source.missCount ?? null,
+        note_count: source.note_count ?? source.noteCount ?? (entry.notes ?? null),
+      };
+      const key = JSON.stringify([base.iidx_id, base.song_id, style, diff, version]);
+      const rows = grouped.get(key) || []; rows.push({ ...entry, base }); grouped.set(key, rows);
+    }
+    const rows = [], newRequests = [];
+    const history = hist.status === '404' || hist.status === 404 ? [] : hist.rows ?? hist.data ?? (Array.isArray(hist) ? hist : []);
+    for (const entries of grouped.values()) {
+      entries.sort((a, b) => String(a.source.observedAt || '').localeCompare(String(b.source.observedAt || '')) ||
+        String(a.source.title).localeCompare(String(b.source.title)));
+      const exemplar = entries[0];
+      const maxEx = Math.max(...entries.map((x) => Number(x.base.ex_score ?? -1)));
+      const maxLamp = Math.max(...entries.map((x) => Number(x.base.lamp ?? 0)));
+      const chosenEx = entries.find((x) => Number(x.base.ex_score ?? -1) === maxEx);
+      const chosenLamp = entries.find((x) => Number(x.base.lamp ?? 0) === maxLamp);
+      const bpEntry = entries.find((x) => Number(x.base.ex_score ?? -1) === maxEx && x.base.bp != null) || chosenEx;
+      const row = { ...exemplar.base, ex_score: maxEx < 0 ? null : maxEx, lamp: maxLamp,
+        date: chosenEx.base.date, bp: bpEntry.base.bp,
+        note_count: entries.find((x) => x.base.note_count != null)?.base.note_count ?? null };
+      if (exemplar.confirmed) {
+        if (maxEx <= 0) continue;
+        const histForUser = history.filter((h) => Array.isArray(h) ? h[0] === row.song_id && h[7] === row.play_style :
+          h.song_id === row.song_id && h.iidx_id === row.iidx_id && h.play_style === row.play_style);
+        const tuple = [row.song_id, row.diff, row.lamp, row.ex_score, row.played_version, row.date,
+          row.date_kst, row.play_style, row.bp, row.note_count];
+        const comparisonRows = histForUser.map((h) => Array.isArray(h) ? h : [h.song_id, h.diff, h.lamp, h.ex_score, h.played_version, h.date, h.date_kst, h.play_style, h.bp ?? null, h.note_count ?? null]);
+        if (hist.status === 'error' || compareHistory(comparisonRows, [tuple]).length) rows.push(row);
+      } else {
+        const source = exemplar.source;
+        const newStyle = row.play_style;
+        const newDiff = row.diff;
+        const tempKey = `@crawl:new:${encodeURIComponent(String(exemplar.item.aliasTitle ?? source.title))}:${String(source.seriesNo)}:${newStyle}:${String(newDiff)}`;
+        const request = { ...row, song_id: tempKey, title: exemplar.item.aliasTitle ?? source.title,
+          p_textage_song_id: '@crawl:new-only', p_ac: newDiff === DIFF_MAP.LEGGENDARIA ? null : 1,
+          p_legen: newDiff === DIFF_MAP.LEGGENDARIA ? 1 : null };
+        if (maxEx <= 0) {
+          delete request.date; delete request.date_kst; delete request.ex_score; delete request.lamp;
+          delete request.bp; delete request.note_count; request.scoreless = true;
+        }
+        newRequests.push(request);
+      }
+    }
+    rows.sort((a, b) => Number(a.played_version) - Number(b.played_version) || String(a.song_id).localeCompare(String(b.song_id)) ||
+      a.play_style - b.play_style || String(a.diff).localeCompare(String(b.diff)));
+    newRequests.sort((a, b) => String(a.song_id).localeCompare(String(b.song_id)));
+    return { rows, newRequests, deferred: ordered.filter((x) => x.status === 'deferred'), failedSeries, rejected };
+  }
+
   return Object.freeze({
     SERIES_CONCURRENCY,
     NEW_LIMIT_PER_OLD_SERIES,
@@ -165,5 +275,6 @@
     _runQueueForTest(options, slots) { return runQueueInternal(options, slots); },
     resolveObservation,
     finalizeIdentity,
+    buildPlan,
   });
 });

@@ -198,3 +198,84 @@ test('NEW retains alias and observation details and is deterministic regardless 
   assert.equal(first[0].aliasTitle, 'ZENITH');
   assert.equal(first[0].observation.diff, 'LEGGENDARIA');
 });
+
+const lampNames = { 0: 'NO PLAY', 1: 'FAILED', 2: 'ASSIST', 3: 'EASY', 4: 'CLEAR', 5: 'HARD', 6: 'EX HARD', 7: 'FULL COMBO' };
+const scoreRow = (extra = {}) => {
+  const songId = extra.songId ?? 1;
+  const row = { iidxId: 'u1', exScore: 100, lampNum: 4, lamp: 'CLEAR', missCount: 0,
+    playedVersion: 33, playStyle: 1, ...extra };
+  delete row.songId;
+  if (Object.hasOwn(row, 'ex_score')) { row.exScore = row.ex_score; delete row.ex_score; }
+  if (Object.hasOwn(extra, 'lamp') && Number.isInteger(extra.lamp)) { row.lampNum = extra.lamp; row.lamp = lampNames[extra.lamp]; }
+  if (Object.hasOwn(extra, 'lamp') && typeof extra.lamp === 'string') {
+    row.lampNum = Object.entries(lampNames).find(([, name]) => name === extra.lamp)?.[0] * 1;
+  }
+  if (Object.hasOwn(extra, 'playStyle') && typeof extra.playStyle === 'string') row.playStyle = extra.playStyle === 'DP' ? 1 : 0;
+  if (Object.hasOwn(row, 'bp')) { row.missCount = row.bp; delete row.bp; }
+  if (Object.hasOwn(row, 'note_count')) { row.noteCount = row.note_count; delete row.note_count; }
+  return { status: 'matched', songId, observation: observation(34, 'Shared', row) };
+};
+let actualFilter;
+const actualFilterReady = import('../../ohsorry-data/.github/scripts/score-history.mjs').then((module) => {
+  actualFilter = module.filterWebCrawlHistoryRows;
+});
+const planner = (items, histRows = [], options = {}) => api.buildPlan({ observations: items, iidxId: 'u1',
+  hist: options.hist ?? { status: 'ok', rows: histRows }, songs: [], chartNotes: options.chartNotes ?? (() => 1000),
+  compareHistory: options.compareHistory ?? actualFilter });
+
+test('buildPlan uses the real C6 comparator with real crawl and hist row shapes', async () => {
+  await actualFilterReady;
+  const hist = [[160, 3, 4, 100, 33, '2026-08-20T08:44:38.019+00:00', '2026-08-20', 1, null, 1000]];
+  const plan = (exScore, lamp) => planner([scoreRow({ songId: 160, exScore, lamp, playedVersion: 33, playStyle: 1,
+    observedAt: '2026-11-05T20:00:00.000Z' })], hist);
+  const hard = plan(90, 'HARD'), assistWin = plan(110, 'ASSIST'), assistLose = plan(90, 'ASSIST');
+  assert.equal(hard.rows.length, 1);
+  assert.equal(assistWin.rows.length, 1);
+  assert.equal(assistLose.rows.length, 0);
+  assert.deepEqual([hard.rows[0].diff, hard.rows[0].lamp], [3, 5]);
+  assert.deepEqual([hard.rows[0].date_kst, hard.rows[0].play_style], ['2026-11-06', 1]);
+});
+
+test('buildPlan preserves same-EX BP and NULL note enrichment after ID merge', () => {
+  const result = planner([scoreRow({ missCount: null, noteCount: null }), scoreRow({ seriesNo: 35, missCount: 0, noteCount: 1000 })],
+    [[1, 3, 5, 100, 33, '2026-11-01T00:00:00.000Z', '2026-11-01', 1, null, null]]);
+  assert.equal(result.rows.length, 1);
+  assert.equal(result.rows[0].bp, 0);
+  assert.equal(result.rows[0].note_count, 1000);
+});
+
+test('buildPlan rejects over-maximum observations before merging and accepts equality', () => {
+  const result = planner([scoreRow({ exScore: 2001, seriesNo: 34 }), scoreRow({ exScore: 1900, seriesNo: 35 })]);
+  assert.equal(result.rejected.length, 1);
+  assert.equal(result.rejected[0].ex, 2001);
+  assert.equal(result.rows[0].ex_score, 1900);
+  assert.equal(planner([scoreRow({ exScore: 2000 })]).rows[0].ex_score, 2000);
+});
+
+test('buildPlan skips unknown note metadata and keeps NEW with the server reservation fields', () => {
+  const fresh = { status: 'new', observation: observation(34, 'ZE?ITH', { playedVersion: 34, diff: 'LEGGENDARIA', playStyle: 1,
+    exScore: 0, lampNum: 0, lamp: 'NO PLAY' }), aliasTitle: 'ZENITH' };
+  const result = planner([scoreRow({ exScore: 0, lamp: 'NO PLAY' }), fresh], [], { chartNotes: () => null });
+  assert.equal(result.rejected.length, 0);
+  assert.equal(result.newRequests[0].title, 'ZENITH');
+  assert.equal(result.newRequests[0].p_textage_song_id, '@crawl:new-only');
+  assert.equal(result.newRequests[0].p_ac, null);
+  assert.equal(result.newRequests[0].p_legen, 1);
+  assert.equal(result.newRequests[0].scoreless, true);
+  assert.equal(result.rows.length, 0);
+});
+
+test('buildPlan output is stable across observation completion order', () => {
+  const rows = [scoreRow({ exScore: 100, observedAt: '2026-11-01T00:00:00Z' }), scoreRow({ exScore: 2001, observedAt: '2026-11-02T00:00:00Z' })];
+  const run = (items) => planner(items);
+  assert.deepEqual(run(rows), run([...rows].reverse()));
+});
+
+test('buildPlan handles hist errors, failed series, and deferred rows without network or writes', () => {
+  const deferred = { status: 'deferred', observation: observation(33, 'Later') };
+  const result = planner([scoreRow(), deferred], [], { hist: { status: 'error' } });
+  assert.equal(result.rows.length, 1);
+  assert.deepEqual(result.deferred.map((x) => x.status), ['deferred']);
+  assert.deepEqual(result.failedSeries, []);
+  assert.deepEqual(result.newRequests, []);
+});
