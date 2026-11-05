@@ -2,6 +2,12 @@
 
 ohSorry 의 변경 이력입니다. 사용방법은 [README.md](README.md) 를 참고하세요.
 
+### 2026-11-05 — 시리즈 기준 웹 크롤 저장
+
+- 공용 `modules/crawlSession.js`에 N 슬롯 큐, 시리즈 판정, 미매칭 정리, 비교 및 최종 저장 계획을 모았다. 수집 행은 시리즈별로 보존하고 점수 저장은 계획 업로드로 전환했다.
+- 계산 입력의 기존 `title|diff` 규칙과 `normTitle` 사본 동기화를 유지한다. 일부 시리즈를 읽지 못해도 읽기에 성공한 시리즈는 저장한다.
+- 미플레이 신곡은 NEW 요청으로 전달한다.
+
 ### 2026-11-05 — v34 제니스 혼입 지혈
 
 - eagate 웹은 ZEИITH 를 ASCII `ZENITH` 로 준다. 이 제목이 norm 에서 Zenith(1564)로 매칭되고, ID dedup 에서 EX 높은 쪽만 남아 ZEИITH 기록이 Zenith 를 덮었다. `bump_song_series` 로 1564 의 시리즈도 30 으로 덮였다.
