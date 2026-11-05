@@ -22,7 +22,7 @@
 (function () {
   'use strict';
 
-  const VERSION = 'v0.0.9';
+  const VERSION = 'v0.0.10';
 
   // ---- 상수 -----------------------------------------------------------
   // 시리즈 페이지 간 0.8~1.5초 사이 랜덤 대기 (평균 1.15초)
@@ -123,10 +123,59 @@
       seriesNos,
       retryPolicy: { maxCycles: EMPTY_CHART_RETRY_MAX_CYCLES, delaysMs: EMPTY_CHART_RETRY_CYCLE_DELAYS_MS, capMs: EMPTY_CHART_RETRY_CYCLE_DELAY_MAX_MS },
       betweenRequestsMs: () => Math.round(randomDelay()),
+      onEvent: (event) => {
+        const { type, seriesNo, cycle, maxCycles, position, total, chartCount, errorMessage, delayMs } = event;
+        const list = (event.pendingSeriesNos || []).join(', ');
+        if (type === 'series-start') {
+          if (cycle > 0) {
+            console.warn(`[eagateFetch] 재시도 사이클 ${cycle}/${maxCycles} 진행: 시리즈 ${seriesNo}, pending ${list}`);
+            ictx.updateProgress(`재시도 사이클 ${cycle}/${maxCycles}: 시리즈 ${seriesNo} 요청 중... (pending ${list})`, 95);
+          } else {
+            ictx.updateProgress(`시리즈 ${seriesNo} 요청 중... (${position}/${total})`, ((position - 1) / total) * 95);
+          }
+          return;
+        }
+        if (type === 'series-result') {
+          const isRetry = cycle > 0;
+          if (event.outcome === 'error') {
+            const message = errorMessage || '알 수 없는 오류';
+            const http = message.startsWith('HTTP ');
+            if (!isRetry && position === 1) {
+              console.error(`[eagateFetch] 첫 시리즈 ${seriesNo} fetch 실패: ${message}`);
+              ictx.updateProgress(`시리즈 ${seriesNo} 페이지 fetch 실패: ${message}`, 95);
+            } else if (isRetry) {
+              console.warn(http
+                ? `[eagateFetch] 시리즈 ${seriesNo} ${message} — 이번 사이클만 skip`
+                : `[eagateFetch] 시리즈 ${seriesNo} fetch 실패: ${message} — 이번 사이클만 skip`);
+            } else {
+              console.warn(http
+                ? `[eagateFetch] 시리즈 ${seriesNo} ${message} — skip`
+                : `[eagateFetch] 시리즈 ${seriesNo} fetch 실패: ${message} — skip`);
+            }
+          } else if (event.outcome === 'empty') {
+            console.warn(isRetry
+              ? `[eagateFetch] 시리즈 ${seriesNo} 0차트 — 재시도 대기`
+              : `[eagateFetch] 시리즈 ${seriesNo} 0차트 — 재시도 pending에 추가`);
+          } else if (isRetry) {
+            console.log(`[eagateFetch] 시리즈 ${seriesNo} (재시도 사이클 ${cycle}/${maxCycles}): ${chartCount}차트 수집`);
+            ictx.updateProgress(`재시도 사이클 ${cycle}/${maxCycles}: 시리즈 ${seriesNo} 성공 (pending ${list || '없음'})`, 95);
+          } else {
+            console.log(`[eagateFetch] 시리즈 ${seriesNo} (${position}/${total}): ${chartCount}차트 수집`);
+            ictx.updateProgress(`시리즈 ${seriesNo}: ${chartCount}차트 수집`, (position / total) * 95);
+          }
+          return;
+        }
+        if (type === 'retry-cycle-start') {
+          console.warn(`[eagateFetch] 재시도 사이클 ${cycle}/${maxCycles} 시작 전: 시리즈 ${list} / 정책 대기 ${delayMs}ms`);
+          ictx.updateProgress(`재시도 사이클 ${cycle}/${maxCycles} 시작: 시리즈 ${list} (정책 대기 ${delayMs}ms)`, 95);
+          return;
+        }
+        if (type === 'retry-exhausted') {
+          console.warn(`[eagateFetch] 재시도 ${cycle}/${maxCycles}사이클 소진: 시리즈 ${list}`);
+        }
+      },
       fetchSeries: async (seriesNo) => {
-        const index = seriesNos.indexOf(seriesNo);
         const list = seriesNo - 1;
-        ictx.updateProgress(`시리즈 ${seriesNo} 요청 중... (${index + 1}/${seriesNos.length})`, (index / seriesNos.length) * 95);
         const fetched = await fetchSeriesOnce(ictx, list);
         if (!fetched.parsed) return { status: 'error', error: fetched.reason === 'http' ? new Error(`HTTP ${fetched.status}`) : fetched.error };
         if (fetched.parsed.charts.length > 0) state.pageCount++;
@@ -145,7 +194,6 @@
     const ok = !firstFailure && state.charts.length > 0;
     if (firstFailure) {
       const message = firstSeries.error && firstSeries.error.message || String(firstSeries.error);
-      ictx.updateProgress(`시리즈 페이지 fetch 실패: ${message}`, 95);
       ictx.alertFn(message.startsWith('HTTP ') ? `시리즈 페이지를 가져오지 못했어요 (${message}).\n로그인 상태인지 확인해주세요.` : `시리즈 페이지 fetch 실패: ${message}`);
     } else if (!state.charts.length) {
       ictx.alertFn('모든 시리즈에서 곡을 못 찾았어요. 로그인 상태가 아니거나 페이지 구조가 변경됐을 수 있습니다.');

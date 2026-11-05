@@ -15,7 +15,7 @@ function fakeTime() {
   return { clock: () => now, sleeps, sleep: async (ms) => { sleeps.push(ms); now += ms; } };
 }
 
-function loadEagate(fetchImpl, session = api, timing = {}) {
+function loadEagate(fetchImpl, session = api, timing = {}, capturedConsole = console) {
   const window = { OhsorryCrawlSession: session };
   const simulated = { now: 0 };
   class FakeDOMParser {
@@ -37,7 +37,7 @@ function loadEagate(fetchImpl, session = api, timing = {}) {
     ? (callback, ms) => { timing.sleep(ms).then(callback); }
     : (callback, ms) => { simulated.now += ms; Promise.resolve().then(callback); };
   vm.runInNewContext(adapterSource, { window, fetch: fetchImpl, URLSearchParams, DOMParser: FakeDOMParser,
-    Math: fakeMath, Date: FakeDate, Promise, setTimeout: fakeSetTimeout, console });
+    Math: fakeMath, Date: FakeDate, Promise, setTimeout: fakeSetTimeout, console: capturedConsole });
   return window.OhsorryEagateFetch;
 }
 
@@ -90,14 +90,79 @@ test('eagate adapter applies retry policy and returns exhausted empty-series fai
 });
 
 test('eagate adapter keeps first-series login failure fatal while returning later observations', async () => {
+  const logs = { log: [], warn: [], error: [] }, progress = [], notices = [];
+  const capturedConsole = Object.fromEntries(Object.entries(logs).map(([key, values]) => [key, (message) => values.push(message)]));
   const adapter = loadEagate(async (_url, options) => {
     const list = new URLSearchParams(options.body).get('list');
     return list === '0' ? { ok: false, status: 500 } : { ok: true, text: async () => '22DUNK' };
-  });
-  const result = await adapter.collectCharts({ series: '33', seriesList: [0, 1], style: '1', updateProgress() {}, alertFn() {} });
+  }, api, {}, capturedConsole);
+  const result = await adapter.collectCharts({ series: '33', seriesList: [0, 1], style: '1',
+    updateProgress: (message, pct) => progress.push([message, pct]), alertFn: (message) => notices.push(message) });
+  assert.deepEqual(logs.error, ['[eagateFetch] 첫 시리즈 1 fetch 실패: HTTP 500']);
+  assert.deepEqual(progress.filter(([message]) => message.includes('페이지 fetch 실패')),
+    [['시리즈 1 페이지 fetch 실패: HTTP 500', 95]]);
+  assert.deepEqual(notices, ['시리즈 페이지를 가져오지 못했어요 (HTTP 500).\n로그인 상태인지 확인해주세요.']);
   assert.deepEqual(result.series.map((item) => [item.seriesNo, item.status, item.completed]), [[1, 'error', false], [2, 'ok', true]]);
   assert.equal(result.ok, false);
   assert.deepEqual(result.observations.map((row) => [row.title, row.seriesNo, row.playStyle]), [['22DUNK', 2, 1]]);
+});
+
+test('eagate adapter labels fetch exceptions distinctly', async () => {
+  const logs = { log: [], warn: [], error: [] };
+  const capturedConsole = Object.fromEntries(Object.entries(logs).map(([key, values]) => [key, (message) => values.push(message)]));
+  const adapter = loadEagate(async (_url, options) => {
+    if (new URLSearchParams(options.body).get('list') === '1') throw new Error('network down');
+    return { ok: true, text: async () => '22DUNK' };
+  }, api, {}, capturedConsole);
+  const result = await adapter.collectCharts({ series: '33', seriesList: [0, 1], style: '1', updateProgress() {}, alertFn() {} });
+  assert.ok(logs.warn.includes('[eagateFetch] 시리즈 2 fetch 실패: network down — skip'));
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.charts.map((chart) => chart.seriesNo), [1]);
+});
+
+test('eagate adapter restores event-based console and progress output across retry outcomes', async () => {
+  const t = fakeTime();
+  const logs = { log: [], warn: [], error: [] };
+  const capturedConsole = Object.fromEntries(Object.entries(logs).map(([key, values]) => [key, (message) => values.push(message)]));
+  const progress = [], notices = [];
+  let attempts = 0;
+  const adapter = loadEagate(async (_url, options) => {
+    attempts++;
+    const list = new URLSearchParams(options.body).get('list');
+    if (list === '0') return attempts === 1
+      ? { ok: true, text: async () => '' }
+      : { ok: true, text: async () => '22DUNK' };
+    if (list === '1') return { ok: false, status: 503 };
+    return { ok: true, text: async () => '22DUNK' };
+  }, { runQueue: (options) => api._runQueueForTest({ ...options, clock: t.clock, sleep: t.sleep }, 1) },
+  { clock: t.clock, sleep: t.sleep }, capturedConsole);
+  const result = await adapter.collectCharts({ series: '33', seriesList: [2, 0, 1], style: '1',
+    updateProgress: (message, pct) => progress.push([message, pct]), alertFn: (message) => notices.push(message) });
+  assert.ok(logs.warn.includes('[eagateFetch] 시리즈 1 0차트 — 재시도 pending에 추가'));
+  assert.ok(logs.warn.includes('[eagateFetch] 재시도 사이클 1/10 시작 전: 시리즈 1 / 정책 대기 2000ms'));
+  assert.ok(logs.log.includes('[eagateFetch] 시리즈 1 (재시도 사이클 1/10): 1차트 수집'));
+  assert.ok(logs.warn.includes('[eagateFetch] 시리즈 2 HTTP 503 — skip'));
+  assert.ok(logs.log.includes('[eagateFetch] 시리즈 3 (3/3): 1차트 수집'));
+  assert.ok(progress.some(([message]) => message === '시리즈 3 요청 중... (3/3)'));
+  assert.deepEqual(progress.filter(([message]) => message.includes('시리즈 1')), [
+    ['시리즈 1 요청 중... (1/3)', 0],
+    ['재시도 사이클 1/10 시작: 시리즈 1 (정책 대기 2000ms)', 95],
+    ['재시도 사이클 1/10: 시리즈 1 요청 중... (pending 1)', 95],
+    ['재시도 사이클 1/10: 시리즈 1 성공 (pending 없음)', 95],
+  ]);
+  assert.deepEqual(notices, ['다음 시리즈는 이번에 못 읽었어요: 2. 나머지는 저장해요.']);
+  assert.equal(result.ok, true);
+  assert.equal(result.pageCount, 2);
+  assert.equal(result.charts.length, 2);
+
+  const exhaustedTime = fakeTime();
+  const exhaustedLogs = { log: [], warn: [], error: [] };
+  const exhaustedConsole = Object.fromEntries(Object.entries(exhaustedLogs).map(([key, values]) => [key, (message) => values.push(message)]));
+  const exhaustedAdapter = loadEagate(async () => ({ ok: true, text: async () => '' }),
+    { runQueue: (options) => api._runQueueForTest({ ...options, clock: exhaustedTime.clock, sleep: exhaustedTime.sleep }, 1) },
+    { clock: exhaustedTime.clock, sleep: exhaustedTime.sleep }, exhaustedConsole);
+  await exhaustedAdapter.collectCharts({ series: '33', seriesList: [4], style: '1', updateProgress() {}, alertFn() {} });
+  assert.ok(exhaustedLogs.warn.includes('[eagateFetch] 재시도 10/10사이클 소진: 시리즈 5'));
 });
 
 test('eagate adapter allows two queue slots to have requests in progress at once', async () => {
