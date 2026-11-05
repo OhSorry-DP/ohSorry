@@ -14,10 +14,19 @@
     'NO PLAY': 0, FAILED: 1, ASSIST: 2, EASY: 3, CLEAR: 4, HARD: 5, 'EX HARD': 6, 'FULL COMBO': 7 });
 
   async function runQueueInternal(options, slots) {
-    const { seriesNos, fetchSeries, retryPolicy = {}, clock = Date.now, sleep = defaultSleep, betweenRequestsMs } = options;
+    const { seriesNos, fetchSeries, retryPolicy = {}, clock = Date.now, sleep = defaultSleep, betweenRequestsMs, onEvent } = options;
     if (typeof betweenRequestsMs !== 'function') throw new TypeError('betweenRequestsMs must be a function');
     const sorted = [...new Set(seriesNos)].sort((a, b) => a - b);
     const state = new Map(sorted.map((n) => [n, { status: 'pending', charts: [], error: null }]));
+    const maxCycles = Math.max(0, Number(retryPolicy.maxCycles) || 0);
+    const emit = (event) => {
+      if (typeof onEvent !== 'function') return;
+      try {
+        const pending = event.pendingSeriesNos;
+        const returned = onEvent({ ...event, ...(pending ? { pendingSeriesNos: [...pending] } : {}) });
+        if (returned && typeof returned.then === 'function') Promise.resolve(returned).catch(() => {});
+      } catch (_) {}
+    };
     let pauseUntil = 0;
     let zeroStreak = 0;
     const waitForChange = async (deadline) => {
@@ -43,17 +52,27 @@
         state.set(n, { status: isRetry ? 'pending' : 'error', charts: [], error: error || (isRetry ? previous.error : null) });
       }
     };
-    const runPass = async (series, isRetry) => {
+    const runPass = async (series, isRetry, cycle) => {
       let nextIndex = 0;
       const workers = Array.from({ length: Math.min(slots, series.length) }, async () => {
         while (nextIndex < series.length) {
           while (clock() < pauseUntil) await waitForChange(pauseUntil);
           if (nextIndex >= series.length) break;
           const n = series[nextIndex++];
+          const position = sorted.indexOf(n) + 1;
+          emit({ type: 'series-start', seriesNo: n, cycle, maxCycles, total: sorted.length, position,
+            ...(isRetry ? { pendingSeriesNos: sorted.filter((item) => state.get(item).status === 'pending') } : {}) });
           let result;
           try { result = await fetchSeries(n); }
           catch (error) { result = { status: 'error', error }; }
           processResult(n, result, isRetry);
+          const value = state.get(n);
+          const rawError = result && result.error;
+          const outcome = result && result.status === 'ok' ? (Array.isArray(result.charts) && result.charts.length ? 'ok' : 'empty') : 'error';
+          emit({ type: 'series-result', seriesNo: n, cycle, maxCycles, total: sorted.length, position, outcome,
+            status: value.status, chartCount: outcome === 'ok' ? result.charts.length : 0,
+            errorMessage: rawError == null ? null : (rawError && rawError.message != null ? String(rawError.message) : String(rawError)),
+            ...(isRetry ? { pendingSeriesNos: sorted.filter((item) => state.get(item).status === 'pending') } : {}) });
           if (nextIndex < series.length) {
             const delay = Number(betweenRequestsMs());
             if (Number.isFinite(delay) && delay > 0) await sleep(delay);
@@ -62,20 +81,24 @@
       });
       await Promise.all(workers);
     };
-    await runPass(sorted, false);
+    await runPass(sorted, false, 0);
 
-    const maxCycles = Math.max(0, Number(retryPolicy.maxCycles) || 0);
     const delays = Array.isArray(retryPolicy.delaysMs) ? retryPolicy.delaysMs : [];
     const cap = Number.isFinite(retryPolicy.capMs) ? retryPolicy.capMs : Infinity;
+    let cyclesExecuted = 0;
     for (let cycle = 0; cycle < maxCycles; cycle += 1) {
       const pending = sorted.filter((n) => state.get(n).status === 'pending');
       if (!pending.length) break;
       const delay = Math.min(cap, Math.max(0, Number(delays[Math.min(cycle, delays.length - 1)]) || 0));
       const cycleDeadline = clock() + delay;
+      emit({ type: 'retry-cycle-start', cycle: cycle + 1, maxCycles, delayMs: delay, pendingSeriesNos: pending });
       await waitForChange(Math.max(cycleDeadline, pauseUntil));
       while (clock() < pauseUntil) await waitForChange(pauseUntil);
-      await runPass(pending, true);
+      await runPass(pending, true, cycle + 1);
+      cyclesExecuted = cycle + 1;
     }
+    const remaining = sorted.filter((n) => state.get(n).status === 'pending');
+    if (cyclesExecuted > 0 && remaining.length) emit({ type: 'retry-exhausted', cycle: cyclesExecuted, maxCycles, pendingSeriesNos: remaining });
     const series = sorted.map((seriesNo) => ({ seriesNo, ...state.get(seriesNo), completed: state.get(seriesNo).status === 'ok' }));
     return { series, charts: series.flatMap((item) => item.charts), completed: series.every((item) => item.completed) };
   }

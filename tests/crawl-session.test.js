@@ -178,6 +178,47 @@ test('each retry cycle delays from its own start; retry errors stay pending', as
   assert.equal(failed.series[0].error, 'offline');
 });
 
+test('onEvent is isolated and reports ordered retry observations without changing queue behavior', async () => {
+  const run = async (mode) => {
+    const t = fakeTime(); const requests = []; const events = [];
+    const options = { seriesNos: [2, 1, 2], clock: t.clock, sleep: t.sleep, betweenRequestsMs: () => 3,
+      retryPolicy: { maxCycles: 1, delaysMs: [5], capMs: 5 }, fetchSeries: async (n) => {
+        requests.push(n);
+        if (n === 1 && requests.filter((item) => item === 1).length === 1) throw new Error('first');
+        if (n === 2) return { status: 'ok', charts: [] };
+        return { status: 'ok', charts: [n] };
+      } };
+    if (mode) options.onEvent = (event) => {
+      events.push(event);
+      if (event.pendingSeriesNos) event.pendingSeriesNos.length = 0;
+      if (mode === 'throw') throw new Error('observer');
+      if (mode === 'reject') return Promise.reject(new Error('observer'));
+    };
+    const result = await api._runQueueForTest(options, 1);
+    await Promise.resolve();
+    return { result, requests, sleeps: t.sleeps, events };
+  };
+  const baseline = await run(null);
+  for (const mode of ['ok', 'throw', 'reject']) {
+    const observed = await run(mode);
+    assert.deepEqual(observed.result, baseline.result);
+    assert.deepEqual(observed.requests, baseline.requests);
+    assert.deepEqual(observed.sleeps, baseline.sleeps);
+  }
+  const events = (await run('ok')).events;
+  assert.deepEqual(events.map((event) => event.type), ['series-start', 'series-result', 'series-start', 'series-result',
+    'retry-cycle-start', 'series-start', 'series-result', 'retry-exhausted']);
+  assert.deepEqual(events.slice(0, 4).map((event) => [event.seriesNo, event.position, event.total, event.cycle]),
+    [[1, 1, 2, 0], [1, 1, 2, 0], [2, 2, 2, 0], [2, 2, 2, 0]]);
+  assert.equal(events[1].status, 'error');
+  assert.equal(events[6].status, 'pending');
+  assert.equal(events.at(-1).type, 'retry-exhausted');
+  const exhausted = await api._runQueueForTest({ seriesNos: [1], retryPolicy: { maxCycles: 0 }, betweenRequestsMs: () => 0,
+    onEvent: (event) => { if (event.type === 'retry-exhausted') assert.fail('unexpected exhaustion'); },
+    fetchSeries: async () => ({ status: 'ok', charts: [] }) }, 1);
+  assert.equal(exhausted.completed, false);
+});
+
 test('browser UMD and CommonJS expose the same API', () => {
   const browser = {};
   vm.runInNewContext(source, { globalThis: browser, setTimeout, Promise, Object, Array, Map, Number, Math });
