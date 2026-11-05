@@ -1182,7 +1182,7 @@ window.OhsorryDb = (function () {
           if (Object.prototype.hasOwnProperty.call(opts, 'plan')) {
             if (opts.plan && opts.plan.error) out.scores = { ok: false, error: opts.plan.error };
             else {
-              out.scores = await uploadWebCrawlPlan(opts.plan, { iidxId: result.dbPayload.iidx_id, notify: false });
+              out.scores = await uploadWebCrawlPlan(opts.plan, { iidxId: result.dbPayload.iidx_id });
               if (out.scores && out.scores.ok) out.scores.inserted = Number(out.scores.submitted) || 0;
             }
           } else out.scores = await upsertUserChartScores(result.chartScoreRows);

@@ -839,7 +839,7 @@ window.OhsorryCore = {
         //   spUploaded 자체의 의미(성공 시 건수, 아니면 null)는 유지 — 실패 사유는 별도 변수(spUploadFailReason)로.
         try {
           const built = await __buildCrawlPlan(r, profile, true, SERIES, textageSongs);
-          const res = built.ok ? await window.OhsorryDb.uploadWebCrawlPlan(built.plan, { iidxId: spIidx, notify: false }) : built;
+          const res = built.ok ? await window.OhsorryDb.uploadWebCrawlPlan(built.plan, { iidxId: spIidx }) : built;
           spInserted = Number(res && (res.submitted ?? res.inserted)) || 0;
           const uploadOk = !!(res && res.ok);
           spUploaded = uploadOk && spInserted ? spInserted : null;

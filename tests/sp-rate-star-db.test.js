@@ -644,9 +644,13 @@ test('웹 크롤 계획은 기존 점수와 예약 NEW를 한 번의 upsert_scor
   assert.equal(rpc(calls, 'bump_song_series').length, 0);
 });
 
-test('DP 계획 저장은 빠른 크롤 완료 통지를 한 번만 보낸다', async () => {
-  const { db, calls } = loadDb(async (url) => url.includes('/api/dump-trigger')
-    ? response({ accepted: true }) : response(null), true, Date.parse, { fastDumpEnabled: true, profileDumpCompletionOnly: true });
+test('DP 계획 저장은 빠른 덤프와 완료 통지를 각각 한 번 보낸다', async () => {
+  const { db, calls } = loadDb(async (url) => {
+    if (url.endsWith('/auth/issue')) return response({ url: 'https://iidx.in/login?ticket=one' });
+    if (url.endsWith('/auth/exchange')) return response({ iidx_id: '12345678', token: 'token' });
+    if (url.includes('/api/dump-trigger')) return response({ accepted: true });
+    return response(null);
+  }, true, Date.parse, { fastDumpEnabled: true, profileDumpCompletionOnly: true });
   const plan = { rows: [{ iidx_id: '12345678', song_id: 1564, diff: 3, play_style: 1, ex_score: 100, lamp: 4, played_version: 33 }], newRequests: [] };
   const result = await db.uploadResult({ dbPayload: { iidx_id: '12345678' }, chartScoreRows: [] }, { plan });
   assert.equal(result.profile.ok, true);
@@ -657,8 +661,7 @@ test('DP 계획 저장은 빠른 크롤 완료 통지를 한 번만 보낸다', 
   assert.equal(rpc(calls, 'upsert_user').length, 1);
   const enqueueCalls = calls.filter(({ url }) => url.includes('dump-trigger')).length;
   const completionRpcCalls = rpc(calls, 'upsert_user').length;
-  assert.equal(enqueueCalls + completionRpcCalls, 1);
-  assert.equal(enqueueCalls, 0);
+  assert.equal(enqueueCalls, 1);
   assert.equal(completionRpcCalls, 1);
 });
 

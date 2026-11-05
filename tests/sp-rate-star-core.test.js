@@ -84,7 +84,8 @@ function createHarness(options = {}) {
     },
     filterWebCrawlHistoryRows(hist, incoming) { return incoming; },
     async uploadWebCrawlPlan(plan, opts) {
-      assert.equal(opts.notify, false);
+      assert.equal(opts.iidxId, '12345678');
+      assert.equal(opts.notify, undefined);
       const rows = [...plan.rows, ...plan.newRequests];
       if (!rows.length) return { ok: true, empty: true, submitted: 0 };
       calls.order.push('scores'); calls.scoreUploads.push(rows);
@@ -500,7 +501,7 @@ function crawlFixture(options = {}) {
   db.uploadWebCrawlPlan = async (plan, opts) => { plans.push({ plan, opts }); return { ok: true, submitted: plan.rows.length + plan.newRequests.length }; };
   db.uploadResult = async (result, { plan }) => {
     await db.upsertUserProfile(result.dbPayload);
-    const scores = plan.error ? { ok: false, error: plan.error } : await db.uploadWebCrawlPlan(plan, { iidxId: result.dbPayload.iidx_id, notify: false });
+    const scores = plan.error ? { ok: false, error: plan.error } : await db.uploadWebCrawlPlan(plan, { iidxId: result.dbPayload.iidx_id });
     return { profile: { ok: true }, scores, dump: null };
   };
   h.context.alert = (s) => alerts.push(s);
