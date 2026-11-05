@@ -124,9 +124,9 @@ test('C2 series identity exception selects exactly one remaining AC candidate', 
   const row = observation(30, 'Shared');
   const exception = [{ seriesNo: 30, sourceTitle: 'Shared', songId: 42 }];
   assert.equal(api.resolveObservation(row, songs, identityKey, exception).songId, 42);
-  assert.equal(api.resolveObservation(row, songs, identityKey, []).status, 'unmatched');
-  assert.equal(api.resolveObservation(row, songs, identityKey, [{ ...exception[0], songId: 999 }]).status, 'unmatched');
-  assert.equal(api.resolveObservation(row, songs, identityKey, [exception[0], { ...exception[0], songId: 41 }]).status, 'unmatched');
+  assert.equal(api.resolveObservation(row, songs, identityKey, []).status, 'unresolved');
+  assert.equal(api.resolveObservation(row, songs, identityKey, [{ ...exception[0], songId: 999 }]).status, 'unresolved');
+  assert.equal(api.resolveObservation(row, songs, identityKey, [exception[0], { ...exception[0], songId: 41 }]).status, 'unresolved');
 });
 
 test('raw observations with Shared in different series remain separate', () => {
@@ -142,4 +142,59 @@ test('songs load failure is distinct from a valid empty song list', () => {
   const empty = api.resolveObservation(row, [], identityKey, []);
   assert.equal(empty.status, 'unmatched');
   assert.equal(empty.songId, null);
+});
+
+const aliasIdentity = (value) => value === 'ZE?ITH' ? 'ZENITH' : value;
+const resolved = (seriesNo, title, songId) => ({ status: 'matched', songId, observation: observation(seriesNo, title) });
+const missing = (seriesNo, title, extra = {}) => ({ status: 'unmatched', songId: null, observation: observation(seriesNo, title, extra) });
+const completeCoverage = (series) => ({ requiredSeries: series, succeededSeries: series });
+
+test('finalize joins one confirmed common key across series and leaves multiple IDs unresolved', () => {
+  const one = api.finalizeIdentity([resolved(28, 'Shared', 8), missing(30, 'Shared')], completeCoverage([28, 30]), identityKey, aliasIdentity);
+  assert.equal(one.observations[1].status, 'matched');
+  assert.equal(one.observations[1].songId, 8);
+  const many = api.finalizeIdentity([resolved(28, 'Shared', 8), resolved(29, 'Shared', 9), missing(30, 'Shared')], completeCoverage([28, 29, 30]), identityKey, aliasIdentity);
+  assert.equal(many.observations[2].status, 'unresolved');
+});
+
+test('finalize creates NEW despite same title only in a different master series and keeps ambiguous matches unresolved', () => {
+  assert.equal(api.finalizeIdentity([missing(34, 'Same')], completeCoverage([34]), identityKey, aliasIdentity).observations[0].status, 'new');
+  const songs = [{ song_id: 1, title: 'Same', series_no: 34, ac: 1 }, { song_id: 2, title: 'Same', series_no: 34, ac: 1 }];
+  assert.equal(api.resolveObservation(observation(34, 'Same'), songs, identityKey, []).status, 'unresolved');
+});
+
+test('incomplete coverage defers unmatched rows but preserves confirmed IDs', () => {
+  const result = api.finalizeIdentity([resolved(28, 'Known', 8), missing(30, 'Unknown')], { requiredSeries: [28, 30], succeededSeries: [28] }, identityKey, aliasIdentity);
+  assert.equal(result.observations[0].songId, 8);
+  assert.equal(result.observations[1].status, 'deferred');
+  assert.deepEqual(result.coverage.failedSeries, [30]);
+  assert.equal(api.finalizeIdentity([missing(30, 'Unknown')], completeCoverage([30]), identityKey, aliasIdentity).observations[0].status, 'new');
+});
+
+test('old-series NEW limit allows ten unique titles and defers all eleven with reason', () => {
+  const ten = Array.from({ length: 10 }, (_, i) => missing(12, `T${i}`, { playedVersion: 34 }));
+  assert.ok(api.finalizeIdentity(ten, completeCoverage([12]), identityKey, aliasIdentity).observations.every((x) => x.status === 'new'));
+  const result = api.finalizeIdentity([...ten, missing(12, 'T10', { playedVersion: 34 })], completeCoverage([12]), identityKey, aliasIdentity);
+  assert.ok(result.observations.every((x) => x.status === 'deferred'));
+  assert.deepEqual(result.observations[0].limit, { seriesNo: 12, count: 11, maximum: 10 });
+  const duplicate = [missing(12, 'T', { playedVersion: 34, diff: 'HYPER' }), missing(12, 'T', { playedVersion: 34, diff: 'ANOTHER', playStyle: 'SP' })];
+  assert.ok(api.finalizeIdentity(duplicate, completeCoverage([12]), identityKey, aliasIdentity).observations.every((x) => x.status === 'new'));
+});
+
+test('latest-series NEW is unlimited and old-series limit does not affect other rows', () => {
+  const rows = [...Array.from({ length: 11 }, (_, i) => missing(34, `N${i}`, { playedVersion: 34 })), ...Array.from({ length: 11 }, (_, i) => missing(12, `O${i}`, { playedVersion: 34 })), resolved(28, 'Confirmed', 8)];
+  const result = api.finalizeIdentity(rows, completeCoverage([12, 28, 34]), identityKey, aliasIdentity);
+  assert.ok(result.observations.slice(0, 11).every((x) => x.status === 'new'));
+  assert.ok(result.observations.slice(11, 22).every((x) => x.status === 'deferred'));
+  assert.equal(result.observations[22].songId, 8);
+});
+
+test('NEW retains alias and observation details and is deterministic regardless of completion order', () => {
+  const rows = [missing(12, 'ZE?ITH', { playedVersion: 34, diff: 'LEGGENDARIA', playStyle: 'DP', observedAt: 't1' }), missing(12, 'Other', { playedVersion: 34, observedAt: 't2' })];
+  const run = (items) => api.finalizeIdentity(items, completeCoverage([12]), identityKey, aliasIdentity).observations;
+  const first = run(rows), reversed = run([...rows].reverse());
+  const sort = (items) => items.map((x) => [x.status, x.aliasTitle, x.observation.title, x.observation.diff, x.observation.playStyle, x.observation.playedVersion, x.observation.observedAt]).sort((a, b) => String(a[2]).localeCompare(String(b[2])));
+  assert.deepEqual(sort(first), sort(reversed));
+  assert.equal(first[0].aliasTitle, 'ZENITH');
+  assert.equal(first[0].observation.diff, 'LEGGENDARIA');
 });

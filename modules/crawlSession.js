@@ -6,6 +6,7 @@
   'use strict';
 
   const SERIES_CONCURRENCY = 2;
+  const NEW_LIMIT_PER_OLD_SERIES = 10;
   const EMPTY_PAUSE_MS = [2000, 4000, 8000];
 
   async function runQueueInternal(options, slots) {
@@ -99,14 +100,70 @@
         candidates.some((song) => song.song_id === entry.songId));
       if (matches.length === 1) return { status: 'matched', observation, songId: matches[0].songId };
     }
-    return { status: 'unmatched', observation, songId: null };
+    return candidates.length > 1
+      ? { status: 'unresolved', observation, songId: null, reason: 'ambiguous-existing-candidates' }
+      : { status: 'unmatched', observation, songId: null };
+  }
+
+  function finalizeIdentity(observations, coverage, commonKey, aliasTitle) {
+    if (typeof commonKey !== 'function') throw new TypeError('commonKey must be a function');
+    if (typeof aliasTitle !== 'function') throw new TypeError('aliasTitle must be a function');
+    const required = coverage && (coverage.requiredSeries || coverage.requiredSeriesNos);
+    const succeeded = coverage && (coverage.succeededSeries || coverage.successfulSeries || coverage.succeededSeriesNos);
+    if (!Array.isArray(required) || !Array.isArray(succeeded)) throw new TypeError('coverage must include requiredSeries and succeededSeries');
+    const successSet = new Set(succeeded);
+    const complete = required.every((n) => successSet.has(n));
+    const rows = (Array.isArray(observations) ? observations : []).map((item) => ({ ...item }));
+    const confirmed = new Map();
+    for (const item of rows) {
+      if (item.status !== 'matched' || item.songId == null) continue;
+      const key = commonKey(aliasTitle(item.observation ? item.observation.title : item.title));
+      if (!confirmed.has(key)) confirmed.set(key, []);
+      confirmed.get(key).push({ songId: item.songId, seriesNo: (item.observation || item).seriesNo });
+    }
+    const newBySeries = new Map();
+    for (const item of rows) {
+      if (item.status !== 'unmatched') continue;
+      const row = item.observation || item;
+      const key = commonKey(aliasTitle(row.title));
+      const ids = new Set((confirmed.get(key) || []).filter((entry) => entry.seriesNo !== row.seriesNo).map((entry) => entry.songId));
+      if (ids && ids.size === 1) {
+        item.status = 'matched'; item.songId = [...ids][0]; item.identityResolution = 'cross-series';
+      } else if (ids && ids.size > 1) {
+        item.status = 'unresolved'; item.songId = null; item.reason = 'multiple-confirmed-song-ids';
+      } else if (!complete) {
+        item.status = 'deferred'; item.songId = null; item.reason = 'incomplete-series-coverage';
+      } else {
+        item.status = 'new'; item.songId = null;
+        item.aliasTitle = aliasTitle(row.title);
+        const version = row.playedVersion ?? row.gameVersion;
+        const keySeries = `${String(version)}:${String(row.seriesNo)}`;
+        if (!newBySeries.has(keySeries)) newBySeries.set(keySeries, []);
+        newBySeries.get(keySeries).push({ item, row, version });
+      }
+    }
+    for (const entries of newBySeries.values()) {
+      const { version } = entries[0];
+      const seriesNo = entries[0].row.seriesNo;
+      if (Number(seriesNo) === Number(version)) continue;
+      const titles = new Set(entries.map(({ item }) => item.aliasTitle));
+      if (titles.size > NEW_LIMIT_PER_OLD_SERIES) {
+        for (const { item } of entries) {
+          item.status = 'deferred'; item.reason = 'old-series-new-limit-exceeded';
+          item.limit = { seriesNo, count: titles.size, maximum: NEW_LIMIT_PER_OLD_SERIES };
+        }
+      }
+    }
+    return { observations: rows, coverage: { requiredSeries: [...required], succeededSeries: [...succeeded], failedSeries: required.filter((n) => !successSet.has(n)), complete } };
   }
 
   return Object.freeze({
     SERIES_CONCURRENCY,
+    NEW_LIMIT_PER_OLD_SERIES,
     EMPTY_PAUSE_MS: Object.freeze(EMPTY_PAUSE_MS),
     runQueue(options) { return runQueueInternal(options, SERIES_CONCURRENCY); },
     _runQueueForTest(options, slots) { return runQueueInternal(options, slots); },
     resolveObservation,
+    finalizeIdentity,
   });
 });
