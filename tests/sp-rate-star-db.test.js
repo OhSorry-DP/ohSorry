@@ -628,3 +628,66 @@ test('폐기된 SP API는 네트워크 없이 오류를 내고 호환 함수는 
   assert.equal(Object.hasOwn(signal, 'star'), false);
   assert.equal(rpc(calls, 'upsert_user').length, 1);
 });
+
+test('웹 크롤 계획은 기존 점수와 예약 NEW를 한 번의 upsert_scores에 전달한다', async () => {
+  const { db, calls } = loadDb(async () => response(null));
+  const plan = { rows: [{ song_id: 160, iidx_id: '12345678', diff: 3, lamp: 4, ex_score: 100,
+    played_version: 33, play_style: 0, date: '2026-08-20T08:44:38.019+00:00', date_kst: '2026-08-20', bp: null, note_count: null }],
+  newRequests: [{ song_id: '@crawl:new:X:34:1:3', iidx_id: '12345678', title: 'X', series_no: 34,
+    p_textage_song_id: '@crawl:new-only', p_ac: 1, p_legen: null, diff: 3, play_style: 1, played_version: 34,
+    scoreless: true }], failedSeries: [] };
+  const result = await db.uploadWebCrawlPlan(plan);
+  assert.equal(result.ok, true);
+  const sent = rpc(calls, 'upsert_scores');
+  assert.equal(sent.length, 1);
+  assert.deepEqual(JSON.parse(sent[0].options.body).p_rows, [...plan.rows, ...plan.newRequests]);
+  assert.equal(rpc(calls, 'bump_song_series').length, 0);
+});
+
+test('웹 크롤 빈 계획은 전송하지 않고 RPC 실패 시 완료 통지를 보내지 않는다', async () => {
+  const empty = loadDb(async () => response(null));
+  assert.equal((await empty.db.uploadWebCrawlPlan({ rows: [], newRequests: [] })).empty, true);
+  assert.equal(empty.calls.length, 0);
+  const failed = loadDb(async (url) => url.endsWith('/rpc/upsert_scores')
+    ? response(null, { ok: false, status: 500 }) : response(null));
+  const result = await failed.db.uploadWebCrawlPlan({ rows: [{ iidx_id: '12345678' }], newRequests: [] });
+  assert.equal(result.ok, false);
+  assert.equal(rpc(failed.calls, 'upsert_scores').length, 1);
+  assert.equal(failed.calls.some(({ url }) => url.includes('dump-trigger')), false);
+});
+
+test('웹 크롤 브라우저 비교기는 ESM comparator와 hist 10열 fixture 결과가 같다', async () => {
+  const esm = await import('../../ohsorry-data/.github/scripts/score-history.mjs');
+  const { db } = loadDb(async () => response(null));
+  const histRow = (song, version = 33, style = 0, lamp = 1, ex = 1085, bp = null, notes = null) =>
+    [song, 2, lamp, ex, version, '2026-08-20T08:44:38.019+00:00', '2026-08-20', style, bp, notes];
+  const incomingRow = (song, version = 33, style = 0, lamp = 1, ex = 1085, bp = null, notes = null) =>
+    [song, 2, lamp, ex, version, '2026-08-21T08:44:38.019+00:00', '2026-08-21', style, bp, notes];
+  const hist = [
+    histRow(160), // 실제 hist 형식과 DP/SP 스타일(0)
+    histRow(161, 33, 0, 1, 100),
+    histRow(162, 33, 0, 1, 100),
+    histRow(163, 33, 0, 2, 100),
+    histRow(164, 33, 0, 2, 100),
+    histRow(165, 33, 0, 2, 100),
+    histRow(160, -10), // DBR 행은 비교 기준에서 제외
+  ];
+  const incoming = [
+    incomingRow(161, 33, 0, 1, 101), // EX 상승
+    incomingRow(162, 33, 0, 2, 90), // 램프 상승
+    incomingRow(163, 33, 0, 1, 90), // EX와 램프 모두 낮음
+    incomingRow(164, 33, 0, 2, 100, 4), // 같은 EX에서 BP 보충
+    incomingRow(165, 33, 0, 2, 100, null, 1200), // note_count 보충
+    incomingRow(160, 34, 0, 1, 1085), // 다른 버전
+    incomingRow(160, 33, 1, 1, 1085), // 다른 스타일
+  ];
+  const browserResult = JSON.parse(JSON.stringify(db.filterWebCrawlHistoryRows(hist, incoming)));
+  assert.deepEqual(browserResult, esm.filterWebCrawlHistoryRows(hist, incoming));
+  assert.deepEqual(browserResult, [incoming[0], incoming[1], incoming[3], incoming[4], incoming[5], incoming[6]]);
+  const invalidIncoming = [[160, 2, 1, 1085, -10, '2026-08-21T08:44:38.019+00:00', '2026-08-21', 0, null, null]];
+  let esmErrorMessage;
+  try { esm.filterWebCrawlHistoryRows(hist, invalidIncoming); }
+  catch (error) { esmErrorMessage = error.message; }
+  assert.equal(typeof esmErrorMessage, 'string');
+  assert.throws(() => db.filterWebCrawlHistoryRows(hist, invalidIncoming), (error) => error.message === esmErrorMessage);
+});

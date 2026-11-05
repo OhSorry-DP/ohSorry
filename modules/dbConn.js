@@ -824,6 +824,112 @@ window.OhsorryDb = (function () {
     }
   }
 
+  // buildPlan 결과를 서버에 한 번에 적용한다. songs 매칭과 NEW 예약은 서버 RPC의 책임이다.
+  async function uploadWebCrawlPlan(plan, options = {}) {
+    if (!plan || !Array.isArray(plan.rows) || !Array.isArray(plan.newRequests)) {
+      return { ok: false, error: '웹 크롤 계획 형식이 올바르지 않습니다' };
+    }
+    const pRows = [...plan.rows, ...plan.newRequests];
+    if (pRows.length === 0) return { ok: true, inserted: 0, empty: true, failedSeries: plan.failedSeries || [] };
+    const statusErr = await checkUploadEnabled();
+    if (statusErr) return statusErr;
+    try {
+      await callRpc('upsert_scores', { p_rows: pRows });
+    } catch (error) {
+      return { ok: false, inserted: 0, error: error && error.message ? error.message : String(error), failedSeries: plan.failedSeries || [] };
+    }
+    const id = options.iidxId || pRows[0].iidx_id;
+    let dump = null;
+    if (FAST_DUMP_ENQUEUE_CRAWLER) {
+      try { await enqueueDumpComplete(String(id || '').replace(/-/g, ''), 'crawler'); dump = { ok: true }; }
+      catch (error) { dump = { ok: false, error: error && error.message ? error.message : String(error) }; }
+    }
+    return { ok: true, submitted: pRows.length, failedSeries: plan.failedSeries || [], dump };
+  }
+
+  // score-history.mjs filterWebCrawlHistoryRows와 같은 차트별 독립 EX/lamp 비교기.
+  function filterWebCrawlHistoryRows(histRows, incomingRows) {
+    const fail = (message) => { throw new TypeError(message); };
+    const day = (value) => {
+      if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)
+        || !Number.isFinite(Date.parse(`${value}T00:00:00Z`))
+        || new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) !== value) fail('invalid date_kst');
+    };
+    const normalize = (row, kind, index) => {
+      if (!Array.isArray(row) || (row.length !== 8 && row.length !== 10)) fail(`${kind} row at index ${index} must have 8 or 10 columns`);
+      const r = row.length === 8 ? [...row, null, null] : [...row];
+      for (const i of [0, 1, 4, 7]) {
+        if (!Number.isFinite(r[i]) || !Number.isInteger(r[i])) fail(`column ${i} must be a finite integer`);
+      }
+      if (r[4] === -10 && kind === 'incoming') fail(`incoming row at index ${index} cannot be DBR (-10)`);
+      if (r[7] !== 0 && r[7] !== 1) fail(`column 7 at ${kind} row ${index} must be 0 or 1`);
+      for (const i of [2, 3, 8, 9]) {
+        if (r[i] !== null && (!Number.isFinite(r[i]) || !Number.isInteger(r[i]))) fail(`column ${i} must be a finite integer or null`);
+      }
+      const match = typeof r[5] === 'string' && r[5].match(
+        /^(\d{4}-\d{2}-\d{2})[T ](\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,6}))?(Z|[+-]\d{2}(?::?\d{2})?)$/,
+      );
+      if (!match) fail('date requires a timestamp with timezone (up to 6 fractional digits)');
+      day(match[1]);
+      if (+match[2] > 23 || +match[3] > 59 || +match[4] > 59) fail('invalid timestamp time');
+      const zone = match[6] === 'Z' ? 'Z' : match[6].length === 3 ? `${match[6]}:00`
+        : match[6].includes(':') ? match[6] : `${match[6].slice(0, 3)}:${match[6].slice(3)}`;
+      const ms = Date.parse(`${match[1]}T${match[2]}:${match[3]}:${match[4]}${zone}`);
+      if (!Number.isFinite(ms)) fail('invalid timestamp timezone');
+      day(r[6]);
+      const kst = new Date(ms + 9 * 3600000).toISOString().slice(0, 10);
+      if (kst !== r[6]) fail(`${kind} row at index ${index}: date_kst does not match date in KST`);
+      return r;
+    };
+    const chartKey = (row) => JSON.stringify([row[0], row[1], row[4], row[7]]);
+    const naturalKey = (row) => JSON.stringify([row[0], row[1], row[4], row[7], row[6]]);
+    const ex = (row) => row[3] ?? -1;
+    const lamp = (row) => row[2] ?? 0;
+    if (!Array.isArray(histRows) || !Array.isArray(incomingRows)) fail('histRows and incomingRows must be arrays');
+    const baseline = histRows.map((row, index) => normalize(row, 'hist', index));
+    const normalizedIncoming = incomingRows.map((row, index) => normalize(row, 'incoming', index));
+    const histKeys = new Set();
+    for (let i = 0; i < baseline.length; i += 1) {
+      const row = baseline[i];
+      if (row[4] === -10) continue;
+      const key = naturalKey(row);
+      if (histKeys.has(key)) fail(`duplicate natural key in hist at row ${i}: ${key}`);
+      histKeys.add(key);
+    }
+    const incomingKeys = new Set();
+    for (let i = 0; i < normalizedIncoming.length; i += 1) {
+      const key = chartKey(normalizedIncoming[i]);
+      if (incomingKeys.has(key)) fail(`duplicate incoming chart key at row ${i}: ${key}`);
+      incomingKeys.add(key);
+    }
+    const best = new Map();
+    for (const row of baseline) {
+      if (row[4] === -10) continue;
+      const key = chartKey(row), prev = best.get(key) || { ex: -1, lamp: 0 };
+      prev.ex = Math.max(prev.ex, ex(row)); prev.lamp = Math.max(prev.lamp, lamp(row)); best.set(key, prev);
+    }
+    const selected = [];
+    for (let i = 0; i < normalizedIncoming.length; i += 1) {
+      const row = normalizedIncoming[i];
+      if (row[4] === -10) continue;
+      const prior = best.get(chartKey(row)) || { ex: -1, lamp: 0 };
+      const key = chartKey(row);
+      const accepted = ex(row) > prior.ex || lamp(row) > prior.lamp
+        || (row[3] !== null && row[3] === prior.ex && row[8] !== null
+          && baseline.some((old) => old[4] !== -10 && chartKey(old) === key
+            && old[3] === row[3] && old[8] === null))
+        || (row[9] !== null && baseline.some((old) => old[4] !== -10
+          && chartKey(old) === key && old[9] === null));
+      if (accepted) {
+        prior.ex = Math.max(prior.ex, ex(row));
+        prior.lamp = Math.max(prior.lamp, lamp(row));
+        best.set(key, prior);
+        selected.push(incomingRows[i]);
+      }
+    }
+    return selected;
+  }
+
   function createRequestId() {
     try {
       if (typeof crypto !== 'undefined' && crypto && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
@@ -1370,6 +1476,8 @@ window.OhsorryDb = (function () {
     upsertUserProfile: upsertUserProfile,
     upsertInitialUserProfile: upsertInitialUserProfile,
     upsertUserChartScores: upsertUserChartScores,
+    uploadWebCrawlPlan: uploadWebCrawlPlan,
+    filterWebCrawlHistoryRows: filterWebCrawlHistoryRows,
     uploadResult: uploadResult,
     // ★값 재계산 + 저장(onlyOSR/onlyOSRtoEreter) — CSV Upload 등 코어 없이 점수만 바뀐 경우용.
     //   upsert_user 호출이 users.date 를 갱신 → 웹훅이 dump-user 를 깨워 페르소나까지 자동 재생성.
