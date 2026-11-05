@@ -147,6 +147,18 @@
       .normalize('NFKC');
   }
 
+  function aliasTitle(s) {
+    var raw = String(s == null ? '' : s);
+    if (Object.prototype.hasOwnProperty.call(TITLE_ALIASES, raw)) {
+      raw = TITLE_ALIASES[raw];
+    }
+    return raw;
+  }
+
+  function commonKey(s) {
+    return basicNorm(aliasTitle(s));
+  }
+
   function norm(s) {
     var raw = String(s == null ? '' : s);
     // TITLE_ALIASES — raw 단계 치환
@@ -174,6 +186,8 @@
   return {
     VERSION: '0.0.7',
     norm: norm,
+    aliasTitle: aliasTitle,
+    commonKey: commonKey,
     denorm: denorm,
   };
 });
