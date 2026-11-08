@@ -2,6 +2,12 @@
 
 ohSorry 의 변경 이력입니다. 사용방법은 [README.md](README.md) 를 참고하세요.
 
+### 2026-11-08 — 웹 크롤 업로드 1000행 청크 복원
+
+- 11-05 시리즈 기준 저장으로 바꾸면서 `upsert_scores` 를 한 번에 보내게 됐다. 북마클릿은 anon 역할이라 statement_timeout 이 3초다. 큰 요청은 `57014 canceling statement due to statement timeout` 으로 간헐 실패했다.
+- `uploadWebCrawlPlan` 이 구 경로와 같이 1000행씩 순차 전송한다. 실패한 청크에서 멈추고 앞서 성공한 행 수를 돌려준다. 완료 통지는 전부 성공했을 때만 보낸다.
+- 확정 행 수·NEW 요청 수·청크 진행 로그를 남긴다.
+
 ### 2026-11-06 — 시리즈별 웹 크롤 로그 복원
 
 - `onEvent` 기반으로 시리즈 요청·수집·실패와 재시도 진행 로그를 복원했다.
