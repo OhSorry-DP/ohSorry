@@ -447,7 +447,28 @@ const actualFilterReady = import('../../ohsorry-data/.github/scripts/score-histo
 });
 const planner = (items, histRows = [], options = {}) => api.buildPlan({ observations: items, iidxId: 'u1',
   hist: options.hist ?? { status: 'ok', rows: histRows }, songs: [], chartNotes: options.chartNotes ?? (() => 1000),
-  compareHistory: options.compareHistory ?? actualFilter });
+  compareHistory: options.compareHistory ?? actualFilter, best: options.best,
+  compareBest: options.compareBest });
+
+test('best 비교는 확정 후보 tuple 전체를 한 번에 전달하고 선택 참조로 행을 포함한다', () => {
+  const seen = [];
+  const result = planner([scoreRow({ songId: 101 }), scoreRow({ songId: 102, diff: 'HYPER' })], [], {
+    best: { status: 'ok', document: { v: 1, id: 'u1', dp: [], sp: [], flags: {} } },
+    compareBest(baseline, tuples) { seen.push({ baseline, tuples }); return [tuples[1]]; },
+  });
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].tuples.length, 2);
+  assert.deepEqual(result.rows.map((row) => row.song_id), [102]);
+});
+
+test('best 일괄 비교 예외는 확정 후보 전부 포함하고 예외를 한 번 기록한다', () => {
+  const result = planner([scoreRow({ songId: 101 }), scoreRow({ songId: 102, diff: 'HYPER' })], [], {
+    best: { status: 'ok', document: { v: 1, id: 'u1', dp: [], sp: [], flags: {} } },
+    compareBest() { throw new Error('comparison failed'); },
+  });
+  assert.equal(result.rows.length, 2);
+  assert.equal(result.bestCompareExceptions, 1);
+});
 
 test('buildPlan uses the real C6 comparator with real crawl and hist row shapes', async () => {
   await actualFilterReady;

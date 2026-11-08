@@ -266,6 +266,7 @@
     }
     const rows = [], newRequests = [];
     let bestCompareExceptions = 0;
+    const bestCandidates = [];
     const history = hist.status === '404' || hist.status === 404 ? [] : hist.rows ?? hist.data ?? (Array.isArray(hist) ? hist : []);
     for (const entries of grouped.values()) {
       entries.sort((a, b) => String(a.source.observedAt || '').localeCompare(String(b.source.observedAt || '')) ||
@@ -281,19 +282,17 @@
         note_count: entries.find((x) => x.base.note_count != null)?.base.note_count ?? null };
       if (exemplar.confirmed) {
         if (maxEx <= 0 && maxLamp < LAMP_MAP.AC) continue;
-        const histForUser = history.filter((h) => Array.isArray(h) ? h[0] === row.song_id && h[7] === row.play_style :
-          h.song_id === row.song_id && h.iidx_id === row.iidx_id && h.play_style === row.play_style);
         const tuple = [row.song_id, row.diff, row.lamp, row.ex_score, row.played_version, row.date,
           row.date_kst, row.play_style, row.bp, row.note_count];
-        const comparisonRows = histForUser.map((h) => Array.isArray(h) ? h : [h.song_id, h.diff, h.lamp, h.ex_score, h.played_version, h.date, h.date_kst, h.play_style, h.bp ?? null, h.note_count ?? null]);
         if (best) {
           if (best.status === 'error') rows.push(row);
-          else {
-            const baseline = best.status === 'absent' ? { v: 1, id: iidxId, dp: [], sp: [], flags: {} } : best.document;
-            try { if (compareBest(baseline, [tuple]).length) rows.push(row); }
-            catch (error) { bestCompareExceptions += 1; console.warn('[crawl] best comparison failed; including candidate', error); rows.push(row); }
-          }
-        } else if (hist.status === 'error' || compareHistory(comparisonRows, [tuple]).length) rows.push(row);
+          else bestCandidates.push({ row, tuple });
+        } else {
+          const histForUser = history.filter((h) => Array.isArray(h) ? h[0] === row.song_id && h[7] === row.play_style :
+            h.song_id === row.song_id && h.iidx_id === row.iidx_id && h.play_style === row.play_style);
+          const comparisonRows = histForUser.map((h) => Array.isArray(h) ? h : [h.song_id, h.diff, h.lamp, h.ex_score, h.played_version, h.date, h.date_kst, h.play_style, h.bp ?? null, h.note_count ?? null]);
+          if (hist.status === 'error' || compareHistory(comparisonRows, [tuple]).length) rows.push(row);
+        }
       } else {
         const source = exemplar.source;
         const newStyle = row.play_style;
@@ -307,6 +306,17 @@
           delete request.bp; delete request.note_count; request.scoreless = true;
         }
         newRequests.push(request);
+      }
+    }
+    if (best && best.status !== 'error') {
+      const baseline = best.status === 'absent' ? { v: 1, id: iidxId, dp: [], sp: [], flags: {} } : best.document;
+      try {
+        const selected = new Set(compareBest(baseline, bestCandidates.map(({ tuple }) => tuple)));
+        for (const candidate of bestCandidates) if (selected.has(candidate.tuple)) rows.push(candidate.row);
+      } catch (error) {
+        bestCompareExceptions = 1;
+        console.warn('[crawl] best comparison failed; including all candidates', error);
+        for (const candidate of bestCandidates) rows.push(candidate.row);
       }
     }
     rows.sort((a, b) => Number(a.played_version) - Number(b.played_version) || String(a.song_id).localeCompare(String(b.song_id)) ||
