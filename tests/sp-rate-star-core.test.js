@@ -485,7 +485,7 @@ test('단일·다중 완료 문구는 덤프 대기와 신호 재시도를 알�
 
 function crawlFixture(options = {}) {
   const h = createHarness();
-  const plans = [], alerts = [], calculated = [];
+  const plans = [], alerts = [], calculated = [], crawlFetch = [];
   const songs = [
     { song_id: 1564, title: 'Zenith', ac: 1, legen: 0, textage_song_id: 'z1', series_no: 28 },
     { song_id: 1677, title: 'ZENITH', ac: 1, legen: 0, textage_song_id: 'z2', series_no: 30 },
@@ -498,6 +498,15 @@ function crawlFixture(options = {}) {
   h.context.window.OhsorryNorm = require('../modules/normTitle.js');
   const db = h.context.window.OhsorryDb;
   db.filterWebCrawlHistoryRows = (hist, incoming) => incoming.filter((r) => !hist.some((x) => x[0] === r[0] && x[1] === r[1] && x[7] === r[7] && x[3] >= r[3] && x[2] >= r[2]));
+  db.filterWebCrawlBestRows = (best, incoming) => incoming.filter((r) => {
+    if (options.compareThrow) throw new Error('comparison exception');
+    const rows = r[7] === 1 ? best.dp : best.sp;
+    const matching = rows.filter((b) => b.song_id === r[0] && b.diff === r[1] && b.played_version === r[4]);
+    const ex = matching.length ? Math.max(...matching.map((b) => b.ex_score ?? -1)) : -1;
+    const lamp = matching.length ? Math.max(...matching.map((b) => b.lamp ?? 0)) : 0;
+    const flags = best.flags[`${r[0]}:${r[1]}:${r[4]}:${r[7]}`] || [0, 0];
+    return r[3] > ex || r[2] > lamp || (r[3] !== null && r[3] === ex && r[8] !== null && flags[0] === 1) || (r[9] !== null && flags[1] === 1);
+  });
   db.uploadWebCrawlPlan = async (plan, opts) => { plans.push({ plan, opts }); return { ok: true, submitted: plan.rows.length + plan.newRequests.length }; };
   db.uploadResult = async (result, { plan }) => {
     await db.upsertUserProfile(result.dbPayload);
@@ -505,12 +514,16 @@ function crawlFixture(options = {}) {
     return { profile: { ok: true }, scores, dump: null };
   };
   h.context.alert = (s) => alerts.push(s);
-  h.context.fetch = async (url) => {
+  h.context.fetch = async (url, fetchOptions) => {
+    crawlFetch.push([String(url), fetchOptions]);
     if (String(url).includes('/songs.json')) return options.songsFail ? { ok: false, status: 500 } : { ok: true, json: async () => songs };
-    if (String(url).includes('/hist/')) {
+    if (String(url).includes('/best/')) {
       if (options.histFail) throw new Error('offline');
       if (options.hist404) return { ok: false, status: 404 };
-      return { ok: true, json: async () => [[160,2,1,1085,33,'2026-08-20T08:44:38.019+00:00','2026-08-20',0,null,null]] };
+      if (options.bestHttp) return { ok: false, status: 500 };
+      if (options.bestJsonError) return { ok: true, json: async () => { throw new Error('bad json'); } };
+      return { ok: true, json: async () => options.bestDoc || (options.bestSchema ? { v: 1, id: 'wrong', dp: [], sp: [], flags: {} } : { v: 1, id: '12345678', histRevision: null,
+        dp: [], sp: [{ song_id: 160, diff: 2, lamp: 1, ex_score: 1085, played_version: 30 }], flags: {} }) };
     }
     throw new Error('unexpected fetch');
   };
@@ -524,19 +537,44 @@ function crawlFixture(options = {}) {
   });
   h.context.window.OhsorryEagateFetch.collectCharts = async () => ({ ok: true, charts: observations, observations, series, completed: !options.failed, pageCount: series.length });
   const run = (style = 'SP', suppressDone = true) => h.core.compute({ playStyle: style, gameVersion: '30', seriesList: Array.from({ length: 30 }, (_, i) => i), profile: { iidxId: '12345678' }, suppressDone });
-  return { ...h, plans, alerts, calculated, run };
+  return { ...h, plans, alerts, calculated, crawlFetch, run };
 }
 
 nodeTest('SP와 DP 원본 관측을 시리즈별 song_id로 저장하고 NEW를 scoreless로 보낸다', async () => {
   for (const style of ['SP', 'DP']) {
     const h = crawlFixture();
     await h.run(style);
-    assert.equal(h.plans.length, 1);
+    assert.equal(h.plans.length, 1, JSON.stringify(h.alerts));
     const { plan, opts } = h.plans[0];
     assert.equal(opts.iidxId, '12345678');
     assert.deepEqual(Array.from(plan.rows.filter((r) => [1564,1677].includes(r.song_id)), (r) => [r.song_id, r.play_style, r.note_count]), [[1564, style === 'SP' ? 0 : 1, 100], [1677, style === 'SP' ? 0 : 1, 100]]);
     assert.equal(plan.newRequests[0].title, '22DUNK');
     assert.equal(plan.newRequests[0].scoreless, true);
+  }
+});
+
+nodeTest('best 요청 URL과 no-store 옵션 및 정상·404·HTTP·네트워크·JSON·스키마 상태를 구분한다', async () => {
+  const cases = [
+    [{}, 'ok'], [{ hist404: true }, 'absent'], [{ bestHttp: true }, 'error'], [{ histFail: true }, 'error'],
+    [{ bestJsonError: true }, 'error'], [{ bestSchema: true }, 'error'],
+  ];
+  for (const [opts, status] of cases) {
+    const h = crawlFixture(opts); await h.run();
+    const request = h.crawlFetch.find(([url]) => url.includes('/best/'));
+    assert.equal(request[0], 'https://data.iidx.in/best/12345678.json?fresh=1');
+    assert.equal(request[1].cache, 'no-store');
+    assert.equal(h.plans[0].plan.bestStatus, status);
+  }
+  const empty = crawlFixture({ bestDoc: { v: 1, id: '12345678', dp: [], sp: [], flags: {} } });
+  await empty.run(); assert.equal(empty.plans[0].plan.bestStatus, 'ok'); assert.ok(empty.plans[0].plan.rows.length > 0);
+});
+
+nodeTest('best 오류와 비교 예외는 검증된 기존 곡을 포함하고 404는 빈 기준으로 비교한다', async () => {
+  for (const opts of [{ bestHttp: true }, { histFail: true }, { bestJsonError: true }, { bestSchema: true }, { compareThrow: true }, { hist404: true }]) {
+    const h = crawlFixture(opts); await h.run();
+    assert.ok(h.plans[0].plan.rows.some((r) => r.song_id === 1564));
+    assert.ok(h.plans[0].plan.newRequests.some((r) => r.p_textage_song_id === '@crawl:new-only'));
+    if (opts.compareThrow) assert.ok(h.plans[0].plan.bestCompareExceptions > 0);
   }
 });
 

@@ -763,3 +763,33 @@ test('웹 크롤 브라우저 비교기는 ESM comparator와 hist 10열 fixture 
   assert.equal(typeof esmErrorMessage, 'string');
   assert.throws(() => db.filterWebCrawlHistoryRows(hist, invalidIncoming), (error) => error.message === esmErrorMessage);
 });
+
+test('웹 크롤 best 비교기는 정본과 버전·스타일·DBR·flags 선택 결과가 같다', async () => {
+  const esm = await import('../../ohsorry-data/.github/scripts/score-history.mjs');
+  const { db } = loadDb(async () => response(null));
+  const bestRow = (song_id, played_version, play_style, ex_score = 100, lamp = 2) => ({ song_id, diff: 2, played_version, ex_score, lamp });
+  const best = { v: 1, id: '12345678', dp: [bestRow(10, 33, 1)], sp: [bestRow(10, 33, 0), bestRow(11, 33, 0), bestRow(12, 33, 0), bestRow(13, 33, 0)],
+    flags: { '11:2:33:0': [1, 0], '12:2:33:0': [0, 1] } };
+  const tuple = (song, version, style, ex = 100, lamp = 2, bp = null, note = null) =>
+    [song, 2, lamp, ex, version, '2026-08-20T08:44:38.019+00:00', '2026-08-20', style, bp, note];
+  const incoming = [tuple(10, 34, 1, 99), tuple(11, 33, 0, 100, 2, 5), tuple(12, 33, 0, 100, 2, null, 1200), tuple(13, 33, 0, 90),
+    [10, 2, 1, 500, -10, '2026-08-20T08:44:38.019+00:00', '2026-08-20', 0, null, null]];
+  assert.deepEqual(JSON.parse(JSON.stringify(db.filterWebCrawlBestRows(best, incoming))), JSON.parse(JSON.stringify(esm.filterWebCrawlBestRows(best, incoming))));
+  assert.deepEqual(JSON.parse(JSON.stringify(db.filterWebCrawlBestRows(best, incoming))), JSON.parse(JSON.stringify(incoming.slice(0, 3))));
+  assert.equal(db.filterWebCrawlBestRows({ v: 1, id: 'x', dp: [], sp: [], flags: {} }, [tuple(10, 33, 0, null, 0)]).length, 0);
+});
+
+test('best B안의 EX 상승·램프 상승·동점 BP 보충·note_count 보충 네 조건을 적용한다', () => {
+  const { db } = loadDb(async () => response(null));
+  const row = (song_id, ex_score, lamp, bp = null, note_count = null) => ({ song_id, diff: 2, played_version: 33, ex_score, lamp });
+  const best = { v: 1, id: '12345678', dp: [row(20, 100, 2), row(22, 100, 2), row(23, 100, 2), row(24, 100, 2)], sp: [row(21, 100, 2)],
+    flags: { '22:2:33:1': [1, 0], '23:2:33:1': [0, 1] } };
+  const incoming = [
+    [20, 2, 2, 101, 33, '2026-08-20T08:44:38.019+00:00', '2026-08-20', 1, null, null],
+    [21, 2, 3, 90, 33, '2026-08-20T08:44:38.019+00:00', '2026-08-20', 0, null, null],
+    [22, 2, 2, 100, 33, '2026-08-20T08:44:38.019+00:00', '2026-08-20', 1, 4, null],
+    [23, 2, 2, 90, 33, '2026-08-20T08:44:38.019+00:00', '2026-08-20', 1, null, 1200],
+    [24, 2, 2, 90, 33, '2026-08-20T08:44:38.019+00:00', '2026-08-20', 1, null, null],
+  ];
+  assert.deepEqual(JSON.parse(JSON.stringify(db.filterWebCrawlBestRows(best, incoming))), JSON.parse(JSON.stringify(incoming.slice(0, 4))));
+});

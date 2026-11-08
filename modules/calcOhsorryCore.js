@@ -47,7 +47,7 @@ async function __buildCrawlPlan(crawl, profile, isSp, version, textageSongs) {
   const db = window.OhsorryDb;
   const session = window.OhsorryCrawlSession;
   const iidxId = profile && profile.iidxId && profile.iidxId.replace(/-/g, '');
-  if (!iidxId || !db || !session || !db.uploadWebCrawlPlan || !db.filterWebCrawlHistoryRows) {
+  if (!iidxId || !db || !session || !db.uploadWebCrawlPlan) {
     return { ok: false, error: '저장 모듈 또는 IIDX ID가 없어요.' };
   }
   try {
@@ -55,16 +55,24 @@ async function __buildCrawlPlan(crawl, profile, isSp, version, textageSongs) {
     if (!songsResponse.ok) throw new Error('songs HTTP ' + songsResponse.status);
     const songs = await songsResponse.json();
     if (!Array.isArray(songs)) throw new Error('songs 형식 오류');
-    let hist;
+    let best;
     try {
-      const response = await fetch(`https://data.iidx.in/hist/${encodeURIComponent(iidxId)}.json`, { cache: 'no-store' });
-      if (response.status === 404) hist = { status: 404 };
-      else if (!response.ok) hist = { status: 'error' };
+      const response = await fetch(`https://data.iidx.in/best/${encodeURIComponent(iidxId)}.json?fresh=1`, { cache: 'no-store' });
+      if (response.status === 404) best = { status: 'absent' };
+      else if (!response.ok) best = { status: 'error', error: 'best HTTP ' + response.status };
       else {
-        const rows = await response.json();
-        hist = Array.isArray(rows) ? { rows } : { status: 'error' };
+        const document = await response.json();
+        if (!document || typeof document !== 'object' || document.v !== 1 || document.id !== iidxId || !Array.isArray(document.dp) || !Array.isArray(document.sp) || !document.flags || typeof document.flags !== 'object' || Array.isArray(document.flags)) throw new Error('best schema invalid');
+        for (const rows of [document.dp, document.sp]) for (const row of rows) {
+          if (!row || typeof row !== 'object' || Array.isArray(row)) throw new Error('best row schema invalid');
+          for (const [key, nullable] of [['song_id', false], ['diff', false], ['played_version', false], ['lamp', true], ['ex_score', true]])
+            if (nullable ? row[key] !== null && !Number.isInteger(row[key]) : !Number.isInteger(row[key])) throw new Error('best row schema invalid: ' + key);
+        }
+        for (const value of Object.values(document.flags)) if (!Array.isArray(value) || value.length < 2 || value[0] !== 0 && value[0] !== 1 || value[1] !== 0 && value[1] !== 1) throw new Error('best flags schema invalid');
+        best = { status: 'ok', document };
       }
-    } catch (_) { hist = { status: 'error' }; }
+    } catch (error) { best = { status: 'error', error: (error && error.message) || String(error) }; }
+    console.warn('[crawl] best baseline', best.status, best.error || '');
     const series = crawl.series || [];
     const coverage = { requiredSeries: series.map((s) => s.seriesNo), succeededSeries: series.filter((s) => s.status === 'ok').map((s) => s.seriesNo) };
     const succeeded = new Set(coverage.succeededSeries);
@@ -74,7 +82,7 @@ async function __buildCrawlPlan(crawl, profile, isSp, version, textageSongs) {
     const finalized = session.finalizeIdentity(resolved, coverage, window.OhsorryNorm.aliasTitle);
     const songById = new Map(songs.map((song) => [song.song_id, song]));
     const keys = { BEGINNER: 'B', NORMAL: 'N', HYPER: 'H', ANOTHER: 'A', LEGGENDARIA: 'X' };
-    const plan = session.buildPlan({ observations: finalized, songs, hist, iidxId,
+    const plan = session.buildPlan({ observations: finalized, songs, iidxId,
       chartNotes(source, songId) {
         const song = songById.get(songId);
         const meta = song && textageSongs && textageSongs[song.textage_song_id];
@@ -82,11 +90,13 @@ async function __buildCrawlPlan(crawl, profile, isSp, version, textageSongs) {
         const notes = meta && meta.notes && meta.notes[key];
         return typeof notes === 'number' && notes > 0 ? notes : null;
       },
-      compareHistory: db.filterWebCrawlHistoryRows,
+      best, compareBest: db.filterWebCrawlBestRows,
     });
     profile.__failedSeries = plan.failedSeries;
-    return { ok: true, plan };
+    if (plan.bestCompareExceptions) console.warn('[crawl] best comparison exceptions', plan.bestCompareExceptions);
+    return { ok: true, plan, bestStatus: best.status };
   } catch (error) {
+    console.warn('[crawl] plan failed', error);
     return { ok: false, error: (error && error.message) || String(error) };
   }
 }

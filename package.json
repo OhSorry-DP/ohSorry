@@ -5,7 +5,7 @@
   "main": "ohsorry.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "push:gist-modules": "node ../ohSorryAdmin/scripts/publishAsset.js modules/calcOhsorryCore.js modules/dbConn.js modules/normTitle.js modules/eagateFetch.js",
+    "push:gist-modules": "node ../ohSorryAdmin/scripts/publishAsset.js modules/calcOhsorryCore.js modules/dbConn.js modules/crawlSession.js modules/normTitle.js modules/eagateFetch.js",
     "push:bookmarklet": "node ../ohSorryAdmin/scripts/publishAsset.js ohsorry.js"
   },
   "repository": {

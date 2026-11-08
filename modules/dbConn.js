@@ -940,6 +940,36 @@ window.OhsorryDb = (function () {
     return selected;
   }
 
+  // R2 best 비교: 스타일별 best와 버전별 보충 flags를 사용한다. best 행은 정수/null만 검사한다.
+  function filterWebCrawlBestRows(best, incomingRows) {
+    if (!best || !Array.isArray(best.dp) || !Array.isArray(best.sp) || !best.flags || typeof best.flags !== 'object' || Array.isArray(best.flags) || !Array.isArray(incomingRows)) throw new TypeError('invalid best comparison input');
+    // Reuse the hist comparator's incoming-row validation contract; best rows intentionally have no date validation.
+    for (const r of incomingRows) if (!(Array.isArray(r) && r.length >= 5 && r[4] === -10)) filterWebCrawlHistoryRows([], [r]);
+    const bestByChart = new Map();
+    for (const [style, rows] of [[1, best.dp], [0, best.sp]]) for (const b of rows) {
+      if (!b || typeof b !== 'object' || Array.isArray(b)) throw new TypeError('best row must be an object');
+      for (const [v, nullable] of [[b.song_id, false], [b.diff, false], [b.played_version, false], [b.ex_score, true], [b.lamp, true]])
+        if (nullable ? (v !== null && (!Number.isInteger(v))) : !Number.isInteger(v)) throw new TypeError('invalid best integer');
+      if (b.played_version === -10) continue;
+      const key = JSON.stringify([b.song_id, b.diff, b.played_version, style]);
+      const old = bestByChart.get(key) || { ex: -1, lamp: 0 };
+      old.ex = Math.max(old.ex, b.ex_score ?? -1); old.lamp = Math.max(old.lamp, b.lamp ?? 0); bestByChart.set(key, old);
+    }
+    const selected = [];
+    for (const row of incomingRows) {
+      if (!Array.isArray(row) || row.length < 10) throw new TypeError('invalid incoming best row');
+      const [sid, diff, , exScore, version, , , style, bp, note] = row;
+      if (version === -10) continue;
+      const key = JSON.stringify([sid, diff, version, style]);
+      const current = bestByChart.get(key) || { ex: -1, lamp: 0 };
+      const flags = best.flags[`${sid}:${diff}:${version}:${style}`] ?? [0, 0];
+      if (!Array.isArray(flags) || flags.length < 2 || !flags.every((v) => v === 0 || v === 1)) throw new TypeError('invalid best flags');
+      const incomingEx = exScore ?? -1, incomingLamp = row[2] ?? 0;
+      if (incomingEx > current.ex || incomingLamp > current.lamp || (exScore !== null && exScore === current.ex && bp !== null && flags[0] === 1) || (note !== null && flags[1] === 1)) selected.push(row);
+    }
+    return selected;
+  }
+
   function createRequestId() {
     try {
       if (typeof crypto !== 'undefined' && crypto && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
@@ -1494,6 +1524,7 @@ window.OhsorryDb = (function () {
     upsertUserChartScores: upsertUserChartScores,
     uploadWebCrawlPlan: uploadWebCrawlPlan,
     filterWebCrawlHistoryRows: filterWebCrawlHistoryRows,
+    filterWebCrawlBestRows: filterWebCrawlBestRows,
     uploadResult: uploadResult,
     // ★값 재계산 + 저장(onlyOSR/onlyOSRtoEreter) — CSV Upload 등 코어 없이 점수만 바뀐 경우용.
     //   upsert_user 호출이 users.date 를 갱신 → 웹훅이 dump-user 를 깨워 페르소나까지 자동 재생성.

@@ -199,9 +199,9 @@
     return { observations: rows, coverage: { requiredSeries: [...required], succeededSeries: [...succeeded], failedSeries: required.filter((n) => !successSet.has(n)), complete } };
   }
 
-  function buildPlan({ observations = [], songs = [], hist = {}, chartNotes, compareHistory, iidxId } = {}) {
+  function buildPlan({ observations = [], songs = [], hist = {}, chartNotes, compareHistory, iidxId, best, compareBest } = {}) {
     if (typeof chartNotes !== 'function') throw new TypeError('chartNotes must be a function');
-    if (typeof compareHistory !== 'function') throw new TypeError('compareHistory must be a function');
+    if (!best && typeof compareHistory !== 'function') throw new TypeError('compareHistory must be a function');
     if (songs && !Array.isArray(songs) && songs.status === 'error') throw new Error('songs-read-failed');
     const failedSeries = Array.isArray(observations.failedSeries) ? [...observations.failedSeries].sort((a, b) => a - b) :
       (observations.coverage && Array.isArray(observations.coverage.failedSeries) ? [...observations.coverage.failedSeries].sort((a, b) => a - b) : []);
@@ -265,6 +265,7 @@
       const rows = grouped.get(key) || []; rows.push({ ...entry, base }); grouped.set(key, rows);
     }
     const rows = [], newRequests = [];
+    let bestCompareExceptions = 0;
     const history = hist.status === '404' || hist.status === 404 ? [] : hist.rows ?? hist.data ?? (Array.isArray(hist) ? hist : []);
     for (const entries of grouped.values()) {
       entries.sort((a, b) => String(a.source.observedAt || '').localeCompare(String(b.source.observedAt || '')) ||
@@ -285,7 +286,14 @@
         const tuple = [row.song_id, row.diff, row.lamp, row.ex_score, row.played_version, row.date,
           row.date_kst, row.play_style, row.bp, row.note_count];
         const comparisonRows = histForUser.map((h) => Array.isArray(h) ? h : [h.song_id, h.diff, h.lamp, h.ex_score, h.played_version, h.date, h.date_kst, h.play_style, h.bp ?? null, h.note_count ?? null]);
-        if (hist.status === 'error' || compareHistory(comparisonRows, [tuple]).length) rows.push(row);
+        if (best) {
+          if (best.status === 'error') rows.push(row);
+          else {
+            const baseline = best.status === 'absent' ? { v: 1, id: iidxId, dp: [], sp: [], flags: {} } : best.document;
+            try { if (compareBest(baseline, [tuple]).length) rows.push(row); }
+            catch (error) { bestCompareExceptions += 1; console.warn('[crawl] best comparison failed; including candidate', error); rows.push(row); }
+          }
+        } else if (hist.status === 'error' || compareHistory(comparisonRows, [tuple]).length) rows.push(row);
       } else {
         const source = exemplar.source;
         const newStyle = row.play_style;
@@ -304,7 +312,8 @@
     rows.sort((a, b) => Number(a.played_version) - Number(b.played_version) || String(a.song_id).localeCompare(String(b.song_id)) ||
       a.play_style - b.play_style || String(a.diff).localeCompare(String(b.diff)));
     newRequests.sort((a, b) => String(a.song_id).localeCompare(String(b.song_id)));
-    return { rows, newRequests, deferred: ordered.filter((x) => x.status === 'deferred'), failedSeries, rejected };
+    return { rows, newRequests, deferred: ordered.filter((x) => x.status === 'deferred'), failedSeries, rejected,
+      ...(best ? { bestStatus: best.status, bestCompareExceptions } : {}) };
   }
 
   return Object.freeze({
