@@ -2,6 +2,12 @@
 
 ohSorry 의 변경 이력입니다. 사용방법은 [README.md](README.md) 를 참고하세요.
 
+### 2026-11-08 — 웹 크롤 비교를 버전별 best 문서로 전환
+
+- 북마클릿 크롤 비교를 hist에서 채보×버전 최고값 `best/{id}.json`으로 바꿨다. EX·lamp 향상, EX 동점의 BP 보충, note_count 보충과 기준 없는 채보를 선택한다.
+- 404는 빈 기준으로 처리하고 조회 오류·비교 예외는 검증된 후보 전체를 포함한다. `ok`·`absent`·`error`를 로그와 반환에서 구분한다. `buildPlan`은 확정 후보를 한 번에 비교한다.
+- 테스트와 변이 확인을 완료했다. push 및 gist·R2 모듈 게시 전이다.
+
 ### 2026-11-08 — 웹 크롤 업로드 1000행 청크 복원
 
 - 11-05 시리즈 기준 저장으로 바꾸면서 `upsert_scores` 를 한 번에 보내게 됐다. 북마클릿은 anon 역할이라 statement_timeout 이 3초다. 큰 요청은 `57014 canceling statement due to statement timeout` 으로 간헐 실패했다.
