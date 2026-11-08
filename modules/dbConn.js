@@ -833,10 +833,20 @@ window.OhsorryDb = (function () {
     if (pRows.length === 0) return { ok: true, inserted: 0, empty: true, failedSeries: plan.failedSeries || [] };
     const statusErr = await checkUploadEnabled();
     if (statusErr) return statusErr;
-    try {
-      await callRpc('upsert_scores', { p_rows: pRows });
-    } catch (error) {
-      return { ok: false, inserted: 0, error: error && error.message ? error.message : String(error), failedSeries: plan.failedSeries || [] };
+    const SCORE_UPSERT_CHUNK_SIZE = 1000;
+    const chunkTotal = Math.ceil(pRows.length / SCORE_UPSERT_CHUNK_SIZE);
+    console.log(`[OhsorryDb] scores 업로드 ${plan.rows.length}개 확정 + ${plan.newRequests.length}개 NEW 요청 (${pRows.length}행)`);
+    let inserted = 0;
+    for (let i = 0; i < chunkTotal; i++) {
+      const chunk = pRows.slice(i * SCORE_UPSERT_CHUNK_SIZE, (i + 1) * SCORE_UPSERT_CHUNK_SIZE);
+      console.log(`[OhsorryDb] scores 청크 ${i + 1}/${chunkTotal} (${chunk.length}행)`);
+      try {
+        await callRpc('upsert_scores', { p_rows: chunk });
+        inserted += chunk.length;
+      } catch (error) {
+        const message = error && error.message ? error.message : String(error);
+        return { ok: false, inserted, error: `scores 청크 ${i + 1}/${chunkTotal} 실패: ${message} (이전 성공 ${inserted}행)`, failedChunk: i + 1, totalChunks: chunkTotal, failedSeries: plan.failedSeries || [] };
+      }
     }
     const id = options.iidxId || pRows[0].iidx_id;
     let dump = null;

@@ -440,7 +440,12 @@ test('프로필 완료 전용 명시 OFF는 기존 RPC 이름과 payload를 유�
 });
 
 test('파일 기본값 ON은 두 프로필을 wrapper로 저장하고 완료 통지는 legacy RPC를 사용한다', async () => {
-  const { db, calls } = loadDb(async () => response(null));
+  const { db, calls } = loadDb(async (url) => {
+    if (url.endsWith('/auth/issue')) return response({ url: 'https://iidx.in/login?ticket=one' });
+    if (url.endsWith('/auth/exchange')) return response({ iidx_id: '12345678', token: 'token' });
+    if (url.includes('/api/dump-trigger')) return response({ accepted: true });
+    return response(null);
+  }, true, Date.parse, { fastDumpEnabled: true });
   assert.equal((await db.upsertUserProfile({ iidx_id: '12345678', dj_name: 'DJ' })).ok, true);
   assert.equal((await db.upsertInitialUserProfile({ iidx_id: '12345678', dj_name: 'DJ' })).ok, true);
   assert.equal((await db.notifyUploadComplete('12345678')).ok, true);
@@ -629,19 +634,46 @@ test('폐기된 SP API는 네트워크 없이 오류를 내고 호환 함수는 
   assert.equal(rpc(calls, 'upsert_user').length, 1);
 });
 
-test('웹 크롤 계획은 기존 점수와 예약 NEW를 한 번의 upsert_scores에 전달한다', async () => {
-  const { db, calls } = loadDb(async () => response(null));
-  const plan = { rows: [{ song_id: 160, iidx_id: '12345678', diff: 3, lamp: 4, ex_score: 100,
-    played_version: 33, play_style: 0, date: '2026-08-20T08:44:38.019+00:00', date_kst: '2026-08-20', bp: null, note_count: null }],
-  newRequests: [{ song_id: '@crawl:new:X:34:1:3', iidx_id: '12345678', title: 'X', series_no: 34,
-    p_textage_song_id: '@crawl:new-only', p_ac: 1, p_legen: null, diff: 3, play_style: 1, played_version: 34,
-    scoreless: true }], failedSeries: [] };
+test('웹 크롤 계획은 기존 점수와 예약 NEW를 순서대로 1000행 청크로 전달한다', async () => {
+  const { db, calls } = loadDb(async (url) => {
+    if (url.endsWith('/auth/issue')) return response({ url: 'https://iidx.in/login?ticket=one' });
+    if (url.endsWith('/auth/exchange')) return response({ iidx_id: '12345678', token: 'token' });
+    if (url.includes('/api/dump-trigger')) return response({ accepted: true });
+    return response(null);
+  }, true, Date.parse, { fastDumpEnabled: true });
+  const rows = Array.from({ length: 999 }, (_, i) => ({ song_id: 160 + i, iidx_id: '12345678', diff: 3, lamp: 4, ex_score: 100 + i,
+    played_version: 33, play_style: 0, date: '2026-08-20T08:44:38.019+00:00', date_kst: '2026-08-20', bp: null, note_count: null }));
+  const newRequests = [1, 2].map((n) => ({ song_id: `@crawl:new:X${n}:34:1:3`, iidx_id: '12345678', title: `X${n}`, series_no: 34,
+    p_textage_song_id: '@crawl:new-only', p_ac: 1, p_legen: null, diff: 3, play_style: 1, played_version: 34, scoreless: true }));
+  const plan = { rows, newRequests, failedSeries: [] };
   const result = await db.uploadWebCrawlPlan(plan);
   assert.equal(result.ok, true);
   const sent = rpc(calls, 'upsert_scores');
-  assert.equal(sent.length, 1);
-  assert.deepEqual(JSON.parse(sent[0].options.body).p_rows, [...plan.rows, ...plan.newRequests]);
+  assert.equal(sent.length, 2);
+  const chunks = sent.map(({ options }) => JSON.parse(options.body).p_rows);
+  assert.deepEqual(chunks.map((chunk) => chunk.length), [1000, 1]);
+  assert.deepEqual(chunks.flat(), [...plan.rows, ...plan.newRequests]);
+  assert.equal(calls.filter(({ url }) => url.includes('/api/dump-trigger')).length, 1);
   assert.equal(rpc(calls, 'bump_song_series').length, 0);
+});
+
+test('웹 크롤 계획의 두 번째 청크 실패는 앞선 삽입 수를 반환하고 완료 통지를 보내지 않는다', async () => {
+  let upsertCount = 0;
+  const { db, calls } = loadDb(async (url) => {
+    if (url.endsWith('/rpc/upsert_scores') && ++upsertCount === 2) return response({ message: 'timeout' }, { ok: false, status: 57014 });
+    if (url.includes('/api/dump-trigger')) return response({ accepted: true });
+    return response(null);
+  }, true, Date.parse, { fastDumpEnabled: true });
+  const plan = { rows: Array.from({ length: 1001 }, (_, i) => ({ song_id: i + 1, iidx_id: '12345678', diff: 3,
+    lamp: 4, ex_score: 100 + i, played_version: 33, play_style: 0 })), newRequests: [], failedSeries: [] };
+  const result = await db.uploadWebCrawlPlan(plan);
+  assert.equal(result.ok, false);
+  assert.equal(result.inserted, 1000);
+  assert.equal(result.failedChunk, 2);
+  assert.equal(result.totalChunks, 2);
+  assert.equal(result.error, 'scores 청크 2/2 실패: HTTP 57014 {"message":"timeout"} (이전 성공 1000행)');
+  assert.equal(rpc(calls, 'upsert_scores').length, 2);
+  assert.equal(calls.some(({ url }) => url.includes('/api/dump-trigger')), false);
 });
 
 test('DP 계획 저장은 빠른 덤프와 완료 통지를 각각 한 번 보낸다', async () => {
